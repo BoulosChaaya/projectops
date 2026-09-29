@@ -1,0 +1,5 @@
+node_id: EXEC-CICD-038
+name: "Environment Promotion"
+contract: "[\\\"`PromotionPolicy`\\\"]"
+status: foundation_contract
+owner: "deploy"

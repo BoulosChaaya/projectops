@@ -1,0 +1,5 @@
+node_id: EXEC-OPS-013
+name: "Resource Limit Exhaustion Handling"
+contract: "[\\\"`handleResourceLimitExhaustion()`\\\"]"
+status: foundation_contract
+owner: "resource-isolation"

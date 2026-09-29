@@ -1,0 +1,5 @@
+node_id: EXEC-OPS-007
+name: "Load Balancing Across Instances"
+contract: "[\\\"`LoadBalancerConfig`\\\"]"
+status: foundation_contract
+owner: "reverse-proxy"

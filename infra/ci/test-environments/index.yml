@@ -1,0 +1,5 @@
+node_id: EXEC-TEST-019
+name: "Test Environment Isolation"
+contract: "[\\\"`IsolatedTestEnvironment`\\\"]"
+status: foundation_contract
+owner: "ci"

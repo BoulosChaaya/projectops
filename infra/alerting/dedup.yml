@@ -1,0 +1,5 @@
+node_id: EXEC-OBS-023
+name: "Alert Deduplication"
+contract: "\"`deduplicateAlerts(events) -> AlertEvent[]`\""
+status: foundation_contract
+owner: "alerting"

@@ -1,0 +1,5 @@
+node_id: EXEC-CICD-040
+name: "Environment-Specific Configuration Handling"
+contract: "[\\\"`EnvironmentConfigContract`\\\"]"
+status: foundation_contract
+owner: "deploy"

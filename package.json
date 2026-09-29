@@ -1,0 +1,15 @@
+{
+  "name": "projectops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ProjectOps: client and project operations product built on the Uruk foundation",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "verify": "node scripts/verify-integrity.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  }
+}

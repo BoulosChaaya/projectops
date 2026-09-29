@@ -1,0 +1,5 @@
+node_id: EXEC-OBS-019
+name: "Threshold-Based Alerting"
+contract: "\"`AlertRule`\""
+status: foundation_contract
+owner: "alerting"

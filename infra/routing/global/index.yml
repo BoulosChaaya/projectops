@@ -1,0 +1,5 @@
+node_id: EXEC-ARCH-035
+name: "Global Traffic Routing"
+contract: "[\\\"`GlobalRoutingPolicy`\\\"]"
+status: foundation_contract
+owner: "routing"

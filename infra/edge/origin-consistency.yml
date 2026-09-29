@@ -1,0 +1,5 @@
+node_id: EXEC-CLIENT-025
+name: "Edge-Origin Consistency"
+contract: "\"`verifyEdgeOriginConsistency() -> Promise<ConsistencyResult>`\""
+status: foundation_contract
+owner: "edge"

@@ -1,0 +1,5 @@
+node_id: EXEC-CICD-041
+name: "Deployment Gating"
+contract: "[\\\"`DeploymentGate`\\\"]"
+status: foundation_contract
+owner: "deploy"

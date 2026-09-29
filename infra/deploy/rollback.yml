@@ -1,0 +1,5 @@
+node_id: EXEC-CICD-035
+name: "Automated Rollback on Failure Signal"
+contract: "[\\\"`RollbackController`\\\"]"
+status: foundation_contract
+owner: "deploy"

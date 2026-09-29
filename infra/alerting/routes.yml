@@ -1,0 +1,5 @@
+node_id: EXEC-OBS-021
+name: "Alert Routing"
+contract: "\"`AlertRoute`\""
+status: foundation_contract
+owner: "alerting"

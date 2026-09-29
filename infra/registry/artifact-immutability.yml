@@ -1,0 +1,5 @@
+node_id: EXEC-CICD-021
+name: "Artifact Immutability"
+contract: "[\\\"`ArtifactImmutabilityPolicy`\\\"]"
+status: foundation_contract
+owner: "registry"

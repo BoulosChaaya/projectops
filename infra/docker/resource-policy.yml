@@ -1,0 +1,5 @@
+node_id: EXEC-OPS-010
+name: "Resource Isolation Between Workloads"
+contract: "[\\\"`WorkloadResourcePolicy`\\\"]"
+status: foundation_contract
+owner: "docker"
