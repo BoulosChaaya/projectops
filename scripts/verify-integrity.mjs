@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = process.cwd();
+const IGNORED_WALK_DIRS = new Set(['.git', 'node_modules', 'dist', 'coverage']);
 
 function banner(title) {
   console.log(`\n${'='.repeat(80)}\n[PROJECTOPS VERIFY] ${title}\n${'='.repeat(80)}`);
@@ -20,6 +21,7 @@ function run(cmd, args) {
 
 function walk(dir, output = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && IGNORED_WALK_DIRS.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) walk(full, output);
     else output.push(full);

@@ -32,6 +32,8 @@ importers:
 
   packages/observability: {}
 
+  packages/projectops: {}
+
   packages/queue: {}
 
   packages/release: {}
