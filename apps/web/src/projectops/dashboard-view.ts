@@ -9,11 +9,17 @@ export interface ProjectOpsDashboardPage {
   readonly summary: ProjectOpsDashboardView;
 }
 
-export function composeProjectOpsDashboardPage(
-  rows: readonly ProjectOpsDashboardRow[]
+export function composeProjectOpsDashboardPageFromSummary(
+  summary: ProjectOpsDashboardView
 ): ProjectOpsDashboardPage {
   return Object.freeze({
     title: 'ProjectOps Dashboard',
-    summary: composeProjectOpsDashboard(rows),
+    summary,
   });
+}
+
+export function composeProjectOpsDashboardPage(
+  rows: readonly ProjectOpsDashboardRow[]
+): ProjectOpsDashboardPage {
+  return composeProjectOpsDashboardPageFromSummary(composeProjectOpsDashboard(rows));
 }
