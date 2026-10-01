@@ -9,6 +9,9 @@ import {
   composeProjectOpsDashboardPageFromSummary,
 } from '../apps/web/src/projectops/dashboard-view.ts';
 import { renderProjectOpsDashboardPage } from '../apps/web/src/projectops/dashboard-renderer.ts';
+import { createProjectOpsDashboardWebRoute } from '../apps/web/src/projectops/dashboard-route.ts';
+import { startHttpListener } from '../apps/api/src/bootstrap/http-listener.ts';
+import { serializeResponse } from '../apps/api/src/http/response.ts';
 
 const T0 = '2026-09-29T08:00:00.000Z';
 const T1 = '2026-09-29T09:00:00.000Z';
@@ -98,4 +101,65 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /Estimated/);
   assert.match(rendered.html, /1 shown/);
+});
+
+unitTest('PROJECTOPS-UI-005: HTTP serializer preserves explicit HTML responses', () => {
+  const serialized = serializeResponse(
+    {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+      body: '<h1>ProjectOps</h1>',
+    },
+    { correlationId: 'corr-ui' }
+  );
+
+  assert.equal(serialized.status, 200);
+  assert.equal(serialized.headers['content-type'], 'text/html; charset=utf-8');
+  assert.equal(serialized.headers['content-length'], '19');
+  assert.equal(serialized.headers['x-correlation-id'], 'corr-ui');
+  assert.equal(serialized.body.toString('utf8'), '<h1>ProjectOps</h1>');
+});
+
+unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML', async () => {
+  const sql = new ProjectOpsMemorySqlExecutor();
+  await applyProjectOpsMigrations(sql);
+
+  const repo = new ProjectOpsRepository(sql);
+  await repo.createClient({
+    id: 'client-1',
+    name: 'Zad Studio',
+    createdAtIso: T0,
+  });
+  await repo.createProjectRequest({
+    id: 'req-1',
+    clientId: 'client-1',
+    title: 'Browser dashboard',
+    brief: 'Serve the dashboard through the HTTP listener.',
+    priority: 'high',
+    createdAtIso: T0,
+  });
+  await repo.transitionProjectRequest('req-1', 'estimated', T1);
+  await repo.transitionProjectRequest('req-1', 'approved', T1);
+
+  const server = await startHttpListener({
+    port: 0,
+    routes: [createProjectOpsDashboardWebRoute(repo)],
+  });
+
+  try {
+    const response = await fetch(`${server.origin}/projectops`, {
+      headers: { accept: 'text/html' },
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'text/html; charset=utf-8');
+    assert.equal(response.headers.get('cache-control'), 'private, no-cache, no-store');
+    assert.match(html, /ProjectOps Dashboard/);
+    assert.match(html, /Browser dashboard/);
+    assert.match(html, /Approved/);
+    assert.match(html, /Zad Studio/);
+  } finally {
+    await server.close();
+  }
 });
