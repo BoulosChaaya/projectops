@@ -3,6 +3,7 @@ import type {
   ProjectChangeRequest,
   ProjectDeliverable,
   ProjectInvoice,
+  ProjectIssue,
   ProjectMilestone,
   ProjectOpsClient,
   ProjectRequest,
@@ -106,6 +107,20 @@ export const projectOpsSchemaSql = Object.freeze([
       (estimate_delta_cents IS NOT NULL AND estimate_currency IS NOT NULL)
     )
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_issues (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high')),
+    owner TEXT,
+    status TEXT NOT NULL CHECK (status IN ('open', 'resolved')),
+    opened_at TIMESTAMPTZ NOT NULL,
+    resolved_at TIMESTAMPTZ,
+    resolution_note TEXT,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id)
+  )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_activities (
     id TEXT NOT NULL,
     project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -142,6 +157,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_invoices (project_request_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_change_requests_request_status_idx
     ON projectops_project_change_requests (project_request_id, status)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_issues_request_status_idx
+    ON projectops_project_issues (project_request_id, status, severity)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
     ON projectops_project_activities (project_request_id, happened_at DESC)`,
 ] as const);
@@ -525,6 +542,77 @@ export function updateProjectChangeRequestDecisionSql(
   });
 }
 
+export function insertProjectIssueSql(issue: ProjectIssue): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_issues (
+      id,
+      project_request_id,
+      title,
+      description,
+      severity,
+      owner,
+      status,
+      opened_at,
+      resolved_at,
+      resolution_note,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    RETURNING *`,
+    params: Object.freeze([
+      issue.id,
+      issue.projectRequestId,
+      issue.title,
+      issue.description,
+      issue.severity,
+      issue.owner ?? null,
+      issue.status,
+      issue.openedAtIso,
+      issue.resolvedAtIso ?? null,
+      issue.resolutionNote ?? null,
+      issue.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectIssuesSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_issues
+      WHERE project_request_id = $1
+      ORDER BY opened_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectIssueByIdSql(
+  projectRequestId: string,
+  issueId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_issues
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, issueId]),
+  });
+}
+
+export function resolveProjectIssueSql(issue: ProjectIssue): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_issues
+      SET status = $3, resolved_at = $4, resolution_note = $5, updated_at = $6
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      issue.projectRequestId,
+      issue.id,
+      issue.status,
+      issue.resolvedAtIso ?? null,
+      issue.resolutionNote ?? null,
+      issue.updatedAtIso,
+    ]),
+  });
+}
+
 export function insertProjectActivitySql(activity: ProjectActivity): SqlStatement {
   return Object.freeze({
     sql: `INSERT INTO projectops_project_activities (
@@ -647,6 +735,9 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(ch.proposed_change_requests, 0) AS proposed_change_request_count,
       COALESCE(ch.approved_change_requests, 0) AS approved_change_request_count,
       COALESCE(ch.rejected_change_requests, 0) AS rejected_change_request_count,
+      COALESCE(iss.open_issues, 0) AS open_issue_count,
+      COALESCE(iss.high_open_issues, 0) AS high_open_issue_count,
+      COALESCE(iss.resolved_issues, 0) AS resolved_issue_count,
       act.latest_activity_at,
       act.latest_activity_summary,
       pr.updated_at
@@ -687,6 +778,15 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_change_requests
       GROUP BY project_request_id
     ) ch ON ch.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'open') AS open_issues,
+        COUNT(*) FILTER (WHERE status = 'open' AND severity = 'high') AS high_open_issues,
+        COUNT(*) FILTER (WHERE status = 'resolved') AS resolved_issues
+      FROM projectops_project_issues
+      GROUP BY project_request_id
+    ) iss ON iss.project_request_id = pr.id
     LEFT JOIN (
       SELECT DISTINCT ON (project_request_id)
         project_request_id,
