@@ -54,6 +54,10 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
       highOpenTaskCount: 1,
       completedTaskCount: 1,
       nextTaskDueAtIso: T1,
+      workLogCount: 2,
+      billableWorkMinutes: 180,
+      nonBillableWorkMinutes: 30,
+      latestWorkLoggedAtIso: T1,
       latestActivityAtIso: T1,
       latestActivitySummary: 'Client approved launch copy.',
       updatedAtIso: T1,
@@ -77,6 +81,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /Active documents/);
   assert.match(rendered.html, /Active notes/);
   assert.match(rendered.html, /Open tasks/);
+  assert.match(rendered.html, /Billable hours/);
   assert.match(rendered.html, /Launch dashboard/);
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /In Progress/);
@@ -90,6 +95,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /2 active \/ 1 archived/);
   assert.match(rendered.html, /2 active \/ 1 client/);
   assert.match(rendered.html, /2 open \/ 1 high/);
+  assert.match(rendered.html, /3\.0h billable \/ 0\.5h non/);
   assert.match(rendered.html, /Client approved launch copy/);
   assert.match(rendered.html, /High/);
 });
@@ -209,6 +215,15 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
     dueAtIso: T1,
     createdAtIso: T1,
   });
+  await repo.createProjectWorkLog('req-1', {
+    id: 'work-1',
+    projectRequestId: 'req-1',
+    taskId: 'task-1',
+    actor: 'Boulos',
+    minutes: 90,
+    billable: true,
+    loggedAtIso: T1,
+  });
 
   const summary = await repo.getDashboard();
   const page = composeProjectOpsDashboardPageFromSummary(summary);
@@ -224,6 +239,7 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
   assert.match(rendered.html, /1 active \/ 0 archived/);
   assert.match(rendered.html, /1 active \/ 1 client/);
   assert.match(rendered.html, /1 open \/ 1 high/);
+  assert.match(rendered.html, /1\.5h billable \/ 0\.0h non/);
   assert.match(rendered.html, /Estimate sent to client/);
   assert.match(rendered.html, /1 shown/);
 });
@@ -357,6 +373,15 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     dueAtIso: T1,
     createdAtIso: T1,
   });
+  await repo.createProjectWorkLog('req-1', {
+    id: 'work-1',
+    projectRequestId: 'req-1',
+    taskId: 'task-1',
+    actor: 'Boulos',
+    minutes: 60,
+    billable: false,
+    loggedAtIso: T1,
+  });
 
   const server = await startHttpListener({
     port: 0,
@@ -385,6 +410,7 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     assert.match(html, /1 active \/ 0 archived/);
     assert.match(html, /1 active \/ 0 client/);
     assert.match(html, /1 open \/ 0 high/);
+    assert.match(html, /0\.0h billable \/ 1\.0h non/);
     assert.match(html, /Invoice issued after accepted handoff/);
     assert.match(html, /Zad Studio/);
   } finally {
