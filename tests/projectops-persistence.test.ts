@@ -71,10 +71,20 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   });
 
   const transitioned = await repo.transitionProjectRequest('req-1', 'estimated', T1);
+  const clients = await repo.listClients();
+  const fetchedClient = await repo.getClient('client-1');
+  const requests = await repo.listProjectRequests();
+  const fetchedRequest = await repo.getProjectRequest('req-1');
   const dashboard = await repo.getDashboard();
   const snapshot = sql.snapshot();
 
   assert.equal(transitioned.status, 'estimated');
+  assert.equal(clients.length, 1);
+  assert.equal(clients[0]?.id, 'client-1');
+  assert.equal(fetchedClient?.name, 'Zad Studio');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.id, 'req-1');
+  assert.equal(fetchedRequest?.status, 'estimated');
   assert.equal(snapshot.projectRequests[0]?.status, 'estimated');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.estimated, 1);
@@ -113,6 +123,27 @@ unitTest('PROJECTOPS-PERSIST-004: API can run on repository-backed persistence s
       { status: 'estimated' }
     );
     assert.equal(transitioned.status, 'estimated');
+
+    const clientsRes = await fetch(`${server.origin}/projectops/clients`);
+    assert.equal(clientsRes.status, 200);
+    const clients = await clientsRes.json() as readonly { id: string }[];
+    assert.equal(clients[0]?.id, 'client-1');
+
+    const clientRes = await fetch(`${server.origin}/projectops/clients/client-1`);
+    assert.equal(clientRes.status, 200);
+    assert.equal(((await clientRes.json()) as { name: string }).name, 'Zad Studio');
+
+    const requestsRes = await fetch(`${server.origin}/projectops/project-requests`);
+    assert.equal(requestsRes.status, 200);
+    const requests = await requestsRes.json() as readonly { id: string }[];
+    assert.equal(requests[0]?.id, 'req-1');
+
+    const requestRes = await fetch(`${server.origin}/projectops/project-requests/req-1`);
+    assert.equal(requestRes.status, 200);
+    assert.equal(((await requestRes.json()) as { status: string }).status, 'estimated');
+
+    const missingRes = await fetch(`${server.origin}/projectops/project-requests/missing`);
+    assert.equal(missingRes.status, 404);
 
     const dashboardRes = await fetch(`${server.origin}/projectops/dashboard`);
     assert.equal(dashboardRes.status, 200);
