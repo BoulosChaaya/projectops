@@ -28,6 +28,8 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
       deadlineIso: '2026-10-10T00:00:00.000Z',
       estimateAmountCents: 125000,
       estimateCurrency: 'USD',
+      openMilestoneCount: 2,
+      completedMilestoneCount: 1,
       updatedAtIso: T1,
     },
   ]);
@@ -40,10 +42,12 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /ProjectOps Dashboard/);
   assert.match(rendered.html, /Active requests/);
   assert.match(rendered.html, /High priority open/);
+  assert.match(rendered.html, /Open milestones/);
   assert.match(rendered.html, /Launch dashboard/);
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /In Progress/);
   assert.match(rendered.html, /USD 1,250\.00/);
+  assert.match(rendered.html, /1 done \/ 2 open/);
   assert.match(rendered.html, /High/);
 });
 
@@ -155,6 +159,12 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     approvedBy: 'Boulos',
     approvedAtIso: T1,
   });
+  await repo.createProjectMilestone('req-1', {
+    id: 'milestone-1',
+    projectRequestId: 'req-1',
+    title: 'Prepare launch handoff',
+    createdAtIso: T1,
+  });
 
   const server = await startHttpListener({
     port: 0,
@@ -174,6 +184,7 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     assert.match(html, /Browser dashboard/);
     assert.match(html, /Approved/);
     assert.match(html, /USD 2,100\.00/);
+    assert.match(html, /0 done \/ 1 open/);
     assert.match(html, /Zad Studio/);
   } finally {
     await server.close();
