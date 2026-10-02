@@ -6,9 +6,11 @@ import {
   composeProjectOpsDashboard,
   createClient,
   createProjectDeliverable,
+  createProjectInvoice,
   createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
+  markProjectInvoicePaid,
   completeProjectMilestone,
   insertClientSql,
   insertProjectRequestSql,
@@ -17,10 +19,12 @@ import {
   type ApproveProjectRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectDeliverableInput,
+  type NewProjectInvoiceInput,
   type NewClientInput,
   type NewProjectMilestoneInput,
   type NewProjectRequestInput,
   type ProjectDeliverable,
+  type ProjectInvoice,
   type ProjectOpsClient,
   type ProjectOpsDashboardView,
   type ProjectMilestone,
@@ -106,6 +110,22 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(acceptedDeliverable.status, 'accepted');
   assert.equal(acceptedDeliverable.acceptedAtIso, T3);
 
+  const invoice = createProjectInvoice(approved, {
+    id: 'invoice-1',
+    projectRequestId: request.id,
+    deliverableId: deliverable.id,
+    invoiceNumber: 'INV-001',
+    amountCents: 250000,
+    currency: 'usd',
+    issuedAtIso: T3,
+  });
+  assert.equal(invoice.status, 'issued');
+  assert.equal(invoice.currency, 'USD');
+
+  const paidInvoice = markProjectInvoicePaid(invoice, T3);
+  assert.equal(paidInvoice.status, 'paid');
+  assert.equal(paidInvoice.paidAtIso, T3);
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -134,6 +154,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_clients/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_requests/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_deliverables/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_invoices/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
   assert.equal(clientInsert.sql.includes('Zad Studio'), false);
@@ -333,6 +354,39 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(acceptDeliverableRes.status, 200);
     assert.equal(acceptedDeliverable.status, 'accepted');
 
+    const invoiceRes = await fetch(`${server.origin}/projectops/project-requests/req-2/invoices`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'invoice-1',
+        deliverableId: 'deliverable-1',
+        invoiceNumber: 'INV-001',
+        amountCents: 180000,
+        currency: 'USD',
+        issuedAtIso: T3,
+      }),
+    });
+    const invoice = await invoiceRes.json() as ProjectInvoice;
+    assert.equal(invoiceRes.status, 200);
+    assert.equal(invoice.status, 'issued');
+
+    const invoicesRes = await fetch(`${server.origin}/projectops/project-requests/req-2/invoices`);
+    assert.equal(invoicesRes.status, 200);
+    const invoices = await invoicesRes.json() as readonly ProjectInvoice[];
+    assert.equal(invoices.length, 1);
+
+    const payInvoiceRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/invoices/invoice-1/pay`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ paidAtIso: T3 }),
+      }
+    );
+    const paidInvoice = await payInvoiceRes.json() as ProjectInvoice;
+    assert.equal(payInvoiceRes.status, 200);
+    assert.equal(paidInvoice.status, 'paid');
+
     const dashboardRes = await fetch(`${server.origin}/projectops/dashboard`);
     assert.equal(dashboardRes.status, 200);
     const dashboard = await dashboardRes.json() as ProjectOpsDashboardView;
@@ -343,6 +397,9 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.completedMilestones, 1);
     assert.equal(dashboard.submittedDeliverables, 0);
     assert.equal(dashboard.acceptedDeliverables, 1);
+    assert.equal(dashboard.issuedInvoices, 0);
+    assert.equal(dashboard.paidInvoices, 1);
+    assert.equal(dashboard.paidInvoiceAmountCents, 180000);
   } finally {
     await server.close();
   }
@@ -367,6 +424,10 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       completedMilestoneCount: 2,
       submittedDeliverableCount: 1,
       acceptedDeliverableCount: 3,
+      issuedInvoiceCount: 1,
+      paidInvoiceCount: 2,
+      outstandingInvoiceAmountCents: 120000,
+      paidInvoiceAmountCents: 240000,
       updatedAtIso: T1,
     },
   ]);
@@ -456,6 +517,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const requests = new Map<string, ProjectRequest>();
   const milestones = new Map<string, ProjectMilestone>();
   const deliverables = new Map<string, ProjectDeliverable>();
+  const invoices = new Map<string, ProjectInvoice>();
 
   return Object.freeze({
     async createClient(input: NewClientInput): Promise<ProjectOpsClient> {
@@ -548,6 +610,42 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       deliverables.set(key, next);
       return next;
     },
+    async createProjectInvoice(
+      projectRequestId: string,
+      input: NewProjectInvoiceInput
+    ): Promise<ProjectInvoice> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      if (input.deliverableId) {
+        const deliverable = deliverables.get(deliverableKey(projectRequestId, input.deliverableId));
+        if (!deliverable) throw new Error(`Project deliverable not found: ${projectRequestId}/${input.deliverableId}`);
+        if (deliverable.status !== 'accepted') throw new Error(`Project deliverable not accepted: ${input.deliverableId}`);
+      }
+      const invoice = createProjectInvoice(request, input);
+      invoices.set(invoiceKey(projectRequestId, invoice.id), invoice);
+      return invoice;
+    },
+    async listProjectInvoices(projectRequestId: string): Promise<readonly ProjectInvoice[]> {
+      return Object.freeze(
+        [...invoices.values()].filter((invoice) => invoice.projectRequestId === projectRequestId)
+      );
+    },
+    async markProjectInvoicePaid(
+      projectRequestId: string,
+      invoiceId: string,
+      paidAtIso: string
+    ): Promise<ProjectInvoice> {
+      const key = invoiceKey(projectRequestId, invoiceId);
+      const current = invoices.get(key);
+      if (!current) {
+        throw new Error(`Project invoice not found: ${projectRequestId}/${invoiceId}`);
+      }
+      const next = markProjectInvoicePaid(current, paidAtIso);
+      invoices.set(key, next);
+      return next;
+    },
     async estimateProjectRequest(
       id: string,
       input: EstimateProjectRequestInput
@@ -607,6 +705,10 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             completedMilestoneCount: countMilestones(milestones, request.id, 'completed'),
             submittedDeliverableCount: countDeliverables(deliverables, request.id, 'submitted'),
             acceptedDeliverableCount: countDeliverables(deliverables, request.id, 'accepted'),
+            issuedInvoiceCount: countInvoices(invoices, request.id, 'issued'),
+            paidInvoiceCount: countInvoices(invoices, request.id, 'paid'),
+            outstandingInvoiceAmountCents: sumInvoices(invoices, request.id, 'issued'),
+            paidInvoiceAmountCents: sumInvoices(invoices, request.id, 'paid'),
             updatedAtIso: request.updatedAtIso,
           };
         })
@@ -621,6 +723,10 @@ function milestoneKey(projectRequestId: string, milestoneId: string): string {
 
 function deliverableKey(projectRequestId: string, deliverableId: string): string {
   return `${projectRequestId}\0${deliverableId}`;
+}
+
+function invoiceKey(projectRequestId: string, invoiceId: string): string {
+  return `${projectRequestId}\0${invoiceId}`;
 }
 
 function countMilestones(
@@ -641,4 +747,24 @@ function countDeliverables(
   return [...deliverables.values()].filter(
     (deliverable) => deliverable.projectRequestId === projectRequestId && deliverable.status === status
   ).length;
+}
+
+function countInvoices(
+  invoices: ReadonlyMap<string, ProjectInvoice>,
+  projectRequestId: string,
+  status: ProjectInvoice['status']
+): number {
+  return [...invoices.values()].filter(
+    (invoice) => invoice.projectRequestId === projectRequestId && invoice.status === status
+  ).length;
+}
+
+function sumInvoices(
+  invoices: ReadonlyMap<string, ProjectInvoice>,
+  projectRequestId: string,
+  status: ProjectInvoice['status']
+): number {
+  return [...invoices.values()]
+    .filter((invoice) => invoice.projectRequestId === projectRequestId && invoice.status === status)
+    .reduce((total, invoice) => total + invoice.amountCents, 0);
 }
