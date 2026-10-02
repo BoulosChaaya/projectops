@@ -6,6 +6,8 @@ import {
   ProjectOpsValidationError,
 } from '../../../../packages/projectops/src/index.ts';
 import type {
+  ApproveProjectRequestInput,
+  EstimateProjectRequestInput,
   NewClientInput,
   NewProjectRequestInput,
   ProjectOpsClient,
@@ -21,6 +23,14 @@ export interface ProjectOpsApiService {
   getClient(id: string): Promise<ProjectOpsClient | undefined>;
   listProjectRequests(): Promise<readonly ProjectRequest[]>;
   getProjectRequest(id: string): Promise<ProjectRequest | undefined>;
+  estimateProjectRequest(
+    id: string,
+    input: EstimateProjectRequestInput
+  ): Promise<ProjectRequest>;
+  approveProjectRequest(
+    id: string,
+    input: ApproveProjectRequestInput
+  ): Promise<ProjectRequest>;
   transitionProjectRequest(
     id: string,
     nextStatus: ProjectRequestStatus,
@@ -69,6 +79,22 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id',
       handler: async (_request, _context, params) =>
         await requireFound(service.getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND'),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/estimate',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.estimateProjectRequest(params.id, readEstimateInput(request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/approve',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.approveProjectRequest(params.id, readApprovalInput(request.body, clock))
+        ),
     },
     {
       method: 'POST',
@@ -173,11 +199,35 @@ function readProjectRequestInput(body: unknown, clock: () => string): NewProject
   });
 }
 
+function readEstimateInput(body: unknown, clock: () => string): EstimateProjectRequestInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    amountCents: readPositiveInteger(value.amountCents, 'amountCents'),
+    currency: readString(value.currency, 'currency'),
+    estimatedAtIso: readOptionalString(value.estimatedAtIso, 'estimatedAtIso') ?? clock(),
+  });
+}
+
+function readApprovalInput(body: unknown, clock: () => string): ApproveProjectRequestInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    approvedBy: readString(value.approvedBy, 'approvedBy'),
+    approvedAtIso: readOptionalString(value.approvedAtIso, 'approvedAtIso') ?? clock(),
+  });
+}
+
 function readRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new HttpError(400, 'INVALID_PROJECTOPS_PAYLOAD', 'Expected a JSON object.');
   }
   return value as Record<string, unknown>;
+}
+
+function readPositiveInteger(value: unknown, field: string): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new HttpError(400, 'INVALID_PROJECTOPS_FIELD', `Missing or invalid field: ${field}.`);
+  }
+  return value;
 }
 
 function readString(value: unknown, field: string): string {
