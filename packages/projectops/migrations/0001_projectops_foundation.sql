@@ -129,6 +129,25 @@ CREATE TABLE IF NOT EXISTS projectops_project_feedback (
     ON DELETE SET NULL (deliverable_id)
 );
 
+CREATE TABLE IF NOT EXISTS projectops_project_documents (
+  id TEXT NOT NULL,
+  project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+  deliverable_id TEXT,
+  title TEXT NOT NULL,
+  document_type TEXT NOT NULL CHECK (document_type IN ('proposal', 'contract', 'asset', 'handoff', 'other')),
+  url TEXT NOT NULL CHECK (url ~ '^https?://'),
+  status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+  uploaded_by TEXT NOT NULL,
+  uploaded_at TIMESTAMPTZ NOT NULL,
+  archived_at TIMESTAMPTZ,
+  archived_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_request_id, id),
+  FOREIGN KEY (project_request_id, deliverable_id)
+    REFERENCES projectops_project_deliverables(project_request_id, id)
+    ON DELETE SET NULL (deliverable_id)
+);
+
 CREATE TABLE IF NOT EXISTS projectops_project_activities (
   id TEXT NOT NULL,
   project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -177,6 +196,9 @@ CREATE INDEX IF NOT EXISTS projectops_project_issues_request_status_idx
 
 CREATE INDEX IF NOT EXISTS projectops_project_feedback_request_status_idx
   ON projectops_project_feedback (project_request_id, status, sentiment);
+
+CREATE INDEX IF NOT EXISTS projectops_project_documents_request_status_idx
+  ON projectops_project_documents (project_request_id, status, document_type);
 
 CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
   ON projectops_project_activities (project_request_id, happened_at DESC);
