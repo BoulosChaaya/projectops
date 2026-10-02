@@ -3,14 +3,17 @@ import {
   ProjectOpsRepository,
   acceptProjectDeliverable,
   approveProjectRequest,
+  approveProjectChangeRequest,
   composeProjectOpsDashboard,
   createClient,
+  createProjectChangeRequest,
   createProjectDeliverable,
   createProjectInvoice,
   createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
   markProjectInvoicePaid,
+  rejectProjectChangeRequest,
   completeProjectMilestone,
   createProjectActivity,
   insertClientSql,
@@ -18,8 +21,10 @@ import {
   projectOpsSchemaSql,
   transitionProjectRequest,
   type ApproveProjectRequestInput,
+  type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
+  type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
   type NewProjectInvoiceInput,
   type NewClientInput,
@@ -27,6 +32,7 @@ import {
   type NewProjectRequestInput,
   type ProjectDeliverable,
   type ProjectActivity,
+  type ProjectChangeRequest,
   type ProjectInvoice,
   type ProjectOpsClient,
   type ProjectOpsDashboardView,
@@ -129,6 +135,27 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(paidInvoice.status, 'paid');
   assert.equal(paidInvoice.paidAtIso, T3);
 
+  const changeRequest = createProjectChangeRequest(approved, {
+    id: 'change-1',
+    projectRequestId: request.id,
+    title: 'Add CMS editing',
+    description: 'Client wants editable launch copy.',
+    requestedBy: 'Boulos',
+    estimateDeltaCents: 75000,
+    estimateCurrency: 'usd',
+    requestedAtIso: T3,
+  });
+  assert.equal(changeRequest.status, 'proposed');
+  assert.equal(changeRequest.estimateCurrency, 'USD');
+
+  const approvedChange = approveProjectChangeRequest(changeRequest, {
+    decidedBy: 'Client',
+    decidedAtIso: T3,
+    decisionNote: 'Approved for launch scope.',
+  });
+  assert.equal(approvedChange.status, 'approved');
+  assert.equal(approvedChange.decidedBy, 'Client');
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -158,6 +185,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_requests/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_deliverables/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_invoices/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_change_requests/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
@@ -391,6 +419,44 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(payInvoiceRes.status, 200);
     assert.equal(paidInvoice.status, 'paid');
 
+    const changeRequestRes = await fetch(`${server.origin}/projectops/project-requests/req-2/change-requests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'change-1',
+        title: 'Add analytics event tracking',
+        description: 'Track contact form conversions after launch.',
+        requestedBy: 'Boulos',
+        estimateDeltaCents: 45000,
+        estimateCurrency: 'USD',
+        requestedAtIso: T3,
+      }),
+    });
+    const changeRequest = await changeRequestRes.json() as ProjectChangeRequest;
+    assert.equal(changeRequestRes.status, 200);
+    assert.equal(changeRequest.status, 'proposed');
+
+    const changeRequestsRes = await fetch(`${server.origin}/projectops/project-requests/req-2/change-requests`);
+    assert.equal(changeRequestsRes.status, 200);
+    const changeRequests = await changeRequestsRes.json() as readonly ProjectChangeRequest[];
+    assert.equal(changeRequests.length, 1);
+
+    const approveChangeRequestRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/change-requests/change-1/approve`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          decidedBy: 'Client',
+          decidedAtIso: T3,
+          decisionNote: 'Approved for launch reporting.',
+        }),
+      }
+    );
+    const approvedChangeRequest = await approveChangeRequestRes.json() as ProjectChangeRequest;
+    assert.equal(approveChangeRequestRes.status, 200);
+    assert.equal(approvedChangeRequest.status, 'approved');
+
     const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -425,6 +491,8 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.issuedInvoices, 0);
     assert.equal(dashboard.paidInvoices, 1);
     assert.equal(dashboard.paidInvoiceAmountCents, 180000);
+    assert.equal(dashboard.proposedChangeRequests, 0);
+    assert.equal(dashboard.approvedChangeRequests, 1);
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -457,6 +525,9 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       paidInvoiceCount: 2,
       outstandingInvoiceAmountCents: 120000,
       paidInvoiceAmountCents: 240000,
+      proposedChangeRequestCount: 1,
+      approvedChangeRequestCount: 2,
+      rejectedChangeRequestCount: 0,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -549,6 +620,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const milestones = new Map<string, ProjectMilestone>();
   const deliverables = new Map<string, ProjectDeliverable>();
   const invoices = new Map<string, ProjectInvoice>();
+  const changeRequests = new Map<string, ProjectChangeRequest>();
   const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
@@ -678,6 +750,53 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       invoices.set(key, next);
       return next;
     },
+    async createProjectChangeRequest(
+      projectRequestId: string,
+      input: NewProjectChangeRequestInput
+    ): Promise<ProjectChangeRequest> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      const changeRequest = createProjectChangeRequest(request, input);
+      changeRequests.set(changeRequestKey(projectRequestId, changeRequest.id), changeRequest);
+      return changeRequest;
+    },
+    async listProjectChangeRequests(projectRequestId: string): Promise<readonly ProjectChangeRequest[]> {
+      return Object.freeze(
+        [...changeRequests.values()]
+          .filter((changeRequest) => changeRequest.projectRequestId === projectRequestId)
+          .sort((a, b) => b.requestedAtIso.localeCompare(a.requestedAtIso) || a.id.localeCompare(b.id))
+      );
+    },
+    async approveProjectChangeRequest(
+      projectRequestId: string,
+      changeRequestId: string,
+      input: DecideProjectChangeRequestInput
+    ): Promise<ProjectChangeRequest> {
+      const key = changeRequestKey(projectRequestId, changeRequestId);
+      const current = changeRequests.get(key);
+      if (!current) {
+        throw new Error(`Project change request not found: ${projectRequestId}/${changeRequestId}`);
+      }
+      const next = approveProjectChangeRequest(current, input);
+      changeRequests.set(key, next);
+      return next;
+    },
+    async rejectProjectChangeRequest(
+      projectRequestId: string,
+      changeRequestId: string,
+      input: DecideProjectChangeRequestInput
+    ): Promise<ProjectChangeRequest> {
+      const key = changeRequestKey(projectRequestId, changeRequestId);
+      const current = changeRequests.get(key);
+      if (!current) {
+        throw new Error(`Project change request not found: ${projectRequestId}/${changeRequestId}`);
+      }
+      const next = rejectProjectChangeRequest(current, input);
+      changeRequests.set(key, next);
+      return next;
+    },
     async createProjectActivity(
       projectRequestId: string,
       input: NewProjectActivityInput
@@ -760,6 +879,9 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             paidInvoiceCount: countInvoices(invoices, request.id, 'paid'),
             outstandingInvoiceAmountCents: sumInvoices(invoices, request.id, 'issued'),
             paidInvoiceAmountCents: sumInvoices(invoices, request.id, 'paid'),
+            proposedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'proposed'),
+            approvedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'approved'),
+            rejectedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'rejected'),
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -780,6 +902,10 @@ function deliverableKey(projectRequestId: string, deliverableId: string): string
 
 function invoiceKey(projectRequestId: string, invoiceId: string): string {
   return `${projectRequestId}\0${invoiceId}`;
+}
+
+function changeRequestKey(projectRequestId: string, changeRequestId: string): string {
+  return `${projectRequestId}\0${changeRequestId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -824,6 +950,16 @@ function sumInvoices(
   return [...invoices.values()]
     .filter((invoice) => invoice.projectRequestId === projectRequestId && invoice.status === status)
     .reduce((total, invoice) => total + invoice.amountCents, 0);
+}
+
+function countChangeRequests(
+  changeRequests: ReadonlyMap<string, ProjectChangeRequest>,
+  projectRequestId: string,
+  status: ProjectChangeRequest['status']
+): number {
+  return [...changeRequests.values()].filter(
+    (changeRequest) => changeRequest.projectRequestId === projectRequestId && changeRequest.status === status
+  ).length;
 }
 
 function latestActivity(
