@@ -98,6 +98,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Milestones</th>
           <th scope="col">Deliverables</th>
           <th scope="col">Invoices</th>
+          <th scope="col">Latest Activity</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
         </tr>
@@ -121,6 +122,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatMilestones(row))}</td>
     <td>${escapeHtml(formatDeliverables(row))}</td>
     <td>${escapeHtml(formatInvoices(row))}</td>
+    <td>${escapeHtml(formatLatestActivity(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
   </tr>`;
@@ -173,6 +175,13 @@ function formatDeliverables(row: ProjectOpsDashboardRow): string {
 function formatInvoices(row: ProjectOpsDashboardRow): string {
   const outstanding = formatMoney(row.outstandingInvoiceAmountCents ?? 0, row.estimateCurrency ?? 'USD');
   return `${row.paidInvoiceCount ?? 0} paid / ${row.issuedInvoiceCount ?? 0} open (${outstanding})`;
+}
+
+function formatLatestActivity(row: ProjectOpsDashboardRow): string {
+  if (!row.latestActivitySummary || !row.latestActivityAtIso) {
+    return 'No activity yet';
+  }
+  return `${row.latestActivitySummary} (${formatDate(row.latestActivityAtIso)})`;
 }
 
 function formatMoney(amountCents: number, currency: string): string {
