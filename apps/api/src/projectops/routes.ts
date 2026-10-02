@@ -14,6 +14,10 @@ import type {
 export interface ProjectOpsApiService {
   createClient(input: NewClientInput): Promise<ProjectOpsClient>;
   createProjectRequest(input: NewProjectRequestInput): Promise<ProjectRequest>;
+  listClients(): Promise<readonly ProjectOpsClient[]>;
+  getClient(id: string): Promise<ProjectOpsClient | undefined>;
+  listProjectRequests(): Promise<readonly ProjectRequest[]>;
+  getProjectRequest(id: string): Promise<ProjectRequest | undefined>;
   transitionProjectRequest(
     id: string,
     nextStatus: ProjectRequestStatus,
@@ -34,12 +38,34 @@ export function createProjectOpsRoutes(
         await runProjectOpsRequest(() => service.createClient(readClientInput(request.body, clock))),
     },
     {
+      method: 'GET',
+      path: '/projectops/clients',
+      handler: async () => await service.listClients(),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/clients/:id',
+      handler: async (_request, _context, params) =>
+        await requireFound(service.getClient(params.id), 'PROJECTOPS_CLIENT_NOT_FOUND'),
+    },
+    {
       method: 'POST',
       path: '/projectops/project-requests',
       handler: async (request) =>
         await runProjectOpsRequest(() =>
           service.createProjectRequest(readProjectRequestInput(request.body, clock))
         ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests',
+      handler: async () => await service.listProjectRequests(),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id',
+      handler: async (_request, _context, params) =>
+        await requireFound(service.getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND'),
     },
     {
       method: 'POST',
@@ -58,6 +84,14 @@ export function createProjectOpsRoutes(
       handler: async () => await service.getDashboard(),
     },
   ]);
+}
+
+async function requireFound<T>(value: Promise<T | undefined>, code: string): Promise<T> {
+  const resolved = await value;
+  if (!resolved) {
+    throw new HttpError(404, code, 'ProjectOps resource not found.');
+  }
+  return resolved;
 }
 
 async function runProjectOpsRequest<T>(operation: () => Promise<T>): Promise<T> {
