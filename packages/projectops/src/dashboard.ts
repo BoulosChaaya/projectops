@@ -35,6 +35,10 @@ export interface ProjectOpsDashboardRow {
   readonly activeNoteCount?: number;
   readonly archivedNoteCount?: number;
   readonly clientVisibleNoteCount?: number;
+  readonly openTaskCount?: number;
+  readonly highOpenTaskCount?: number;
+  readonly completedTaskCount?: number;
+  readonly nextTaskDueAtIso?: string;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
@@ -66,6 +70,9 @@ export interface ProjectOpsDashboardView {
   readonly activeNotes: number;
   readonly archivedNotes: number;
   readonly clientVisibleNotes: number;
+  readonly openTasks: number;
+  readonly highOpenTasks: number;
+  readonly completedTasks: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -105,6 +112,9 @@ export function composeProjectOpsDashboard(
   let activeNotes = 0;
   let archivedNotes = 0;
   let clientVisibleNotes = 0;
+  let openTasks = 0;
+  let highOpenTasks = 0;
+  let completedTasks = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -134,6 +144,9 @@ export function composeProjectOpsDashboard(
     activeNotes += row.activeNoteCount ?? 0;
     archivedNotes += row.archivedNoteCount ?? 0;
     clientVisibleNotes += row.clientVisibleNoteCount ?? 0;
+    openTasks += row.openTaskCount ?? 0;
+    highOpenTasks += row.highOpenTaskCount ?? 0;
+    completedTasks += row.completedTaskCount ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -165,6 +178,9 @@ export function composeProjectOpsDashboard(
     activeNotes,
     archivedNotes,
     clientVisibleNotes,
+    openTasks,
+    highOpenTasks,
+    completedTasks,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
