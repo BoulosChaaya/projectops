@@ -24,6 +24,9 @@ export interface ProjectOpsDashboardRow {
   readonly proposedChangeRequestCount?: number;
   readonly approvedChangeRequestCount?: number;
   readonly rejectedChangeRequestCount?: number;
+  readonly openIssueCount?: number;
+  readonly highOpenIssueCount?: number;
+  readonly resolvedIssueCount?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
@@ -44,6 +47,9 @@ export interface ProjectOpsDashboardView {
   readonly proposedChangeRequests: number;
   readonly approvedChangeRequests: number;
   readonly rejectedChangeRequests: number;
+  readonly openIssues: number;
+  readonly highOpenIssues: number;
+  readonly resolvedIssues: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -72,6 +78,9 @@ export function composeProjectOpsDashboard(
   let proposedChangeRequests = 0;
   let approvedChangeRequests = 0;
   let rejectedChangeRequests = 0;
+  let openIssues = 0;
+  let highOpenIssues = 0;
+  let resolvedIssues = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -90,6 +99,9 @@ export function composeProjectOpsDashboard(
     proposedChangeRequests += row.proposedChangeRequestCount ?? 0;
     approvedChangeRequests += row.approvedChangeRequestCount ?? 0;
     rejectedChangeRequests += row.rejectedChangeRequestCount ?? 0;
+    openIssues += row.openIssueCount ?? 0;
+    highOpenIssues += row.highOpenIssueCount ?? 0;
+    resolvedIssues += row.resolvedIssueCount ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -110,6 +122,9 @@ export function composeProjectOpsDashboard(
     proposedChangeRequests,
     approvedChangeRequests,
     rejectedChangeRequests,
+    openIssues,
+    highOpenIssues,
+    resolvedIssues,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
