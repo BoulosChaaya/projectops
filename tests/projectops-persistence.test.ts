@@ -8,6 +8,7 @@ import {
   projectOpsSchemaSql,
   type ProjectOpsDashboardView,
   type ProjectDeliverable,
+  type ProjectFeedback,
   type ProjectInvoice,
   type ProjectMilestone,
   type ProjectRequest,
@@ -143,6 +144,21 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
     resolutionNote: 'Assets received.',
   });
   const issues = await repo.listProjectIssues('req-1');
+  const feedback = await repo.createProjectFeedback('req-1', {
+    id: 'feedback-1',
+    projectRequestId: 'req-1',
+    deliverableId: 'deliverable-1',
+    author: 'Client',
+    sentiment: 'negative',
+    message: 'Please make the launch checklist clearer.',
+    receivedAtIso: T3,
+  });
+  const addressedFeedback = await repo.addressProjectFeedback('req-1', 'feedback-1', {
+    addressedBy: 'Boulos',
+    addressedAtIso: T3,
+    responseNote: 'Checklist rewritten with acceptance notes.',
+  });
+  const feedbackList = await repo.listProjectFeedback('req-1');
   const activity = await repo.createProjectActivity('req-1', {
     id: 'activity-1',
     projectRequestId: 'req-1',
@@ -182,6 +198,10 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(resolvedIssue.status, 'resolved');
   assert.equal(issues.length, 1);
   assert.equal(issues[0]?.resolutionNote, 'Assets received.');
+  assert.equal(feedback.status, 'open');
+  assert.equal(addressedFeedback.status, 'addressed');
+  assert.equal(feedbackList.length, 1);
+  assert.equal(feedbackList[0]?.responseNote, 'Checklist rewritten with acceptance notes.');
   assert.equal(activity.eventType, 'note_added');
   assert.equal(activities.length, 1);
   assert.equal(activities[0]?.summary, 'Client approved paid invoice and handoff.');
@@ -200,6 +220,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(snapshot.projectInvoices[0]?.status, 'paid');
   assert.equal(snapshot.projectChangeRequests[0]?.status, 'approved');
   assert.equal(snapshot.projectIssues[0]?.status, 'resolved');
+  assert.equal(snapshot.projectFeedback[0]?.status, 'addressed');
   assert.equal(snapshot.projectActivities[0]?.summary, 'Client approved paid invoice and handoff.');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.approved, 1);
@@ -214,6 +235,9 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.approvedChangeRequests, 1);
   assert.equal(dashboard.openIssues, 0);
   assert.equal(dashboard.resolvedIssues, 1);
+  assert.equal(dashboard.openFeedback, 0);
+  assert.equal(dashboard.addressedFeedback, 1);
+  assert.equal(dashboard.negativeOpenFeedback, 0);
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
   assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
@@ -221,6 +245,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.rows[0]?.paidInvoiceAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.approvedChangeRequestCount, 1);
   assert.equal(dashboard.rows[0]?.resolvedIssueCount, 1);
+  assert.equal(dashboard.rows[0]?.addressedFeedbackCount, 1);
   assert.equal(dashboard.rows[0]?.latestActivitySummary, 'Client approved paid invoice and handoff.');
 });
 
@@ -482,6 +507,34 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     );
     assert.equal(paidInvoice.status, 'paid');
 
+    const feedback = await expectOkJson<ProjectFeedback>(
+      `${server.origin}/projectops/project-requests/req-1/feedback`,
+      {
+        id: 'feedback-1',
+        deliverableId: 'deliverable-1',
+        author: 'Client',
+        sentiment: 'negative',
+        message: 'Please make acceptance notes easier to scan.',
+        receivedAtIso: T3,
+      }
+    );
+    assert.equal(feedback.status, 'open');
+
+    const feedbackRes = await fetch(`${server.origin}/projectops/project-requests/req-1/feedback`);
+    assert.equal(feedbackRes.status, 200);
+    const feedbackList = await feedbackRes.json() as readonly ProjectFeedback[];
+    assert.equal(feedbackList.length, 1);
+
+    const addressedFeedback = await expectOkJson<ProjectFeedback>(
+      `${server.origin}/projectops/project-requests/req-1/feedback/feedback-1/address`,
+      {
+        addressedBy: 'Boulos',
+        addressedAtIso: T3,
+        responseNote: 'Acceptance notes rewritten for the client.',
+      }
+    );
+    assert.equal(addressedFeedback.status, 'addressed');
+
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
     const clients = await clientsRes.json() as readonly { id: string }[];
@@ -516,10 +569,12 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.acceptedDeliverables, 1);
     assert.equal(dashboard.paidInvoices, 1);
     assert.equal(dashboard.paidInvoiceAmountCents, 240000);
+    assert.equal(dashboard.addressedFeedback, 1);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
     assert.equal(sql.snapshot().projectMilestones[0]?.status, 'completed');
     assert.equal(sql.snapshot().projectDeliverables[0]?.status, 'accepted');
     assert.equal(sql.snapshot().projectInvoices[0]?.status, 'paid');
+    assert.equal(sql.snapshot().projectFeedback[0]?.status, 'addressed');
   } finally {
     await server.close();
   }
