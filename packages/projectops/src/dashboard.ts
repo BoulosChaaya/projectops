@@ -8,6 +8,11 @@ export interface ProjectOpsDashboardRow {
   readonly priority: ProjectPriority;
   readonly status: ProjectRequestStatus;
   readonly deadlineIso?: string;
+  readonly estimateAmountCents?: number;
+  readonly estimateCurrency?: string;
+  readonly estimatedAtIso?: string;
+  readonly approvedAtIso?: string;
+  readonly approvedBy?: string;
   readonly updatedAtIso: string;
 }
 
