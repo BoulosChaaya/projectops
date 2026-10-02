@@ -1,4 +1,5 @@
 import {
+  ProjectOpsOperationError,
   createClient,
   createProjectRequest,
   transitionProjectRequest,
@@ -38,14 +39,49 @@ export class ProjectOpsRepository {
 
   public async createClient(input: NewClientInput): Promise<ProjectOpsClient> {
     const client = createClient(input);
+    const existing = await this.getClient(client.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_CLIENT_ALREADY_EXISTS',
+        `ProjectOps client already exists: ${client.id}.`
+      );
+    }
+
     const rows = await this.sql.query<ProjectOpsClient>(insertClientSql(client));
-    return rows[0] ?? client;
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps client insert did not return a row.');
+    }
+    return persisted;
   }
 
   public async createProjectRequest(input: NewProjectRequestInput): Promise<ProjectRequest> {
     const request = createProjectRequest(input);
+    const client = await this.getClient(request.clientId);
+    if (!client) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_CLIENT_NOT_FOUND',
+        `ProjectOps client not found: ${request.clientId}.`
+      );
+    }
+
+    const existing = await this.getProjectRequest(request.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_REQUEST_ALREADY_EXISTS',
+        `ProjectOps project request already exists: ${request.id}.`
+      );
+    }
+
     const rows = await this.sql.query<ProjectRequest>(insertProjectRequestSql(request));
-    return rows[0] ?? request;
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project request insert did not return a row.');
+    }
+    return persisted;
   }
 
   public async listClients(): Promise<readonly ProjectOpsClient[]> {
@@ -74,14 +110,26 @@ export class ProjectOpsRepository {
     const currentRows = await this.sql.query<ProjectRequest>(selectProjectRequestByIdSql(id));
     const current = currentRows[0];
     if (!current) {
-      throw new Error(`Project request not found: ${id}`);
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_REQUEST_NOT_FOUND',
+        `Project request not found: ${id}.`
+      );
     }
 
     const transitioned = transitionProjectRequest(current, nextStatus, nowIso);
     const rows = await this.sql.query<ProjectRequest>(
       updateProjectRequestStatusSql(id, transitioned.status, transitioned.updatedAtIso)
     );
-    return rows[0] ?? transitioned;
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_REQUEST_NOT_FOUND',
+        `Project request not found: ${id}.`
+      );
+    }
+    return persisted;
   }
 
   public async getDashboard(): Promise<ProjectOpsDashboardView> {
