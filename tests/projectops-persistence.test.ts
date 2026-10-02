@@ -12,6 +12,7 @@ import {
   type ProjectFeedback,
   type ProjectInvoice,
   type ProjectMilestone,
+  type ProjectNote,
   type ProjectRequest,
 } from '../packages/projectops/src/index.ts';
 import { createProjectOpsRoutes } from '../apps/api/src/projectops/routes.ts';
@@ -175,6 +176,19 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
     archivedAtIso: T3,
   });
   const documents = await repo.listProjectDocuments('req-1');
+  const note = await repo.createProjectNote('req-1', {
+    id: 'note-1',
+    projectRequestId: 'req-1',
+    author: 'Boulos',
+    visibility: 'client',
+    body: 'Client asked for a clearer launch checklist.',
+    createdAtIso: T3,
+  });
+  const archivedNote = await repo.archiveProjectNote('req-1', 'note-1', {
+    archivedBy: 'Boulos',
+    archivedAtIso: T3,
+  });
+  const notes = await repo.listProjectNotes('req-1');
   const activity = await repo.createProjectActivity('req-1', {
     id: 'activity-1',
     projectRequestId: 'req-1',
@@ -222,6 +236,10 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(archivedDocument.status, 'archived');
   assert.equal(documents.length, 1);
   assert.equal(documents[0]?.archivedBy, 'Boulos');
+  assert.equal(note.status, 'active');
+  assert.equal(archivedNote.status, 'archived');
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0]?.archivedBy, 'Boulos');
   assert.equal(activity.eventType, 'note_added');
   assert.equal(activities.length, 1);
   assert.equal(activities[0]?.summary, 'Client approved paid invoice and handoff.');
@@ -242,6 +260,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(snapshot.projectIssues[0]?.status, 'resolved');
   assert.equal(snapshot.projectFeedback[0]?.status, 'addressed');
   assert.equal(snapshot.projectDocuments[0]?.status, 'archived');
+  assert.equal(snapshot.projectNotes[0]?.status, 'archived');
   assert.equal(snapshot.projectActivities[0]?.summary, 'Client approved paid invoice and handoff.');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.approved, 1);
@@ -261,6 +280,9 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.negativeOpenFeedback, 0);
   assert.equal(dashboard.activeDocuments, 0);
   assert.equal(dashboard.archivedDocuments, 1);
+  assert.equal(dashboard.activeNotes, 0);
+  assert.equal(dashboard.archivedNotes, 1);
+  assert.equal(dashboard.clientVisibleNotes, 0);
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
   assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
@@ -270,6 +292,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.rows[0]?.resolvedIssueCount, 1);
   assert.equal(dashboard.rows[0]?.addressedFeedbackCount, 1);
   assert.equal(dashboard.rows[0]?.archivedDocumentCount, 1);
+  assert.equal(dashboard.rows[0]?.archivedNoteCount, 1);
   assert.equal(dashboard.rows[0]?.latestActivitySummary, 'Client approved paid invoice and handoff.');
 });
 
@@ -584,6 +607,29 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     );
     assert.equal(archivedDocument.status, 'archived');
 
+    const note = await expectOkJson<ProjectNote>(
+      `${server.origin}/projectops/project-requests/req-1/notes`,
+      {
+        id: 'note-1',
+        author: 'Boulos',
+        visibility: 'client',
+        body: 'Client asked for a clearer launch checklist.',
+        createdAtIso: T3,
+      }
+    );
+    assert.equal(note.status, 'active');
+
+    const notesRes = await fetch(`${server.origin}/projectops/project-requests/req-1/notes`);
+    assert.equal(notesRes.status, 200);
+    const notes = await notesRes.json() as readonly ProjectNote[];
+    assert.equal(notes.length, 1);
+
+    const archivedNote = await expectOkJson<ProjectNote>(
+      `${server.origin}/projectops/project-requests/req-1/notes/note-1/archive`,
+      { archivedBy: 'Boulos', archivedAtIso: T3 }
+    );
+    assert.equal(archivedNote.status, 'archived');
+
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
     const clients = await clientsRes.json() as readonly { id: string }[];
@@ -620,12 +666,14 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.paidInvoiceAmountCents, 240000);
     assert.equal(dashboard.addressedFeedback, 1);
     assert.equal(dashboard.archivedDocuments, 1);
+    assert.equal(dashboard.archivedNotes, 1);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
     assert.equal(sql.snapshot().projectMilestones[0]?.status, 'completed');
     assert.equal(sql.snapshot().projectDeliverables[0]?.status, 'accepted');
     assert.equal(sql.snapshot().projectInvoices[0]?.status, 'paid');
     assert.equal(sql.snapshot().projectFeedback[0]?.status, 'addressed');
     assert.equal(sql.snapshot().projectDocuments[0]?.status, 'archived');
+    assert.equal(sql.snapshot().projectNotes[0]?.status, 'archived');
   } finally {
     await server.close();
   }
