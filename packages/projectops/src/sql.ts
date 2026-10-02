@@ -2,6 +2,7 @@ import type {
   ProjectActivity,
   ProjectChangeRequest,
   ProjectDeliverable,
+  ProjectDocument,
   ProjectFeedback,
   ProjectInvoice,
   ProjectIssue,
@@ -140,6 +141,24 @@ export const projectOpsSchemaSql = Object.freeze([
       REFERENCES projectops_project_deliverables(project_request_id, id)
       ON DELETE SET NULL (deliverable_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_documents (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    deliverable_id TEXT,
+    title TEXT NOT NULL,
+    document_type TEXT NOT NULL CHECK (document_type IN ('proposal', 'contract', 'asset', 'handoff', 'other')),
+    url TEXT NOT NULL CHECK (url ~ '^https?://'),
+    status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+    uploaded_by TEXT NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL,
+    archived_at TIMESTAMPTZ,
+    archived_by TEXT,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id),
+    FOREIGN KEY (project_request_id, deliverable_id)
+      REFERENCES projectops_project_deliverables(project_request_id, id)
+      ON DELETE SET NULL (deliverable_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_activities (
     id TEXT NOT NULL,
     project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -180,6 +199,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_issues (project_request_id, status, severity)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_feedback_request_status_idx
     ON projectops_project_feedback (project_request_id, status, sentiment)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_documents_request_status_idx
+    ON projectops_project_documents (project_request_id, status, document_type)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
     ON projectops_project_activities (project_request_id, happened_at DESC)`,
 ] as const);
@@ -708,6 +729,79 @@ export function addressProjectFeedbackSql(feedback: ProjectFeedback): SqlStateme
   });
 }
 
+export function insertProjectDocumentSql(document: ProjectDocument): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_documents (
+      id,
+      project_request_id,
+      deliverable_id,
+      title,
+      document_type,
+      url,
+      status,
+      uploaded_by,
+      uploaded_at,
+      archived_at,
+      archived_by,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    RETURNING *`,
+    params: Object.freeze([
+      document.id,
+      document.projectRequestId,
+      document.deliverableId ?? null,
+      document.title,
+      document.documentType,
+      document.url,
+      document.status,
+      document.uploadedBy,
+      document.uploadedAtIso,
+      document.archivedAtIso ?? null,
+      document.archivedBy ?? null,
+      document.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectDocumentsSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_documents
+      WHERE project_request_id = $1
+      ORDER BY uploaded_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectDocumentByIdSql(
+  projectRequestId: string,
+  documentId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_documents
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, documentId]),
+  });
+}
+
+export function archiveProjectDocumentSql(document: ProjectDocument): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_documents
+      SET status = $3, archived_at = $4, archived_by = $5, updated_at = $6
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      document.projectRequestId,
+      document.id,
+      document.status,
+      document.archivedAtIso ?? null,
+      document.archivedBy ?? null,
+      document.updatedAtIso,
+    ]),
+  });
+}
+
 export function insertProjectActivitySql(activity: ProjectActivity): SqlStatement {
   return Object.freeze({
     sql: `INSERT INTO projectops_project_activities (
@@ -836,6 +930,8 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(fb.open_feedback, 0) AS open_feedback_count,
       COALESCE(fb.addressed_feedback, 0) AS addressed_feedback_count,
       COALESCE(fb.negative_open_feedback, 0) AS negative_open_feedback_count,
+      COALESCE(doc.active_documents, 0) AS active_document_count,
+      COALESCE(doc.archived_documents, 0) AS archived_document_count,
       act.latest_activity_at,
       act.latest_activity_summary,
       pr.updated_at
@@ -894,6 +990,14 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_feedback
       GROUP BY project_request_id
     ) fb ON fb.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'active') AS active_documents,
+        COUNT(*) FILTER (WHERE status = 'archived') AS archived_documents
+      FROM projectops_project_documents
+      GROUP BY project_request_id
+    ) doc ON doc.project_request_id = pr.id
     LEFT JOIN (
       SELECT DISTINCT ON (project_request_id)
         project_request_id,
