@@ -39,6 +39,10 @@ export interface ProjectOpsDashboardRow {
   readonly highOpenTaskCount?: number;
   readonly completedTaskCount?: number;
   readonly nextTaskDueAtIso?: string;
+  readonly workLogCount?: number;
+  readonly billableWorkMinutes?: number;
+  readonly nonBillableWorkMinutes?: number;
+  readonly latestWorkLoggedAtIso?: string;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
@@ -73,6 +77,9 @@ export interface ProjectOpsDashboardView {
   readonly openTasks: number;
   readonly highOpenTasks: number;
   readonly completedTasks: number;
+  readonly workLogs: number;
+  readonly billableWorkMinutes: number;
+  readonly nonBillableWorkMinutes: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -115,6 +122,9 @@ export function composeProjectOpsDashboard(
   let openTasks = 0;
   let highOpenTasks = 0;
   let completedTasks = 0;
+  let workLogs = 0;
+  let billableWorkMinutes = 0;
+  let nonBillableWorkMinutes = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -147,6 +157,9 @@ export function composeProjectOpsDashboard(
     openTasks += row.openTaskCount ?? 0;
     highOpenTasks += row.highOpenTaskCount ?? 0;
     completedTasks += row.completedTaskCount ?? 0;
+    workLogs += row.workLogCount ?? 0;
+    billableWorkMinutes += row.billableWorkMinutes ?? 0;
+    nonBillableWorkMinutes += row.nonBillableWorkMinutes ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -181,6 +194,9 @@ export function composeProjectOpsDashboard(
     openTasks,
     highOpenTasks,
     completedTasks,
+    workLogs,
+    billableWorkMinutes,
+    nonBillableWorkMinutes,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
