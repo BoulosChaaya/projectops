@@ -7,15 +7,18 @@ import {
 } from '../../../../packages/projectops/src/index.ts';
 import type {
   ApproveProjectRequestInput,
+  DecideProjectChangeRequestInput,
   EstimateProjectRequestInput,
   NewClientInput,
   NewProjectActivityInput,
+  NewProjectChangeRequestInput,
   NewProjectDeliverableInput,
   NewProjectInvoiceInput,
   NewProjectMilestoneInput,
   NewProjectRequestInput,
   ProjectDeliverable,
   ProjectActivity,
+  ProjectChangeRequest,
   ProjectInvoice,
   ProjectOpsClient,
   ProjectOpsDashboardView,
@@ -61,6 +64,21 @@ export interface ProjectOpsApiService {
     invoiceId: string,
     paidAtIso: string
   ): Promise<ProjectInvoice>;
+  createProjectChangeRequest(
+    projectRequestId: string,
+    input: NewProjectChangeRequestInput
+  ): Promise<ProjectChangeRequest>;
+  listProjectChangeRequests(projectRequestId: string): Promise<readonly ProjectChangeRequest[]>;
+  approveProjectChangeRequest(
+    projectRequestId: string,
+    changeRequestId: string,
+    input: DecideProjectChangeRequestInput
+  ): Promise<ProjectChangeRequest>;
+  rejectProjectChangeRequest(
+    projectRequestId: string,
+    changeRequestId: string,
+    input: DecideProjectChangeRequestInput
+  ): Promise<ProjectChangeRequest>;
   createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -192,6 +210,47 @@ export function createProjectOpsRoutes(
             params.id,
             params.invoiceId,
             readPaidAtIso(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/change-requests',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectChangeRequests(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/change-requests',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectChangeRequest(
+            params.id,
+            readChangeRequestInput(params.id, request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/change-requests/:changeRequestId/approve',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.approveProjectChangeRequest(
+            params.id,
+            params.changeRequestId,
+            readChangeRequestDecisionInput(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/change-requests/:changeRequestId/reject',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.rejectProjectChangeRequest(
+            params.id,
+            params.changeRequestId,
+            readChangeRequestDecisionInput(request.body, clock)
           )
         ),
     },
@@ -415,6 +474,36 @@ function readPaidAtIso(body: unknown, clock: () => string): string {
   return readOptionalString(value.paidAtIso, 'paidAtIso') ?? clock();
 }
 
+function readChangeRequestInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectChangeRequestInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    title: readString(value.title, 'title'),
+    description: readString(value.description, 'description'),
+    requestedBy: readString(value.requestedBy, 'requestedBy'),
+    estimateDeltaCents: readOptionalPositiveInteger(value.estimateDeltaCents, 'estimateDeltaCents'),
+    estimateCurrency: readOptionalString(value.estimateCurrency, 'estimateCurrency'),
+    requestedAtIso: readOptionalString(value.requestedAtIso, 'requestedAtIso') ?? clock(),
+  });
+}
+
+function readChangeRequestDecisionInput(
+  body: unknown,
+  clock: () => string
+): DecideProjectChangeRequestInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    decidedBy: readString(value.decidedBy, 'decidedBy'),
+    decidedAtIso: readOptionalString(value.decidedAtIso, 'decidedAtIso') ?? clock(),
+    decisionNote: readOptionalString(value.decisionNote, 'decisionNote'),
+  });
+}
+
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
@@ -443,6 +532,11 @@ function readPositiveInteger(value: unknown, field: string): number {
     throw new HttpError(400, 'INVALID_PROJECTOPS_FIELD', `Missing or invalid field: ${field}.`);
   }
   return value;
+}
+
+function readOptionalPositiveInteger(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  return readPositiveInteger(value, field);
 }
 
 function readString(value: unknown, field: string): string {
