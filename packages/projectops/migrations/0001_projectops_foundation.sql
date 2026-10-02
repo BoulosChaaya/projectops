@@ -148,6 +148,20 @@ CREATE TABLE IF NOT EXISTS projectops_project_documents (
     ON DELETE SET NULL (deliverable_id)
 );
 
+CREATE TABLE IF NOT EXISTS projectops_project_notes (
+  id TEXT NOT NULL,
+  project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+  author TEXT NOT NULL,
+  visibility TEXT NOT NULL CHECK (visibility IN ('internal', 'client')),
+  body TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+  created_at TIMESTAMPTZ NOT NULL,
+  archived_at TIMESTAMPTZ,
+  archived_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_request_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS projectops_project_activities (
   id TEXT NOT NULL,
   project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -199,6 +213,9 @@ CREATE INDEX IF NOT EXISTS projectops_project_feedback_request_status_idx
 
 CREATE INDEX IF NOT EXISTS projectops_project_documents_request_status_idx
   ON projectops_project_documents (project_request_id, status, document_type);
+
+CREATE INDEX IF NOT EXISTS projectops_project_notes_request_status_idx
+  ON projectops_project_notes (project_request_id, status, visibility);
 
 CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
   ON projectops_project_activities (project_request_id, happened_at DESC);
