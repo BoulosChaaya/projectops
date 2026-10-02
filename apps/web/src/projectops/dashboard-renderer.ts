@@ -57,6 +57,7 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('Active documents', String(summary.activeDocuments))}
       ${renderMetric('Active notes', String(summary.activeNotes))}
       ${renderMetric('Open tasks', String(summary.openTasks))}
+      ${renderMetric('Billable hours', formatHours(summary.billableWorkMinutes))}
       ${renderMetric('In progress', String(summary.byStatus.in_progress))}
       ${renderMetric('Delivered', String(summary.byStatus.delivered))}
     </section>
@@ -110,6 +111,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Documents</th>
           <th scope="col">Notes</th>
           <th scope="col">Tasks</th>
+          <th scope="col">Work</th>
           <th scope="col">Latest Activity</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
@@ -140,6 +142,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatDocuments(row))}</td>
     <td>${escapeHtml(formatNotes(row))}</td>
     <td>${escapeHtml(formatTasks(row))}</td>
+    <td>${escapeHtml(formatWork(row))}</td>
     <td>${escapeHtml(formatLatestActivity(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
@@ -219,6 +222,10 @@ function formatTasks(row: ProjectOpsDashboardRow): string {
   return `${row.openTaskCount ?? 0} open / ${row.highOpenTaskCount ?? 0} high`;
 }
 
+function formatWork(row: ProjectOpsDashboardRow): string {
+  return `${formatHours(row.billableWorkMinutes ?? 0)} billable / ${formatHours(row.nonBillableWorkMinutes ?? 0)} non`;
+}
+
 function formatLatestActivity(row: ProjectOpsDashboardRow): string {
   if (!row.latestActivitySummary || !row.latestActivityAtIso) {
     return 'No activity yet';
@@ -232,6 +239,13 @@ function formatMoney(amountCents: number, currency: string): string {
     maximumFractionDigits: 2,
   });
   return `${currency} ${amount}`;
+}
+
+function formatHours(minutes: number): string {
+  return `${(minutes / 60).toLocaleString('en', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}h`;
 }
 
 function formatDate(value: string): string {
