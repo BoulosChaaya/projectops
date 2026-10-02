@@ -10,6 +10,7 @@ import type {
   ArchiveProjectDocumentInput,
   ArchiveProjectNoteInput,
   ApproveProjectRequestInput,
+  CompleteProjectTaskInput,
   DecideProjectChangeRequestInput,
   EstimateProjectRequestInput,
   NewClientInput,
@@ -23,6 +24,7 @@ import type {
   NewProjectMilestoneInput,
   NewProjectNoteInput,
   NewProjectRequestInput,
+  NewProjectTaskInput,
   ProjectDeliverable,
   ProjectActivity,
   ProjectChangeRequest,
@@ -36,6 +38,7 @@ import type {
   ProjectNote,
   ProjectRequest,
   ProjectRequestStatus,
+  ProjectTask,
   ResolveProjectIssueInput,
 } from '../../../../packages/projectops/src/index.ts';
 
@@ -131,6 +134,16 @@ export interface ProjectOpsApiService {
     noteId: string,
     input: ArchiveProjectNoteInput
   ): Promise<ProjectNote>;
+  createProjectTask(
+    projectRequestId: string,
+    input: NewProjectTaskInput
+  ): Promise<ProjectTask>;
+  listProjectTasks(projectRequestId: string): Promise<readonly ProjectTask[]>;
+  completeProjectTask(
+    projectRequestId: string,
+    taskId: string,
+    input: CompleteProjectTaskInput
+  ): Promise<ProjectTask>;
   createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -407,6 +420,32 @@ export function createProjectOpsRoutes(
             params.id,
             params.noteId,
             readArchiveNoteInput(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/tasks',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectTasks(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/tasks',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectTask(params.id, readTaskInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/tasks/:taskId/complete',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.completeProjectTask(
+            params.id,
+            params.taskId,
+            readCompleteTaskInput(request.body, clock)
           )
         ),
     },
@@ -770,6 +809,35 @@ function readArchiveNoteInput(
   });
 }
 
+function readTaskInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectTaskInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    title: readString(value.title, 'title'),
+    description: readOptionalString(value.description, 'description'),
+    assignee: readOptionalString(value.assignee, 'assignee'),
+    priority: readOptionalTaskPriority(value.priority),
+    dueAtIso: readOptionalString(value.dueAtIso, 'dueAtIso'),
+    createdAtIso: readOptionalString(value.createdAtIso, 'createdAtIso') ?? clock(),
+  });
+}
+
+function readCompleteTaskInput(
+  body: unknown,
+  clock: () => string
+): CompleteProjectTaskInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    completedBy: readString(value.completedBy, 'completedBy'),
+    completedAtIso: readOptionalString(value.completedAtIso, 'completedAtIso') ?? clock(),
+  });
+}
+
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
@@ -870,6 +938,12 @@ function readOptionalNoteVisibility(value: unknown): NewProjectNoteInput['visibi
   if (value === undefined || value === null) return undefined;
   if (value === 'internal' || value === 'client') return value;
   throw new HttpError(400, 'INVALID_PROJECTOPS_NOTE_VISIBILITY', 'Unsupported project note visibility.');
+}
+
+function readOptionalTaskPriority(value: unknown): NewProjectTaskInput['priority'] {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  throw new HttpError(400, 'INVALID_PROJECTOPS_TASK_PRIORITY', 'Unsupported project task priority.');
 }
 
 function readActivityEventType(value: unknown): NewProjectActivityInput['eventType'] {
