@@ -1,13 +1,17 @@
 import { unitTest, assert } from '../packages/testing-kit/src/unit/index.ts';
 import {
   ProjectOpsRepository,
+  approveProjectRequest,
   composeProjectOpsDashboard,
   createClient,
   createProjectRequest,
+  estimateProjectRequest,
   insertClientSql,
   insertProjectRequestSql,
   projectOpsSchemaSql,
   transitionProjectRequest,
+  type ApproveProjectRequestInput,
+  type EstimateProjectRequestInput,
   type NewClientInput,
   type NewProjectRequestInput,
   type ProjectOpsClient,
@@ -22,6 +26,7 @@ import { composeProjectOpsDashboardPage } from '../apps/web/src/projectops/dashb
 
 const T0 = '2026-09-29T08:00:00.000Z';
 const T1 = '2026-09-29T09:00:00.000Z';
+const T2 = '2026-09-29T10:00:00.000Z';
 
 unitTest('PROJECTOPS-001: client to project request workflow enforces legal vertical slice states', () => {
   const client = createClient({
@@ -46,6 +51,22 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   const estimated = transitionProjectRequest(request, 'estimated', T1);
   assert.equal(estimated.status, 'estimated');
   assert.equal(estimated.updatedAtIso, T1);
+
+  const estimatedWithValue = estimateProjectRequest(request, {
+    amountCents: 250000,
+    currency: 'usd',
+    estimatedAtIso: T1,
+  });
+  assert.equal(estimatedWithValue.status, 'estimated');
+  assert.equal(estimatedWithValue.estimateAmountCents, 250000);
+  assert.equal(estimatedWithValue.estimateCurrency, 'USD');
+
+  const approved = approveProjectRequest(estimatedWithValue, {
+    approvedBy: 'Boulos',
+    approvedAtIso: T2,
+  });
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.approvedBy, 'Boulos');
 
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
@@ -75,7 +96,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_clients/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_requests/);
   assert.match(clientInsert.sql, /\$1/);
-  assert.match(requestInsert.sql, /\$10/);
+  assert.match(requestInsert.sql, /\$15/);
   assert.equal(clientInsert.sql.includes('Zad Studio'), false);
   assert.equal(requestInsert.sql.includes('Operations dashboard'), false);
   assert.deepEqual(clientInsert.params.slice(0, 2), ['client-1', 'Zad Studio']);
@@ -171,11 +192,51 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(transitionRes.status, 200);
     assert.equal((await transitionRes.json() as ProjectRequest).status, 'estimated');
 
+    const estimateRes = await fetch(`${server.origin}/projectops/project-requests/req-1/estimate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ amountCents: 180000, currency: 'USD', estimatedAtIso: T1 }),
+    });
+    assert.equal(estimateRes.status, 400);
+
+    const request2Res = await fetch(`${server.origin}/projectops/project-requests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'req-2',
+        clientId: 'client-1',
+        title: 'Estimate command',
+        brief: 'Show explicit estimate and approval commands.',
+      }),
+    });
+    assert.equal(request2Res.status, 200);
+
+    const estimate2Res = await fetch(`${server.origin}/projectops/project-requests/req-2/estimate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ amountCents: 180000, currency: 'USD', estimatedAtIso: T1 }),
+    });
+    const estimated2 = await estimate2Res.json() as ProjectRequest;
+    assert.equal(estimate2Res.status, 200);
+    assert.equal(estimated2.status, 'estimated');
+    assert.equal(estimated2.estimateAmountCents, 180000);
+
+    const approve2Res = await fetch(`${server.origin}/projectops/project-requests/req-2/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approvedBy: 'Boulos', approvedAtIso: T2 }),
+    });
+    const approved2 = await approve2Res.json() as ProjectRequest;
+    assert.equal(approve2Res.status, 200);
+    assert.equal(approved2.status, 'approved');
+    assert.equal(approved2.approvedBy, 'Boulos');
+
     const dashboardRes = await fetch(`${server.origin}/projectops/dashboard`);
     assert.equal(dashboardRes.status, 200);
     const dashboard = await dashboardRes.json() as ProjectOpsDashboardView;
-    assert.equal(dashboard.totalActiveRequests, 1);
+    assert.equal(dashboard.totalActiveRequests, 2);
     assert.equal(dashboard.byStatus.estimated, 1);
+    assert.equal(dashboard.byStatus.approved, 1);
   } finally {
     await server.close();
   }
@@ -191,6 +252,11 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       priority: 'medium',
       status: 'approved',
       deadlineIso: '2026-10-10T00:00:00.000Z',
+      estimateAmountCents: 250000,
+      estimateCurrency: 'USD',
+      estimatedAtIso: T1,
+      approvedAtIso: T2,
+      approvedBy: 'Boulos',
       updatedAtIso: T1,
     },
   ]);
@@ -305,6 +371,30 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
     async getProjectRequest(id: string): Promise<ProjectRequest | undefined> {
       return requests.get(id);
     },
+    async estimateProjectRequest(
+      id: string,
+      input: EstimateProjectRequestInput
+    ): Promise<ProjectRequest> {
+      const current = requests.get(id);
+      if (!current) {
+        throw new Error(`Project request not found: ${id}`);
+      }
+      const next = estimateProjectRequest(current, input);
+      requests.set(next.id, next);
+      return next;
+    },
+    async approveProjectRequest(
+      id: string,
+      input: ApproveProjectRequestInput
+    ): Promise<ProjectRequest> {
+      const current = requests.get(id);
+      if (!current) {
+        throw new Error(`Project request not found: ${id}`);
+      }
+      const next = approveProjectRequest(current, input);
+      requests.set(next.id, next);
+      return next;
+    },
     async transitionProjectRequest(
       id: string,
       nextStatus: ProjectRequestStatus,
@@ -331,6 +421,11 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             priority: request.priority,
             status: request.status,
             deadlineIso: request.deadlineIso,
+            estimateAmountCents: request.estimateAmountCents,
+            estimateCurrency: request.estimateCurrency,
+            estimatedAtIso: request.estimatedAtIso,
+            approvedAtIso: request.approvedAtIso,
+            approvedBy: request.approvedBy,
             updatedAtIso: request.updatedAtIso,
           };
         })
