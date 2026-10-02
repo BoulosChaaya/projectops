@@ -3,6 +3,18 @@ export type ProjectPriority = 'low' | 'medium' | 'high';
 export type ProjectMilestoneStatus = 'open' | 'completed';
 export type ProjectDeliverableStatus = 'submitted' | 'accepted';
 export type ProjectInvoiceStatus = 'issued' | 'paid';
+export type ProjectActivityEventType =
+  | 'request_created'
+  | 'request_estimated'
+  | 'request_approved'
+  | 'status_changed'
+  | 'milestone_created'
+  | 'milestone_completed'
+  | 'deliverable_submitted'
+  | 'deliverable_accepted'
+  | 'invoice_issued'
+  | 'invoice_paid'
+  | 'note_added';
 export type ProjectRequestStatus =
   | 'new'
   | 'estimated'
@@ -75,6 +87,16 @@ export interface ProjectInvoice {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectActivity {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly eventType: ProjectActivityEventType;
+  readonly summary: string;
+  readonly actor?: string;
+  readonly happenedAtIso: string;
+  readonly createdAtIso: string;
+}
+
 export interface NewClientInput {
   readonly id: string;
   readonly name: string;
@@ -133,6 +155,15 @@ export interface NewProjectInvoiceInput {
   readonly dueAtIso?: string;
 }
 
+export interface NewProjectActivityInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly eventType: ProjectActivityEventType;
+  readonly summary: string;
+  readonly actor?: string;
+  readonly happenedAtIso: string;
+}
+
 export class ProjectOpsValidationError extends Error {
   readonly code: string;
 
@@ -186,6 +217,20 @@ export const projectInvoiceStatuses = Object.freeze([
   'issued',
   'paid',
 ] satisfies readonly ProjectInvoiceStatus[]);
+
+export const projectActivityEventTypes = Object.freeze([
+  'request_created',
+  'request_estimated',
+  'request_approved',
+  'status_changed',
+  'milestone_created',
+  'milestone_completed',
+  'deliverable_submitted',
+  'deliverable_accepted',
+  'invoice_issued',
+  'invoice_paid',
+  'note_added',
+] satisfies readonly ProjectActivityEventType[]);
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -496,6 +541,39 @@ export function markProjectInvoicePaid(
     status: 'paid',
     paidAtIso: paidAt,
     updatedAtIso: paidAt,
+  });
+}
+
+export function createProjectActivity(
+  request: ProjectRequest,
+  input: NewProjectActivityInput
+): ProjectActivity {
+  const id = requireIdentifier('projectActivity.id', input.id);
+  const projectRequestId = requireIdentifier('projectActivity.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_ACTIVITY_REQUEST_MISMATCH',
+      'Project activity must belong to the selected project request.'
+    );
+  }
+
+  if (!projectActivityEventTypes.includes(input.eventType)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_ACTIVITY_EVENT_TYPE',
+      `Unsupported project activity event type: ${input.eventType}`
+    );
+  }
+
+  const happenedAtIso = assertIsoTimestamp('projectActivity.happenedAtIso', input.happenedAtIso);
+  return Object.freeze({
+    id,
+    projectRequestId,
+    eventType: input.eventType,
+    summary: requireText('projectActivity.summary', input.summary, 500),
+    actor: optionalText('projectActivity.actor', input.actor, 120),
+    happenedAtIso,
+    createdAtIso: happenedAtIso,
   });
 }
 
