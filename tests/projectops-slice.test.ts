@@ -20,6 +20,7 @@ import {
   createProjectNote,
   createProjectRequest,
   createProjectTask,
+  createProjectWorkLog,
   estimateProjectRequest,
   markProjectInvoicePaid,
   rejectProjectChangeRequest,
@@ -49,6 +50,7 @@ import {
   type NewProjectNoteInput,
   type NewProjectRequestInput,
   type NewProjectTaskInput,
+  type NewProjectWorkLogInput,
   type ProjectDeliverable,
   type ProjectActivity,
   type ProjectChangeRequest,
@@ -63,6 +65,7 @@ import {
   type ProjectRequest,
   type ProjectRequestStatus,
   type ProjectTask,
+  type ProjectWorkLog,
   type ResolveProjectIssueInput,
   type SqlStatement,
 } from '../packages/projectops/src/index.ts';
@@ -278,6 +281,20 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(completedTask.status, 'completed');
   assert.equal(completedTask.completedBy, 'Boulos');
 
+  const workLog = createProjectWorkLog(approved, {
+    id: 'work-1',
+    projectRequestId: request.id,
+    taskId: task.id,
+    actor: 'Boulos',
+    minutes: 120,
+    billable: true,
+    note: 'Completed launch QA checklist.',
+    loggedAtIso: T3,
+  });
+  assert.equal(workLog.minutes, 120);
+  assert.equal(workLog.billable, true);
+  assert.equal(workLog.taskId, task.id);
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -313,6 +330,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_documents/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_notes/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_tasks/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_work_logs/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
@@ -772,6 +790,29 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(completedTask.status, 'completed');
     assert.equal(completedTask.completedBy, 'Boulos');
 
+    const workLogRes = await fetch(`${server.origin}/projectops/project-requests/req-2/work-logs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'work-1',
+        taskId: 'task-1',
+        actor: 'Boulos',
+        minutes: 120,
+        billable: true,
+        note: 'Completed launch QA checklist.',
+        loggedAtIso: T3,
+      }),
+    });
+    const workLog = await workLogRes.json() as ProjectWorkLog;
+    assert.equal(workLogRes.status, 200);
+    assert.equal(workLog.minutes, 120);
+    assert.equal(workLog.billable, true);
+
+    const workLogsRes = await fetch(`${server.origin}/projectops/project-requests/req-2/work-logs`);
+    assert.equal(workLogsRes.status, 200);
+    const workLogs = await workLogsRes.json() as readonly ProjectWorkLog[];
+    assert.equal(workLogs.length, 1);
+
     const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -821,6 +862,9 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.openTasks, 0);
     assert.equal(dashboard.highOpenTasks, 0);
     assert.equal(dashboard.completedTasks, 1);
+    assert.equal(dashboard.workLogs, 1);
+    assert.equal(dashboard.billableWorkMinutes, 120);
+    assert.equal(dashboard.nonBillableWorkMinutes, 0);
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -871,6 +915,10 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       highOpenTaskCount: 1,
       completedTaskCount: 1,
       nextTaskDueAtIso: T3,
+      workLogCount: 2,
+      billableWorkMinutes: 180,
+      nonBillableWorkMinutes: 30,
+      latestWorkLoggedAtIso: T3,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -969,6 +1017,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const documents = new Map<string, ProjectDocument>();
   const notes = new Map<string, ProjectNote>();
   const tasks = new Map<string, ProjectTask>();
+  const workLogs = new Map<string, ProjectWorkLog>();
   const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
@@ -1320,6 +1369,32 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       tasks.set(key, next);
       return next;
     },
+    async createProjectWorkLog(
+      projectRequestId: string,
+      input: NewProjectWorkLogInput
+    ): Promise<ProjectWorkLog> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      if (input.taskId && !tasks.has(taskKey(projectRequestId, input.taskId))) {
+        throw new Error(`Project task not found: ${projectRequestId}/${input.taskId}`);
+      }
+      const workLog = createProjectWorkLog(request, input);
+      workLogs.set(workLogKey(projectRequestId, workLog.id), workLog);
+      return workLog;
+    },
+    async listProjectWorkLogs(projectRequestId: string): Promise<readonly ProjectWorkLog[]> {
+      return Object.freeze(
+        [...workLogs.values()]
+          .filter((workLog) => workLog.projectRequestId === projectRequestId)
+          .sort((a, b) => (
+            b.loggedAtIso.localeCompare(a.loggedAtIso) ||
+            b.createdAtIso.localeCompare(a.createdAtIso) ||
+            a.id.localeCompare(b.id)
+          ))
+      );
+    },
     async createProjectActivity(
       projectRequestId: string,
       input: NewProjectActivityInput
@@ -1420,6 +1495,10 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             highOpenTaskCount: countHighOpenTasks(tasks, request.id),
             completedTaskCount: countTasks(tasks, request.id, 'completed'),
             nextTaskDueAtIso: nextOpenTaskDueAt(tasks, request.id),
+            workLogCount: countWorkLogs(workLogs, request.id),
+            billableWorkMinutes: sumWorkMinutes(workLogs, request.id, true),
+            nonBillableWorkMinutes: sumWorkMinutes(workLogs, request.id, false),
+            latestWorkLoggedAtIso: latestWorkLog(workLogs, request.id)?.loggedAtIso,
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -1464,6 +1543,10 @@ function noteKey(projectRequestId: string, noteId: string): string {
 
 function taskKey(projectRequestId: string, taskId: string): string {
   return `${projectRequestId}\0${taskId}`;
+}
+
+function workLogKey(projectRequestId: string, workLogId: string): string {
+  return `${projectRequestId}\0${workLogId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -1621,6 +1704,38 @@ function nextOpenTaskDueAt(
       b.createdAtIso.localeCompare(a.createdAtIso) ||
       a.id.localeCompare(b.id)
     ))[0]?.dueAtIso;
+}
+
+function countWorkLogs(
+  workLogs: ReadonlyMap<string, ProjectWorkLog>,
+  projectRequestId: string
+): number {
+  return [...workLogs.values()].filter(
+    (workLog) => workLog.projectRequestId === projectRequestId
+  ).length;
+}
+
+function sumWorkMinutes(
+  workLogs: ReadonlyMap<string, ProjectWorkLog>,
+  projectRequestId: string,
+  billable: boolean
+): number {
+  return [...workLogs.values()]
+    .filter((workLog) => workLog.projectRequestId === projectRequestId && workLog.billable === billable)
+    .reduce((total, workLog) => total + workLog.minutes, 0);
+}
+
+function latestWorkLog(
+  workLogs: ReadonlyMap<string, ProjectWorkLog>,
+  projectRequestId: string
+): ProjectWorkLog | undefined {
+  return [...workLogs.values()]
+    .filter((workLog) => workLog.projectRequestId === projectRequestId)
+    .sort((a, b) => (
+      b.loggedAtIso.localeCompare(a.loggedAtIso) ||
+      b.createdAtIso.localeCompare(a.createdAtIso) ||
+      a.id.localeCompare(b.id)
+    ))[0];
 }
 
 function latestActivity(
