@@ -25,6 +25,7 @@ import type {
   NewProjectNoteInput,
   NewProjectRequestInput,
   NewProjectTaskInput,
+  NewProjectWorkLogInput,
   ProjectDeliverable,
   ProjectActivity,
   ProjectChangeRequest,
@@ -39,6 +40,7 @@ import type {
   ProjectRequest,
   ProjectRequestStatus,
   ProjectTask,
+  ProjectWorkLog,
   ResolveProjectIssueInput,
 } from '../../../../packages/projectops/src/index.ts';
 
@@ -144,6 +146,11 @@ export interface ProjectOpsApiService {
     taskId: string,
     input: CompleteProjectTaskInput
   ): Promise<ProjectTask>;
+  createProjectWorkLog(
+    projectRequestId: string,
+    input: NewProjectWorkLogInput
+  ): Promise<ProjectWorkLog>;
+  listProjectWorkLogs(projectRequestId: string): Promise<readonly ProjectWorkLog[]>;
   createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -447,6 +454,20 @@ export function createProjectOpsRoutes(
             params.taskId,
             readCompleteTaskInput(request.body, clock)
           )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/work-logs',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectWorkLogs(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/work-logs',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectWorkLog(params.id, readWorkLogInput(params.id, request.body, clock))
         ),
     },
     {
@@ -838,6 +859,24 @@ function readCompleteTaskInput(
   });
 }
 
+function readWorkLogInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectWorkLogInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    taskId: readOptionalString(value.taskId, 'taskId'),
+    actor: readString(value.actor, 'actor'),
+    minutes: readPositiveInteger(value.minutes, 'minutes'),
+    billable: readOptionalBoolean(value.billable, 'billable'),
+    note: readOptionalString(value.note, 'note'),
+    loggedAtIso: readOptionalString(value.loggedAtIso, 'loggedAtIso') ?? clock(),
+  });
+}
+
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
@@ -883,6 +922,14 @@ function readString(value: unknown, field: string): string {
 function readOptionalString(value: unknown, field: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'string') {
+    throw new HttpError(400, 'INVALID_PROJECTOPS_FIELD', `Invalid field: ${field}.`);
+  }
+  return value;
+}
+
+function readOptionalBoolean(value: unknown, field: string): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'boolean') {
     throw new HttpError(400, 'INVALID_PROJECTOPS_FIELD', `Invalid field: ${field}.`);
   }
   return value;
