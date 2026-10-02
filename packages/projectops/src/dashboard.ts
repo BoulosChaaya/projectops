@@ -17,6 +17,10 @@ export interface ProjectOpsDashboardRow {
   readonly completedMilestoneCount?: number;
   readonly submittedDeliverableCount?: number;
   readonly acceptedDeliverableCount?: number;
+  readonly issuedInvoiceCount?: number;
+  readonly paidInvoiceCount?: number;
+  readonly outstandingInvoiceAmountCents?: number;
+  readonly paidInvoiceAmountCents?: number;
   readonly updatedAtIso: string;
 }
 
@@ -28,6 +32,10 @@ export interface ProjectOpsDashboardView {
   readonly completedMilestones: number;
   readonly submittedDeliverables: number;
   readonly acceptedDeliverables: number;
+  readonly issuedInvoices: number;
+  readonly paidInvoices: number;
+  readonly outstandingInvoiceAmountCents: number;
+  readonly paidInvoiceAmountCents: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -49,6 +57,10 @@ export function composeProjectOpsDashboard(
   let completedMilestones = 0;
   let submittedDeliverables = 0;
   let acceptedDeliverables = 0;
+  let issuedInvoices = 0;
+  let paidInvoices = 0;
+  let outstandingInvoiceAmountCents = 0;
+  let paidInvoiceAmountCents = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -60,6 +72,10 @@ export function composeProjectOpsDashboard(
     completedMilestones += row.completedMilestoneCount ?? 0;
     submittedDeliverables += row.submittedDeliverableCount ?? 0;
     acceptedDeliverables += row.acceptedDeliverableCount ?? 0;
+    issuedInvoices += row.issuedInvoiceCount ?? 0;
+    paidInvoices += row.paidInvoiceCount ?? 0;
+    outstandingInvoiceAmountCents += row.outstandingInvoiceAmountCents ?? 0;
+    paidInvoiceAmountCents += row.paidInvoiceAmountCents ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -73,6 +89,10 @@ export function composeProjectOpsDashboard(
     completedMilestones,
     submittedDeliverables,
     acceptedDeliverables,
+    issuedInvoices,
+    paidInvoices,
+    outstandingInvoiceAmountCents,
+    paidInvoiceAmountCents,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
