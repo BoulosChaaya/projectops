@@ -9,11 +9,13 @@ import type {
   ApproveProjectRequestInput,
   EstimateProjectRequestInput,
   NewClientInput,
+  NewProjectActivityInput,
   NewProjectDeliverableInput,
   NewProjectInvoiceInput,
   NewProjectMilestoneInput,
   NewProjectRequestInput,
   ProjectDeliverable,
+  ProjectActivity,
   ProjectInvoice,
   ProjectOpsClient,
   ProjectOpsDashboardView,
@@ -59,6 +61,11 @@ export interface ProjectOpsApiService {
     invoiceId: string,
     paidAtIso: string
   ): Promise<ProjectInvoice>;
+  createProjectActivity(
+    projectRequestId: string,
+    input: NewProjectActivityInput
+  ): Promise<ProjectActivity>;
+  listProjectActivities(projectRequestId: string): Promise<readonly ProjectActivity[]>;
   estimateProjectRequest(
     id: string,
     input: EstimateProjectRequestInput
@@ -186,6 +193,20 @@ export function createProjectOpsRoutes(
             params.invoiceId,
             readPaidAtIso(request.body, clock)
           )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/activities',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectActivities(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/activities',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectActivity(params.id, readActivityInput(params.id, request.body, clock))
         ),
     },
     {
@@ -394,6 +415,22 @@ function readPaidAtIso(body: unknown, clock: () => string): string {
   return readOptionalString(value.paidAtIso, 'paidAtIso') ?? clock();
 }
 
+function readActivityInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectActivityInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    eventType: readActivityEventType(value.eventType),
+    summary: readString(value.summary, 'summary'),
+    actor: readOptionalString(value.actor, 'actor'),
+    happenedAtIso: readOptionalString(value.happenedAtIso, 'happenedAtIso') ?? clock(),
+  });
+}
+
 function readRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new HttpError(400, 'INVALID_PROJECTOPS_PAYLOAD', 'Expected a JSON object.');
@@ -441,4 +478,23 @@ function readStatus(value: unknown): ProjectRequestStatus {
     return value;
   }
   throw new HttpError(400, 'INVALID_PROJECTOPS_STATUS', 'Unsupported project request status.');
+}
+
+function readActivityEventType(value: unknown): NewProjectActivityInput['eventType'] {
+  if (
+    value === 'request_created' ||
+    value === 'request_estimated' ||
+    value === 'request_approved' ||
+    value === 'status_changed' ||
+    value === 'milestone_created' ||
+    value === 'milestone_completed' ||
+    value === 'deliverable_submitted' ||
+    value === 'deliverable_accepted' ||
+    value === 'invoice_issued' ||
+    value === 'invoice_paid' ||
+    value === 'note_added'
+  ) {
+    return value;
+  }
+  throw new HttpError(400, 'INVALID_PROJECTOPS_ACTIVITY_EVENT_TYPE', 'Unsupported project activity event type.');
 }
