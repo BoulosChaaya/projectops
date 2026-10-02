@@ -4,6 +4,8 @@ export type ProjectMilestoneStatus = 'open' | 'completed';
 export type ProjectDeliverableStatus = 'submitted' | 'accepted';
 export type ProjectInvoiceStatus = 'issued' | 'paid';
 export type ProjectChangeRequestStatus = 'proposed' | 'approved' | 'rejected';
+export type ProjectIssueStatus = 'open' | 'resolved';
+export type ProjectIssueSeverity = 'low' | 'medium' | 'high';
 export type ProjectActivityEventType =
   | 'request_created'
   | 'request_estimated'
@@ -104,6 +106,20 @@ export interface ProjectChangeRequest {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectIssue {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly severity: ProjectIssueSeverity;
+  readonly owner?: string;
+  readonly status: ProjectIssueStatus;
+  readonly openedAtIso: string;
+  readonly resolvedAtIso?: string;
+  readonly resolutionNote?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface ProjectActivity {
   readonly id: string;
   readonly projectRequestId: string;
@@ -189,6 +205,21 @@ export interface DecideProjectChangeRequestInput {
   readonly decisionNote?: string;
 }
 
+export interface NewProjectIssueInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly severity?: ProjectIssueSeverity;
+  readonly owner?: string;
+  readonly openedAtIso: string;
+}
+
+export interface ResolveProjectIssueInput {
+  readonly resolvedAtIso: string;
+  readonly resolutionNote?: string;
+}
+
 export interface NewProjectActivityInput {
   readonly id: string;
   readonly projectRequestId: string;
@@ -257,6 +288,17 @@ export const projectChangeRequestStatuses = Object.freeze([
   'approved',
   'rejected',
 ] satisfies readonly ProjectChangeRequestStatus[]);
+
+export const projectIssueStatuses = Object.freeze([
+  'open',
+  'resolved',
+] satisfies readonly ProjectIssueStatus[]);
+
+export const projectIssueSeverities = Object.freeze([
+  'low',
+  'medium',
+  'high',
+] satisfies readonly ProjectIssueSeverity[]);
 
 export const projectActivityEventTypes = Object.freeze([
   'request_created',
@@ -652,6 +694,72 @@ export function rejectProjectChangeRequest(
   input: DecideProjectChangeRequestInput
 ): ProjectChangeRequest {
   return decideProjectChangeRequest(changeRequest, 'rejected', input);
+}
+
+export function createProjectIssue(
+  request: ProjectRequest,
+  input: NewProjectIssueInput
+): ProjectIssue {
+  if (request.status === 'new' || request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_ISSUES',
+      'Project request must be estimated, approved, in progress, or delivered before adding issues.'
+    );
+  }
+
+  const id = requireIdentifier('projectIssue.id', input.id);
+  const projectRequestId = requireIdentifier('projectIssue.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_ISSUE_REQUEST_MISMATCH',
+      'Project issue must belong to the selected project request.'
+    );
+  }
+
+  const severity = input.severity ?? 'medium';
+  if (!projectIssueSeverities.includes(severity)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_ISSUE_SEVERITY',
+      `Unsupported project issue severity: ${severity}`
+    );
+  }
+
+  const openedAtIso = assertIsoTimestamp('projectIssue.openedAtIso', input.openedAtIso);
+  return Object.freeze({
+    id,
+    projectRequestId,
+    title: requireText('projectIssue.title', input.title, 160),
+    description: requireText('projectIssue.description', input.description, 2000),
+    severity,
+    owner: optionalText('projectIssue.owner', input.owner, 120),
+    status: 'open',
+    openedAtIso,
+    updatedAtIso: openedAtIso,
+  });
+}
+
+export function resolveProjectIssue(
+  issue: ProjectIssue,
+  input: ResolveProjectIssueInput
+): ProjectIssue {
+  if (issue.status === 'resolved') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_ISSUE_ALREADY_RESOLVED',
+      'Project issue is already resolved.'
+    );
+  }
+
+  const resolvedAtIso = assertIsoTimestamp('projectIssue.resolvedAtIso', input.resolvedAtIso);
+  return Object.freeze({
+    ...issue,
+    status: 'resolved',
+    resolvedAtIso,
+    resolutionNote: optionalText('projectIssue.resolutionNote', input.resolutionNote, 500),
+    updatedAtIso: resolvedAtIso,
+  });
 }
 
 export function createProjectActivity(
