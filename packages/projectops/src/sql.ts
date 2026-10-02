@@ -21,6 +21,11 @@ export const projectOpsSchemaSql = Object.freeze([
     brief TEXT NOT NULL,
     budget_range TEXT,
     deadline_at TIMESTAMPTZ,
+    estimate_amount_cents INTEGER CHECK (estimate_amount_cents IS NULL OR estimate_amount_cents > 0),
+    estimate_currency TEXT CHECK (estimate_currency IS NULL OR estimate_currency ~ '^[A-Z]{3}$'),
+    estimated_at TIMESTAMPTZ,
+    approved_at TIMESTAMPTZ,
+    approved_by TEXT,
     priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high')),
     status TEXT NOT NULL CHECK (
       status IN ('new', 'estimated', 'approved', 'in_progress', 'delivered', 'archived')
@@ -54,8 +59,22 @@ export function insertClientSql(client: ProjectOpsClient): SqlStatement {
 export function insertProjectRequestSql(request: ProjectRequest): SqlStatement {
   return Object.freeze({
     sql: `INSERT INTO projectops_project_requests (
-      id, client_id, title, brief, budget_range, deadline_at, priority, status, created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      id,
+      client_id,
+      title,
+      brief,
+      budget_range,
+      deadline_at,
+      estimate_amount_cents,
+      estimate_currency,
+      estimated_at,
+      approved_at,
+      approved_by,
+      priority,
+      status,
+      created_at,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     RETURNING *`,
     params: Object.freeze([
       request.id,
@@ -64,9 +83,56 @@ export function insertProjectRequestSql(request: ProjectRequest): SqlStatement {
       request.brief,
       request.budgetRange ?? null,
       request.deadlineIso ?? null,
+      request.estimateAmountCents ?? null,
+      request.estimateCurrency ?? null,
+      request.estimatedAtIso ?? null,
+      request.approvedAtIso ?? null,
+      request.approvedBy ?? null,
       request.priority,
       request.status,
       request.createdAtIso,
+      request.updatedAtIso,
+    ]),
+  });
+}
+
+export function estimateProjectRequestSql(request: ProjectRequest): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_requests
+      SET
+        estimate_amount_cents = $2,
+        estimate_currency = $3,
+        estimated_at = $4,
+        status = $5,
+        updated_at = $6
+      WHERE id = $1
+      RETURNING *`,
+    params: Object.freeze([
+      request.id,
+      request.estimateAmountCents ?? null,
+      request.estimateCurrency ?? null,
+      request.estimatedAtIso ?? null,
+      request.status,
+      request.updatedAtIso,
+    ]),
+  });
+}
+
+export function approveProjectRequestSql(request: ProjectRequest): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_requests
+      SET
+        approved_at = $2,
+        approved_by = $3,
+        status = $4,
+        updated_at = $5
+      WHERE id = $1
+      RETURNING *`,
+    params: Object.freeze([
+      request.id,
+      request.approvedAtIso ?? null,
+      request.approvedBy ?? null,
+      request.status,
       request.updatedAtIso,
     ]),
   });
@@ -132,6 +198,11 @@ export function selectDashboardRowsSql(): SqlStatement {
       pr.priority,
       pr.status,
       pr.deadline_at,
+      pr.estimate_amount_cents,
+      pr.estimate_currency,
+      pr.estimated_at,
+      pr.approved_at,
+      pr.approved_by,
       pr.updated_at
     FROM projectops_project_requests pr
     JOIN projectops_clients c ON c.id = pr.client_id
