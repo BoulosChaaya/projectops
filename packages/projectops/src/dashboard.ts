@@ -32,6 +32,9 @@ export interface ProjectOpsDashboardRow {
   readonly negativeOpenFeedbackCount?: number;
   readonly activeDocumentCount?: number;
   readonly archivedDocumentCount?: number;
+  readonly activeNoteCount?: number;
+  readonly archivedNoteCount?: number;
+  readonly clientVisibleNoteCount?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
@@ -60,6 +63,9 @@ export interface ProjectOpsDashboardView {
   readonly negativeOpenFeedback: number;
   readonly activeDocuments: number;
   readonly archivedDocuments: number;
+  readonly activeNotes: number;
+  readonly archivedNotes: number;
+  readonly clientVisibleNotes: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -96,6 +102,9 @@ export function composeProjectOpsDashboard(
   let negativeOpenFeedback = 0;
   let activeDocuments = 0;
   let archivedDocuments = 0;
+  let activeNotes = 0;
+  let archivedNotes = 0;
+  let clientVisibleNotes = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -122,6 +131,9 @@ export function composeProjectOpsDashboard(
     negativeOpenFeedback += row.negativeOpenFeedbackCount ?? 0;
     activeDocuments += row.activeDocumentCount ?? 0;
     archivedDocuments += row.archivedDocumentCount ?? 0;
+    activeNotes += row.activeNoteCount ?? 0;
+    archivedNotes += row.archivedNoteCount ?? 0;
+    clientVisibleNotes += row.clientVisibleNoteCount ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -150,6 +162,9 @@ export function composeProjectOpsDashboard(
     negativeOpenFeedback,
     activeDocuments,
     archivedDocuments,
+    activeNotes,
+    archivedNotes,
+    clientVisibleNotes,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
