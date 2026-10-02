@@ -1,6 +1,7 @@
 import {
   ProjectOpsOperationError,
   acceptProjectDeliverable,
+  addressProjectFeedback,
   approveProjectChangeRequest,
   approveProjectRequest,
   completeProjectMilestone,
@@ -8,6 +9,7 @@ import {
   createProjectActivity,
   createClient,
   createProjectDeliverable,
+  createProjectFeedback,
   createProjectInvoice,
   createProjectIssue,
   createProjectMilestone,
@@ -17,12 +19,14 @@ import {
   rejectProjectChangeRequest,
   resolveProjectIssue,
   transitionProjectRequest,
+  type AddressProjectFeedbackInput,
   type ApproveProjectRequestInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
+  type NewProjectFeedbackInput,
   type NewProjectInvoiceInput,
   type NewProjectIssueInput,
   type NewProjectMilestoneInput,
@@ -31,6 +35,7 @@ import {
   type ProjectActivity,
   type ProjectChangeRequest,
   type ProjectDeliverable,
+  type ProjectFeedback,
   type ProjectInvoice,
   type ProjectIssue,
   type ProjectOpsClient,
@@ -41,6 +46,7 @@ import {
 } from './domain.ts';
 import {
   acceptProjectDeliverableSql,
+  addressProjectFeedbackSql,
   approveProjectRequestSql,
   completeProjectMilestoneSql,
   estimateProjectRequestSql,
@@ -48,6 +54,7 @@ import {
   insertProjectActivitySql,
   insertProjectChangeRequestSql,
   insertProjectDeliverableSql,
+  insertProjectFeedbackSql,
   insertProjectInvoiceSql,
   insertProjectIssueSql,
   insertProjectMilestoneSql,
@@ -62,6 +69,8 @@ import {
   selectProjectChangeRequestsSql,
   selectProjectDeliverableByIdSql,
   selectProjectDeliverablesSql,
+  selectProjectFeedbackByIdSql,
+  selectProjectFeedbackSql,
   selectProjectInvoiceByIdSql,
   selectProjectInvoicesSql,
   selectProjectIssueByIdSql,
@@ -448,6 +457,62 @@ export class ProjectOpsRepository {
     return this.requirePersistedProjectIssue(rows, projectRequestId, issueId);
   }
 
+  public async createProjectFeedback(
+    projectRequestId: string,
+    input: NewProjectFeedbackInput
+  ): Promise<ProjectFeedback> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const feedback = createProjectFeedback(request, input);
+    if (feedback.deliverableId) {
+      await this.requireProjectDeliverable(projectRequestId, feedback.deliverableId);
+    }
+
+    const existing = await this.getProjectFeedback(projectRequestId, feedback.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_FEEDBACK_ALREADY_EXISTS',
+        `ProjectOps project feedback already exists: ${feedback.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectFeedback>(insertProjectFeedbackSql(feedback));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project feedback insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectFeedback(
+    projectRequestId: string
+  ): Promise<readonly ProjectFeedback[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectFeedback>(selectProjectFeedbackSql(projectRequestId));
+  }
+
+  public async getProjectFeedback(
+    projectRequestId: string,
+    feedbackId: string
+  ): Promise<ProjectFeedback | undefined> {
+    const rows = await this.sql.query<ProjectFeedback>(
+      selectProjectFeedbackByIdSql(projectRequestId, feedbackId)
+    );
+    return rows[0];
+  }
+
+  public async addressProjectFeedback(
+    projectRequestId: string,
+    feedbackId: string,
+    input: AddressProjectFeedbackInput
+  ): Promise<ProjectFeedback> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectFeedback(projectRequestId, feedbackId);
+    const addressed = addressProjectFeedback(current, input);
+    const rows = await this.sql.query<ProjectFeedback>(addressProjectFeedbackSql(addressed));
+    return this.requirePersistedProjectFeedback(rows, projectRequestId, feedbackId);
+  }
+
   public async createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -615,6 +680,21 @@ export class ProjectOpsRepository {
     return issue;
   }
 
+  private async requireProjectFeedback(
+    projectRequestId: string,
+    feedbackId: string
+  ): Promise<ProjectFeedback> {
+    const feedback = await this.getProjectFeedback(projectRequestId, feedbackId);
+    if (!feedback) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_FEEDBACK_NOT_FOUND',
+        `Project feedback not found: ${feedbackId}.`
+      );
+    }
+    return feedback;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -705,6 +785,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_ISSUE_NOT_FOUND',
         `Project issue not found: ${projectRequestId}/${issueId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectFeedback(
+    rows: readonly ProjectFeedback[],
+    projectRequestId: string,
+    feedbackId: string
+  ): ProjectFeedback {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_FEEDBACK_NOT_FOUND',
+        `Project feedback not found: ${projectRequestId}/${feedbackId}.`
       );
     }
     return persisted;
