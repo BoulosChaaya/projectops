@@ -110,6 +110,25 @@ CREATE TABLE IF NOT EXISTS projectops_project_issues (
   PRIMARY KEY (project_request_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS projectops_project_feedback (
+  id TEXT NOT NULL,
+  project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+  deliverable_id TEXT,
+  author TEXT NOT NULL,
+  sentiment TEXT NOT NULL CHECK (sentiment IN ('positive', 'neutral', 'negative')),
+  message TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('open', 'addressed')),
+  received_at TIMESTAMPTZ NOT NULL,
+  addressed_at TIMESTAMPTZ,
+  addressed_by TEXT,
+  response_note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_request_id, id),
+  FOREIGN KEY (project_request_id, deliverable_id)
+    REFERENCES projectops_project_deliverables(project_request_id, id)
+    ON DELETE SET NULL (deliverable_id)
+);
+
 CREATE TABLE IF NOT EXISTS projectops_project_activities (
   id TEXT NOT NULL,
   project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -155,6 +174,9 @@ CREATE INDEX IF NOT EXISTS projectops_project_change_requests_request_status_idx
 
 CREATE INDEX IF NOT EXISTS projectops_project_issues_request_status_idx
   ON projectops_project_issues (project_request_id, status, severity);
+
+CREATE INDEX IF NOT EXISTS projectops_project_feedback_request_status_idx
+  ON projectops_project_feedback (project_request_id, status, sentiment);
 
 CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
   ON projectops_project_activities (project_request_id, happened_at DESC);
