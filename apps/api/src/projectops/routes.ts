@@ -9,8 +9,10 @@ import type {
   ApproveProjectRequestInput,
   EstimateProjectRequestInput,
   NewClientInput,
+  NewProjectDeliverableInput,
   NewProjectMilestoneInput,
   NewProjectRequestInput,
+  ProjectDeliverable,
   ProjectOpsClient,
   ProjectOpsDashboardView,
   ProjectMilestone,
@@ -35,6 +37,16 @@ export interface ProjectOpsApiService {
     milestoneId: string,
     completedAtIso: string
   ): Promise<ProjectMilestone>;
+  createProjectDeliverable(
+    projectRequestId: string,
+    input: NewProjectDeliverableInput
+  ): Promise<ProjectDeliverable>;
+  listProjectDeliverables(projectRequestId: string): Promise<readonly ProjectDeliverable[]>;
+  acceptProjectDeliverable(
+    projectRequestId: string,
+    deliverableId: string,
+    acceptedAtIso: string
+  ): Promise<ProjectDeliverable>;
   estimateProjectRequest(
     id: string,
     input: EstimateProjectRequestInput
@@ -109,6 +121,32 @@ export function createProjectOpsRoutes(
             params.id,
             params.milestoneId,
             readCompletedAtIso(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/deliverables',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectDeliverables(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/deliverables',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectDeliverable(params.id, readDeliverableInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/deliverables/:deliverableId/accept',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.acceptProjectDeliverable(
+            params.id,
+            params.deliverableId,
+            readAcceptedAtIso(request.body, clock)
           )
         ),
     },
@@ -272,6 +310,27 @@ function readMilestoneInput(
 function readCompletedAtIso(body: unknown, clock: () => string): string {
   const value = readRecord(body);
   return readOptionalString(value.completedAtIso, 'completedAtIso') ?? clock();
+}
+
+function readDeliverableInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectDeliverableInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    milestoneId: readOptionalString(value.milestoneId, 'milestoneId'),
+    title: readString(value.title, 'title'),
+    artifactUrl: readString(value.artifactUrl, 'artifactUrl'),
+    submittedAtIso: readOptionalString(value.submittedAtIso, 'submittedAtIso') ?? clock(),
+  });
+}
+
+function readAcceptedAtIso(body: unknown, clock: () => string): string {
+  const value = readRecord(body);
+  return readOptionalString(value.acceptedAtIso, 'acceptedAtIso') ?? clock();
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
