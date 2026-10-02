@@ -6,6 +6,8 @@ export type ProjectInvoiceStatus = 'issued' | 'paid';
 export type ProjectChangeRequestStatus = 'proposed' | 'approved' | 'rejected';
 export type ProjectIssueStatus = 'open' | 'resolved';
 export type ProjectIssueSeverity = 'low' | 'medium' | 'high';
+export type ProjectFeedbackStatus = 'open' | 'addressed';
+export type ProjectFeedbackSentiment = 'positive' | 'neutral' | 'negative';
 export type ProjectActivityEventType =
   | 'request_created'
   | 'request_estimated'
@@ -120,6 +122,21 @@ export interface ProjectIssue {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectFeedback {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly deliverableId?: string;
+  readonly author: string;
+  readonly sentiment: ProjectFeedbackSentiment;
+  readonly message: string;
+  readonly status: ProjectFeedbackStatus;
+  readonly receivedAtIso: string;
+  readonly addressedAtIso?: string;
+  readonly addressedBy?: string;
+  readonly responseNote?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface ProjectActivity {
   readonly id: string;
   readonly projectRequestId: string;
@@ -220,6 +237,22 @@ export interface ResolveProjectIssueInput {
   readonly resolutionNote?: string;
 }
 
+export interface NewProjectFeedbackInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly deliverableId?: string;
+  readonly author: string;
+  readonly sentiment?: ProjectFeedbackSentiment;
+  readonly message: string;
+  readonly receivedAtIso: string;
+}
+
+export interface AddressProjectFeedbackInput {
+  readonly addressedBy: string;
+  readonly addressedAtIso: string;
+  readonly responseNote?: string;
+}
+
 export interface NewProjectActivityInput {
   readonly id: string;
   readonly projectRequestId: string;
@@ -299,6 +332,17 @@ export const projectIssueSeverities = Object.freeze([
   'medium',
   'high',
 ] satisfies readonly ProjectIssueSeverity[]);
+
+export const projectFeedbackStatuses = Object.freeze([
+  'open',
+  'addressed',
+] satisfies readonly ProjectFeedbackStatus[]);
+
+export const projectFeedbackSentiments = Object.freeze([
+  'positive',
+  'neutral',
+  'negative',
+] satisfies readonly ProjectFeedbackSentiment[]);
 
 export const projectActivityEventTypes = Object.freeze([
   'request_created',
@@ -759,6 +803,73 @@ export function resolveProjectIssue(
     resolvedAtIso,
     resolutionNote: optionalText('projectIssue.resolutionNote', input.resolutionNote, 500),
     updatedAtIso: resolvedAtIso,
+  });
+}
+
+export function createProjectFeedback(
+  request: ProjectRequest,
+  input: NewProjectFeedbackInput
+): ProjectFeedback {
+  if (request.status === 'new' || request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_FEEDBACK',
+      'Project request must be estimated, approved, in progress, or delivered before adding feedback.'
+    );
+  }
+
+  const id = requireIdentifier('projectFeedback.id', input.id);
+  const projectRequestId = requireIdentifier('projectFeedback.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_FEEDBACK_REQUEST_MISMATCH',
+      'Project feedback must belong to the selected project request.'
+    );
+  }
+
+  const sentiment = input.sentiment ?? 'neutral';
+  if (!projectFeedbackSentiments.includes(sentiment)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_FEEDBACK_SENTIMENT',
+      `Unsupported project feedback sentiment: ${sentiment}`
+    );
+  }
+
+  const receivedAtIso = assertIsoTimestamp('projectFeedback.receivedAtIso', input.receivedAtIso);
+  return Object.freeze({
+    id,
+    projectRequestId,
+    deliverableId: optionalIdentifier('projectFeedback.deliverableId', input.deliverableId),
+    author: requireText('projectFeedback.author', input.author, 120),
+    sentiment,
+    message: requireText('projectFeedback.message', input.message, 2000),
+    status: 'open',
+    receivedAtIso,
+    updatedAtIso: receivedAtIso,
+  });
+}
+
+export function addressProjectFeedback(
+  feedback: ProjectFeedback,
+  input: AddressProjectFeedbackInput
+): ProjectFeedback {
+  if (feedback.status === 'addressed') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_FEEDBACK_ALREADY_ADDRESSED',
+      'Project feedback is already addressed.'
+    );
+  }
+
+  const addressedAtIso = assertIsoTimestamp('projectFeedback.addressedAtIso', input.addressedAtIso);
+  return Object.freeze({
+    ...feedback,
+    status: 'addressed',
+    addressedAtIso,
+    addressedBy: requireText('projectFeedback.addressedBy', input.addressedBy, 120),
+    responseNote: optionalText('projectFeedback.responseNote', input.responseNote, 500),
+    updatedAtIso: addressedAtIso,
   });
 }
 
