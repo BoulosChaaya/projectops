@@ -15,6 +15,7 @@ import { startHttpListener } from '../apps/api/src/bootstrap/http-listener.ts';
 
 const T0 = '2026-09-29T08:00:00.000Z';
 const T1 = '2026-09-29T09:00:00.000Z';
+const T2 = '2026-09-29T10:00:00.000Z';
 
 unitTest('PROJECTOPS-PERSIST-001: migration artifact matches source schema contract', () => {
   assert.equal(projectOpsFoundationMigration.version, '0001');
@@ -70,7 +71,15 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
     createdAtIso: T0,
   });
 
-  const transitioned = await repo.transitionProjectRequest('req-1', 'estimated', T1);
+  const transitioned = await repo.estimateProjectRequest('req-1', {
+    amountCents: 320000,
+    currency: 'USD',
+    estimatedAtIso: T1,
+  });
+  const approved = await repo.approveProjectRequest('req-1', {
+    approvedBy: 'Boulos',
+    approvedAtIso: T2,
+  });
   const clients = await repo.listClients();
   const fetchedClient = await repo.getClient('client-1');
   const requests = await repo.listProjectRequests();
@@ -79,16 +88,21 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   const snapshot = sql.snapshot();
 
   assert.equal(transitioned.status, 'estimated');
+  assert.equal(transitioned.estimateAmountCents, 320000);
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.approvedBy, 'Boulos');
   assert.equal(clients.length, 1);
   assert.equal(clients[0]?.id, 'client-1');
   assert.equal(fetchedClient?.name, 'Zad Studio');
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.id, 'req-1');
-  assert.equal(fetchedRequest?.status, 'estimated');
-  assert.equal(snapshot.projectRequests[0]?.status, 'estimated');
+  assert.equal(fetchedRequest?.status, 'approved');
+  assert.equal(fetchedRequest?.estimateCurrency, 'USD');
+  assert.equal(snapshot.projectRequests[0]?.status, 'approved');
   assert.equal(dashboard.totalActiveRequests, 1);
-  assert.equal(dashboard.byStatus.estimated, 1);
+  assert.equal(dashboard.byStatus.approved, 1);
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
+  assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
 });
 
 unitTest('PROJECTOPS-PERSIST-004: repository maps write conflicts and missing relationships to product errors', async () => {
@@ -197,10 +211,18 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(request.status, 'new');
 
     const transitioned = await expectOkJson<ProjectRequest>(
-      `${server.origin}/projectops/project-requests/req-1/status`,
-      { status: 'estimated' }
+      `${server.origin}/projectops/project-requests/req-1/estimate`,
+      { amountCents: 240000, currency: 'USD', estimatedAtIso: T1 }
     );
     assert.equal(transitioned.status, 'estimated');
+    assert.equal(transitioned.estimateAmountCents, 240000);
+
+    const approved = await expectOkJson<ProjectRequest>(
+      `${server.origin}/projectops/project-requests/req-1/approve`,
+      { approvedBy: 'Boulos', approvedAtIso: T2 }
+    );
+    assert.equal(approved.status, 'approved');
+    assert.equal(approved.approvedBy, 'Boulos');
 
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
@@ -218,7 +240,9 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
 
     const requestRes = await fetch(`${server.origin}/projectops/project-requests/req-1`);
     assert.equal(requestRes.status, 200);
-    assert.equal(((await requestRes.json()) as { status: string }).status, 'estimated');
+    const fetchedRequest = await requestRes.json() as { status: string; approvedBy?: string };
+    assert.equal(fetchedRequest.status, 'approved');
+    assert.equal(fetchedRequest.approvedBy, 'Boulos');
 
     const missingRes = await fetch(`${server.origin}/projectops/project-requests/missing`);
     assert.equal(missingRes.status, 404);
@@ -229,8 +253,8 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     const dashboard = await dashboardRes.json() as ProjectOpsDashboardView;
 
     assert.equal(dashboard.totalActiveRequests, 1);
-    assert.equal(dashboard.byStatus.estimated, 1);
-    assert.equal(sql.snapshot().projectRequests[0]?.status, 'estimated');
+    assert.equal(dashboard.byStatus.approved, 1);
+    assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
   } finally {
     await server.close();
   }
@@ -279,6 +303,10 @@ unitTest('PROJECTOPS-PERSIST-006: API exposes stable write-side error contracts'
     await expectProjectOpsError(`${server.origin}/projectops/project-requests/req-1/status`, {
       status: 'delivered',
     }, 400, 'PROJECTOPS_INVALID_STATUS_TRANSITION');
+
+    await expectProjectOpsError(`${server.origin}/projectops/project-requests/req-1/approve`, {
+      approvedBy: 'Boulos',
+    }, 400, 'PROJECTOPS_ESTIMATE_REQUIRED');
   } finally {
     await server.close();
   }
