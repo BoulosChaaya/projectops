@@ -8,6 +8,7 @@ import {
   projectOpsSchemaSql,
   type ProjectOpsDashboardView,
   type ProjectDeliverable,
+  type ProjectInvoice,
   type ProjectMilestone,
   type ProjectRequest,
 } from '../packages/projectops/src/index.ts';
@@ -101,6 +102,17 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   });
   const acceptedDeliverable = await repo.acceptProjectDeliverable('req-1', 'deliverable-1', T3);
   const deliverables = await repo.listProjectDeliverables('req-1');
+  const invoice = await repo.createProjectInvoice('req-1', {
+    id: 'invoice-1',
+    projectRequestId: 'req-1',
+    deliverableId: 'deliverable-1',
+    invoiceNumber: 'INV-001',
+    amountCents: 320000,
+    currency: 'USD',
+    issuedAtIso: T3,
+  });
+  const paidInvoice = await repo.markProjectInvoicePaid('req-1', 'invoice-1', T3);
+  const invoices = await repo.listProjectInvoices('req-1');
   const milestones = await repo.listProjectMilestones('req-1');
   const clients = await repo.listClients();
   const fetchedClient = await repo.getClient('client-1');
@@ -119,6 +131,10 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(acceptedDeliverable.status, 'accepted');
   assert.equal(deliverables.length, 1);
   assert.equal(deliverables[0]?.acceptedAtIso, T3);
+  assert.equal(invoice.status, 'issued');
+  assert.equal(paidInvoice.status, 'paid');
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices[0]?.paidAtIso, T3);
   assert.equal(milestones.length, 1);
   assert.equal(milestones[0]?.completedAtIso, T3);
   assert.equal(clients.length, 1);
@@ -131,16 +147,21 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(snapshot.projectRequests[0]?.status, 'approved');
   assert.equal(snapshot.projectMilestones[0]?.status, 'completed');
   assert.equal(snapshot.projectDeliverables[0]?.status, 'accepted');
+  assert.equal(snapshot.projectInvoices[0]?.status, 'paid');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.approved, 1);
   assert.equal(dashboard.openMilestones, 0);
   assert.equal(dashboard.completedMilestones, 1);
   assert.equal(dashboard.submittedDeliverables, 0);
   assert.equal(dashboard.acceptedDeliverables, 1);
+  assert.equal(dashboard.issuedInvoices, 0);
+  assert.equal(dashboard.paidInvoices, 1);
+  assert.equal(dashboard.paidInvoiceAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
   assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
   assert.equal(dashboard.rows[0]?.acceptedDeliverableCount, 1);
+  assert.equal(dashboard.rows[0]?.paidInvoiceAmountCents, 320000);
 });
 
 unitTest('PROJECTOPS-PERSIST-004: repository maps write conflicts and missing relationships to product errors', async () => {
@@ -181,6 +202,23 @@ unitTest('PROJECTOPS-PERSIST-004: repository maps write conflicts and missing re
       error.name === 'ProjectOpsOperationError' &&
       error.kind === 'conflict' &&
       error.code === 'PROJECTOPS_CLIENT_ALREADY_EXISTS'
+  );
+
+  await assert.rejects(
+    () =>
+      repo.createProjectInvoice('req-1', {
+        id: 'invoice-missing-deliverable',
+        projectRequestId: 'req-1',
+        deliverableId: 'missing-deliverable',
+        invoiceNumber: 'INV-MISSING',
+        amountCents: 150000,
+        currency: 'USD',
+        issuedAtIso: T2,
+      }),
+    (error: Error & { code?: string; kind?: string }) =>
+      error.name === 'ProjectOpsOperationError' &&
+      error.kind === 'not_found' &&
+      error.code === 'PROJECTOPS_DELIVERABLE_NOT_FOUND'
   );
 
   await assert.rejects(
@@ -360,6 +398,30 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     );
     assert.equal(acceptedDeliverable.status, 'accepted');
 
+    const invoice = await expectOkJson<ProjectInvoice>(
+      `${server.origin}/projectops/project-requests/req-1/invoices`,
+      {
+        id: 'invoice-1',
+        deliverableId: 'deliverable-1',
+        invoiceNumber: 'INV-001',
+        amountCents: 240000,
+        currency: 'USD',
+        issuedAtIso: T3,
+      }
+    );
+    assert.equal(invoice.status, 'issued');
+
+    const invoicesRes = await fetch(`${server.origin}/projectops/project-requests/req-1/invoices`);
+    assert.equal(invoicesRes.status, 200);
+    const invoices = await invoicesRes.json() as readonly ProjectInvoice[];
+    assert.equal(invoices.length, 1);
+
+    const paidInvoice = await expectOkJson<ProjectInvoice>(
+      `${server.origin}/projectops/project-requests/req-1/invoices/invoice-1/pay`,
+      { paidAtIso: T3 }
+    );
+    assert.equal(paidInvoice.status, 'paid');
+
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
     const clients = await clientsRes.json() as readonly { id: string }[];
@@ -392,9 +454,12 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.byStatus.approved, 1);
     assert.equal(dashboard.completedMilestones, 1);
     assert.equal(dashboard.acceptedDeliverables, 1);
+    assert.equal(dashboard.paidInvoices, 1);
+    assert.equal(dashboard.paidInvoiceAmountCents, 240000);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
     assert.equal(sql.snapshot().projectMilestones[0]?.status, 'completed');
     assert.equal(sql.snapshot().projectDeliverables[0]?.status, 'accepted');
+    assert.equal(sql.snapshot().projectInvoices[0]?.status, 'paid');
   } finally {
     await server.close();
   }
@@ -458,6 +523,13 @@ unitTest('PROJECTOPS-PERSIST-006: API exposes stable write-side error contracts'
       title: 'Too early',
       artifactUrl: 'https://example.com/projectops/too-early',
     }, 400, 'PROJECTOPS_REQUEST_NOT_READY_FOR_DELIVERABLES');
+
+    await expectProjectOpsError(`${server.origin}/projectops/project-requests/req-1/invoices`, {
+      id: 'invoice-not-ready',
+      invoiceNumber: 'INV-NOT-READY',
+      amountCents: 100000,
+      currency: 'USD',
+    }, 400, 'PROJECTOPS_REQUEST_NOT_READY_FOR_INVOICES');
   } finally {
     await server.close();
   }
