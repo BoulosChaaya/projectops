@@ -50,6 +50,7 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('High priority open', String(summary.highPriorityOpen))}
       ${renderMetric('Open milestones', String(summary.openMilestones))}
       ${renderMetric('Submitted deliverables', String(summary.submittedDeliverables))}
+      ${renderMetric('Outstanding invoices', formatMoney(summary.outstandingInvoiceAmountCents, 'USD'))}
       ${renderMetric('In progress', String(summary.byStatus.in_progress))}
       ${renderMetric('Delivered', String(summary.byStatus.delivered))}
     </section>
@@ -96,6 +97,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Estimate</th>
           <th scope="col">Milestones</th>
           <th scope="col">Deliverables</th>
+          <th scope="col">Invoices</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
         </tr>
@@ -118,6 +120,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatEstimate(row))}</td>
     <td>${escapeHtml(formatMilestones(row))}</td>
     <td>${escapeHtml(formatDeliverables(row))}</td>
+    <td>${escapeHtml(formatInvoices(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
   </tr>`;
@@ -165,6 +168,19 @@ function formatMilestones(row: ProjectOpsDashboardRow): string {
 
 function formatDeliverables(row: ProjectOpsDashboardRow): string {
   return `${row.acceptedDeliverableCount ?? 0} accepted / ${row.submittedDeliverableCount ?? 0} submitted`;
+}
+
+function formatInvoices(row: ProjectOpsDashboardRow): string {
+  const outstanding = formatMoney(row.outstandingInvoiceAmountCents ?? 0, row.estimateCurrency ?? 'USD');
+  return `${row.paidInvoiceCount ?? 0} paid / ${row.issuedInvoiceCount ?? 0} open (${outstanding})`;
+}
+
+function formatMoney(amountCents: number, currency: string): string {
+  const amount = (amountCents / 100).toLocaleString('en', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${currency} ${amount}`;
 }
 
 function formatDate(value: string): string {
@@ -241,7 +257,7 @@ function dashboardCss(): string {
     }
 
     .metrics {
-      grid-template-columns: repeat(6, minmax(0, 1fr));
+      grid-template-columns: repeat(7, minmax(0, 1fr));
     }
 
     .workflow {
