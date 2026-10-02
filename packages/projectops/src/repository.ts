@@ -1,8 +1,10 @@
 import {
   ProjectOpsOperationError,
   acceptProjectDeliverable,
+  approveProjectChangeRequest,
   approveProjectRequest,
   completeProjectMilestone,
+  createProjectChangeRequest,
   createProjectActivity,
   createClient,
   createProjectDeliverable,
@@ -11,16 +13,20 @@ import {
   createProjectRequest,
   estimateProjectRequest,
   markProjectInvoicePaid,
+  rejectProjectChangeRequest,
   transitionProjectRequest,
   type ApproveProjectRequestInput,
+  type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
+  type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
   type NewProjectInvoiceInput,
   type NewProjectMilestoneInput,
   type NewClientInput,
   type NewProjectRequestInput,
   type ProjectActivity,
+  type ProjectChangeRequest,
   type ProjectDeliverable,
   type ProjectInvoice,
   type ProjectOpsClient,
@@ -35,6 +41,7 @@ import {
   estimateProjectRequestSql,
   insertClientSql,
   insertProjectActivitySql,
+  insertProjectChangeRequestSql,
   insertProjectDeliverableSql,
   insertProjectInvoiceSql,
   insertProjectMilestoneSql,
@@ -45,6 +52,8 @@ import {
   selectDashboardRowsSql,
   selectProjectActivitiesSql,
   selectProjectActivityByIdSql,
+  selectProjectChangeRequestByIdSql,
+  selectProjectChangeRequestsSql,
   selectProjectDeliverableByIdSql,
   selectProjectDeliverablesSql,
   selectProjectInvoiceByIdSql,
@@ -53,6 +62,7 @@ import {
   selectProjectMilestonesSql,
   selectProjectRequestByIdSql,
   selectProjectRequestsSql,
+  updateProjectChangeRequestDecisionSql,
   updateProjectRequestStatusSql,
   type SqlStatement,
 } from './sql.ts';
@@ -309,6 +319,76 @@ export class ProjectOpsRepository {
     return this.requirePersistedProjectInvoice(rows, projectRequestId, invoiceId);
   }
 
+  public async createProjectChangeRequest(
+    projectRequestId: string,
+    input: NewProjectChangeRequestInput
+  ): Promise<ProjectChangeRequest> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const changeRequest = createProjectChangeRequest(request, input);
+    const existing = await this.getProjectChangeRequest(projectRequestId, changeRequest.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_CHANGE_REQUEST_ALREADY_EXISTS',
+        `ProjectOps project change request already exists: ${changeRequest.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectChangeRequest>(
+      insertProjectChangeRequestSql(changeRequest)
+    );
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project change request insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectChangeRequests(
+    projectRequestId: string
+  ): Promise<readonly ProjectChangeRequest[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectChangeRequest>(selectProjectChangeRequestsSql(projectRequestId));
+  }
+
+  public async getProjectChangeRequest(
+    projectRequestId: string,
+    changeRequestId: string
+  ): Promise<ProjectChangeRequest | undefined> {
+    const rows = await this.sql.query<ProjectChangeRequest>(
+      selectProjectChangeRequestByIdSql(projectRequestId, changeRequestId)
+    );
+    return rows[0];
+  }
+
+  public async approveProjectChangeRequest(
+    projectRequestId: string,
+    changeRequestId: string,
+    input: DecideProjectChangeRequestInput
+  ): Promise<ProjectChangeRequest> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectChangeRequest(projectRequestId, changeRequestId);
+    const approved = approveProjectChangeRequest(current, input);
+    const rows = await this.sql.query<ProjectChangeRequest>(
+      updateProjectChangeRequestDecisionSql(approved)
+    );
+    return this.requirePersistedProjectChangeRequest(rows, projectRequestId, changeRequestId);
+  }
+
+  public async rejectProjectChangeRequest(
+    projectRequestId: string,
+    changeRequestId: string,
+    input: DecideProjectChangeRequestInput
+  ): Promise<ProjectChangeRequest> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectChangeRequest(projectRequestId, changeRequestId);
+    const rejected = rejectProjectChangeRequest(current, input);
+    const rows = await this.sql.query<ProjectChangeRequest>(
+      updateProjectChangeRequestDecisionSql(rejected)
+    );
+    return this.requirePersistedProjectChangeRequest(rows, projectRequestId, changeRequestId);
+  }
+
   public async createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -446,6 +526,21 @@ export class ProjectOpsRepository {
     return invoice;
   }
 
+  private async requireProjectChangeRequest(
+    projectRequestId: string,
+    changeRequestId: string
+  ): Promise<ProjectChangeRequest> {
+    const changeRequest = await this.getProjectChangeRequest(projectRequestId, changeRequestId);
+    if (!changeRequest) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_CHANGE_REQUEST_NOT_FOUND',
+        `Project change request not found: ${changeRequestId}.`
+      );
+    }
+    return changeRequest;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -504,6 +599,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_INVOICE_NOT_FOUND',
         `Project invoice not found: ${projectRequestId}/${invoiceId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectChangeRequest(
+    rows: readonly ProjectChangeRequest[],
+    projectRequestId: string,
+    changeRequestId: string
+  ): ProjectChangeRequest {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_CHANGE_REQUEST_NOT_FOUND',
+        `Project change request not found: ${projectRequestId}/${changeRequestId}.`
       );
     }
     return persisted;
