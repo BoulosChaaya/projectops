@@ -9,11 +9,13 @@ import {
   createClient,
   createProjectDeliverable,
   createProjectInvoice,
+  createProjectIssue,
   createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
   markProjectInvoicePaid,
   rejectProjectChangeRequest,
+  resolveProjectIssue,
   transitionProjectRequest,
   type ApproveProjectRequestInput,
   type DecideProjectChangeRequestInput,
@@ -22,6 +24,7 @@ import {
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
   type NewProjectInvoiceInput,
+  type NewProjectIssueInput,
   type NewProjectMilestoneInput,
   type NewClientInput,
   type NewProjectRequestInput,
@@ -29,10 +32,12 @@ import {
   type ProjectChangeRequest,
   type ProjectDeliverable,
   type ProjectInvoice,
+  type ProjectIssue,
   type ProjectOpsClient,
   type ProjectMilestone,
   type ProjectRequest,
   type ProjectRequestStatus,
+  type ResolveProjectIssueInput,
 } from './domain.ts';
 import {
   acceptProjectDeliverableSql,
@@ -44,6 +49,7 @@ import {
   insertProjectChangeRequestSql,
   insertProjectDeliverableSql,
   insertProjectInvoiceSql,
+  insertProjectIssueSql,
   insertProjectMilestoneSql,
   insertProjectRequestSql,
   markProjectInvoicePaidSql,
@@ -58,10 +64,13 @@ import {
   selectProjectDeliverablesSql,
   selectProjectInvoiceByIdSql,
   selectProjectInvoicesSql,
+  selectProjectIssueByIdSql,
+  selectProjectIssuesSql,
   selectProjectMilestoneByIdSql,
   selectProjectMilestonesSql,
   selectProjectRequestByIdSql,
   selectProjectRequestsSql,
+  resolveProjectIssueSql,
   updateProjectChangeRequestDecisionSql,
   updateProjectRequestStatusSql,
   type SqlStatement,
@@ -389,6 +398,56 @@ export class ProjectOpsRepository {
     return this.requirePersistedProjectChangeRequest(rows, projectRequestId, changeRequestId);
   }
 
+  public async createProjectIssue(
+    projectRequestId: string,
+    input: NewProjectIssueInput
+  ): Promise<ProjectIssue> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const issue = createProjectIssue(request, input);
+    const existing = await this.getProjectIssue(projectRequestId, issue.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_ISSUE_ALREADY_EXISTS',
+        `ProjectOps project issue already exists: ${issue.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectIssue>(insertProjectIssueSql(issue));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project issue insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectIssues(projectRequestId: string): Promise<readonly ProjectIssue[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectIssue>(selectProjectIssuesSql(projectRequestId));
+  }
+
+  public async getProjectIssue(
+    projectRequestId: string,
+    issueId: string
+  ): Promise<ProjectIssue | undefined> {
+    const rows = await this.sql.query<ProjectIssue>(
+      selectProjectIssueByIdSql(projectRequestId, issueId)
+    );
+    return rows[0];
+  }
+
+  public async resolveProjectIssue(
+    projectRequestId: string,
+    issueId: string,
+    input: ResolveProjectIssueInput
+  ): Promise<ProjectIssue> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectIssue(projectRequestId, issueId);
+    const resolved = resolveProjectIssue(current, input);
+    const rows = await this.sql.query<ProjectIssue>(resolveProjectIssueSql(resolved));
+    return this.requirePersistedProjectIssue(rows, projectRequestId, issueId);
+  }
+
   public async createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -541,6 +600,21 @@ export class ProjectOpsRepository {
     return changeRequest;
   }
 
+  private async requireProjectIssue(
+    projectRequestId: string,
+    issueId: string
+  ): Promise<ProjectIssue> {
+    const issue = await this.getProjectIssue(projectRequestId, issueId);
+    if (!issue) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_ISSUE_NOT_FOUND',
+        `Project issue not found: ${issueId}.`
+      );
+    }
+    return issue;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -615,6 +689,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_CHANGE_REQUEST_NOT_FOUND',
         `Project change request not found: ${projectRequestId}/${changeRequestId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectIssue(
+    rows: readonly ProjectIssue[],
+    projectRequestId: string,
+    issueId: string
+  ): ProjectIssue {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_ISSUE_NOT_FOUND',
+        `Project issue not found: ${projectRequestId}/${issueId}.`
       );
     }
     return persisted;
