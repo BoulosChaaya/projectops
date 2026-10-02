@@ -6,6 +6,7 @@ import {
   ProjectOpsValidationError,
 } from '../../../../packages/projectops/src/index.ts';
 import type {
+  AddressProjectFeedbackInput,
   ApproveProjectRequestInput,
   DecideProjectChangeRequestInput,
   EstimateProjectRequestInput,
@@ -13,6 +14,7 @@ import type {
   NewProjectActivityInput,
   NewProjectChangeRequestInput,
   NewProjectDeliverableInput,
+  NewProjectFeedbackInput,
   NewProjectInvoiceInput,
   NewProjectIssueInput,
   NewProjectMilestoneInput,
@@ -20,6 +22,7 @@ import type {
   ProjectDeliverable,
   ProjectActivity,
   ProjectChangeRequest,
+  ProjectFeedback,
   ProjectInvoice,
   ProjectIssue,
   ProjectOpsClient,
@@ -92,6 +95,16 @@ export interface ProjectOpsApiService {
     issueId: string,
     input: ResolveProjectIssueInput
   ): Promise<ProjectIssue>;
+  createProjectFeedback(
+    projectRequestId: string,
+    input: NewProjectFeedbackInput
+  ): Promise<ProjectFeedback>;
+  listProjectFeedback(projectRequestId: string): Promise<readonly ProjectFeedback[]>;
+  addressProjectFeedback(
+    projectRequestId: string,
+    feedbackId: string,
+    input: AddressProjectFeedbackInput
+  ): Promise<ProjectFeedback>;
   createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -290,6 +303,32 @@ export function createProjectOpsRoutes(
             params.id,
             params.issueId,
             readResolveIssueInput(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/feedback',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectFeedback(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/feedback',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectFeedback(params.id, readFeedbackInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/feedback/:feedbackId/address',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.addressProjectFeedback(
+            params.id,
+            params.feedbackId,
+            readAddressFeedbackInput(request.body, clock)
           )
         ),
     },
@@ -568,6 +607,35 @@ function readResolveIssueInput(body: unknown, clock: () => string): ResolveProje
   });
 }
 
+function readFeedbackInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectFeedbackInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    deliverableId: readOptionalString(value.deliverableId, 'deliverableId'),
+    author: readString(value.author, 'author'),
+    sentiment: readOptionalFeedbackSentiment(value.sentiment),
+    message: readString(value.message, 'message'),
+    receivedAtIso: readOptionalString(value.receivedAtIso, 'receivedAtIso') ?? clock(),
+  });
+}
+
+function readAddressFeedbackInput(
+  body: unknown,
+  clock: () => string
+): AddressProjectFeedbackInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    addressedBy: readString(value.addressedBy, 'addressedBy'),
+    addressedAtIso: readOptionalString(value.addressedAtIso, 'addressedAtIso') ?? clock(),
+    responseNote: readOptionalString(value.responseNote, 'responseNote'),
+  });
+}
+
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
@@ -642,6 +710,12 @@ function readOptionalIssueSeverity(value: unknown): NewProjectIssueInput['severi
   if (value === undefined || value === null) return undefined;
   if (value === 'low' || value === 'medium' || value === 'high') return value;
   throw new HttpError(400, 'INVALID_PROJECTOPS_ISSUE_SEVERITY', 'Unsupported project issue severity.');
+}
+
+function readOptionalFeedbackSentiment(value: unknown): NewProjectFeedbackInput['sentiment'] {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'positive' || value === 'neutral' || value === 'negative') return value;
+  throw new HttpError(400, 'INVALID_PROJECTOPS_FEEDBACK_SENTIMENT', 'Unsupported project feedback sentiment.');
 }
 
 function readActivityEventType(value: unknown): NewProjectActivityInput['eventType'] {
