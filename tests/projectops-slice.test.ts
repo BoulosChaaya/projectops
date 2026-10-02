@@ -9,11 +9,13 @@ import {
   createProjectChangeRequest,
   createProjectDeliverable,
   createProjectInvoice,
+  createProjectIssue,
   createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
   markProjectInvoicePaid,
   rejectProjectChangeRequest,
+  resolveProjectIssue,
   completeProjectMilestone,
   createProjectActivity,
   insertClientSql,
@@ -27,6 +29,7 @@ import {
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
   type NewProjectInvoiceInput,
+  type NewProjectIssueInput,
   type NewClientInput,
   type NewProjectMilestoneInput,
   type NewProjectRequestInput,
@@ -34,11 +37,13 @@ import {
   type ProjectActivity,
   type ProjectChangeRequest,
   type ProjectInvoice,
+  type ProjectIssue,
   type ProjectOpsClient,
   type ProjectOpsDashboardView,
   type ProjectMilestone,
   type ProjectRequest,
   type ProjectRequestStatus,
+  type ResolveProjectIssueInput,
   type SqlStatement,
 } from '../packages/projectops/src/index.ts';
 import { createProjectOpsRoutes, type ProjectOpsApiService } from '../apps/api/src/projectops/routes.ts';
@@ -156,6 +161,25 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(approvedChange.status, 'approved');
   assert.equal(approvedChange.decidedBy, 'Client');
 
+  const issue = createProjectIssue(approved, {
+    id: 'issue-1',
+    projectRequestId: request.id,
+    title: 'Waiting on hero assets',
+    description: 'Client needs to send final hero images before handoff.',
+    severity: 'high',
+    owner: 'Client',
+    openedAtIso: T3,
+  });
+  assert.equal(issue.status, 'open');
+  assert.equal(issue.severity, 'high');
+
+  const resolvedIssue = resolveProjectIssue(issue, {
+    resolvedAtIso: T3,
+    resolutionNote: 'Assets received.',
+  });
+  assert.equal(resolvedIssue.status, 'resolved');
+  assert.equal(resolvedIssue.resolutionNote, 'Assets received.');
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -186,6 +210,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_deliverables/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_invoices/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_change_requests/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_issues/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
@@ -457,6 +482,43 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(approveChangeRequestRes.status, 200);
     assert.equal(approvedChangeRequest.status, 'approved');
 
+    const issueRes = await fetch(`${server.origin}/projectops/project-requests/req-2/issues`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'issue-1',
+        title: 'Waiting on launch assets',
+        description: 'Client still needs to send final launch images.',
+        severity: 'high',
+        owner: 'Client',
+        openedAtIso: T3,
+      }),
+    });
+    const issue = await issueRes.json() as ProjectIssue;
+    assert.equal(issueRes.status, 200);
+    assert.equal(issue.status, 'open');
+    assert.equal(issue.severity, 'high');
+
+    const issuesRes = await fetch(`${server.origin}/projectops/project-requests/req-2/issues`);
+    assert.equal(issuesRes.status, 200);
+    const issues = await issuesRes.json() as readonly ProjectIssue[];
+    assert.equal(issues.length, 1);
+
+    const resolveIssueRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/issues/issue-1/resolve`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          resolvedAtIso: T3,
+          resolutionNote: 'Assets received.',
+        }),
+      }
+    );
+    const resolvedIssue = await resolveIssueRes.json() as ProjectIssue;
+    assert.equal(resolveIssueRes.status, 200);
+    assert.equal(resolvedIssue.status, 'resolved');
+
     const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -493,6 +555,8 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.paidInvoiceAmountCents, 180000);
     assert.equal(dashboard.proposedChangeRequests, 0);
     assert.equal(dashboard.approvedChangeRequests, 1);
+    assert.equal(dashboard.openIssues, 0);
+    assert.equal(dashboard.resolvedIssues, 1);
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -528,6 +592,9 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       proposedChangeRequestCount: 1,
       approvedChangeRequestCount: 2,
       rejectedChangeRequestCount: 0,
+      openIssueCount: 1,
+      highOpenIssueCount: 1,
+      resolvedIssueCount: 2,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -621,6 +688,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const deliverables = new Map<string, ProjectDeliverable>();
   const invoices = new Map<string, ProjectInvoice>();
   const changeRequests = new Map<string, ProjectChangeRequest>();
+  const issues = new Map<string, ProjectIssue>();
   const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
@@ -797,6 +865,39 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       changeRequests.set(key, next);
       return next;
     },
+    async createProjectIssue(
+      projectRequestId: string,
+      input: NewProjectIssueInput
+    ): Promise<ProjectIssue> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      const issue = createProjectIssue(request, input);
+      issues.set(issueKey(projectRequestId, issue.id), issue);
+      return issue;
+    },
+    async listProjectIssues(projectRequestId: string): Promise<readonly ProjectIssue[]> {
+      return Object.freeze(
+        [...issues.values()]
+          .filter((issue) => issue.projectRequestId === projectRequestId)
+          .sort((a, b) => b.openedAtIso.localeCompare(a.openedAtIso) || a.id.localeCompare(b.id))
+      );
+    },
+    async resolveProjectIssue(
+      projectRequestId: string,
+      issueId: string,
+      input: ResolveProjectIssueInput
+    ): Promise<ProjectIssue> {
+      const key = issueKey(projectRequestId, issueId);
+      const current = issues.get(key);
+      if (!current) {
+        throw new Error(`Project issue not found: ${projectRequestId}/${issueId}`);
+      }
+      const next = resolveProjectIssue(current, input);
+      issues.set(key, next);
+      return next;
+    },
     async createProjectActivity(
       projectRequestId: string,
       input: NewProjectActivityInput
@@ -882,6 +983,9 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             proposedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'proposed'),
             approvedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'approved'),
             rejectedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'rejected'),
+            openIssueCount: countIssues(issues, request.id, 'open'),
+            highOpenIssueCount: countHighOpenIssues(issues, request.id),
+            resolvedIssueCount: countIssues(issues, request.id, 'resolved'),
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -906,6 +1010,10 @@ function invoiceKey(projectRequestId: string, invoiceId: string): string {
 
 function changeRequestKey(projectRequestId: string, changeRequestId: string): string {
   return `${projectRequestId}\0${changeRequestId}`;
+}
+
+function issueKey(projectRequestId: string, issueId: string): string {
+  return `${projectRequestId}\0${issueId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -959,6 +1067,25 @@ function countChangeRequests(
 ): number {
   return [...changeRequests.values()].filter(
     (changeRequest) => changeRequest.projectRequestId === projectRequestId && changeRequest.status === status
+  ).length;
+}
+
+function countIssues(
+  issues: ReadonlyMap<string, ProjectIssue>,
+  projectRequestId: string,
+  status: ProjectIssue['status']
+): number {
+  return [...issues.values()].filter(
+    (issue) => issue.projectRequestId === projectRequestId && issue.status === status
+  ).length;
+}
+
+function countHighOpenIssues(
+  issues: ReadonlyMap<string, ProjectIssue>,
+  projectRequestId: string
+): number {
+  return [...issues.values()].filter(
+    (issue) => issue.projectRequestId === projectRequestId && issue.status === 'open' && issue.severity === 'high'
   ).length;
 }
 
