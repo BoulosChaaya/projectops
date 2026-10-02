@@ -12,6 +12,7 @@ import type {
   ProjectRequest,
   ProjectRequestStatus,
   ProjectTask,
+  ProjectWorkLog,
 } from './domain.ts';
 
 export interface SqlStatement {
@@ -189,6 +190,21 @@ export const projectOpsSchemaSql = Object.freeze([
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (project_request_id, id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_work_logs (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    task_id TEXT,
+    actor TEXT NOT NULL,
+    minutes INTEGER NOT NULL CHECK (minutes > 0 AND minutes <= 1440),
+    billable BOOLEAN NOT NULL,
+    note TEXT,
+    logged_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id),
+    FOREIGN KEY (project_request_id, task_id)
+      REFERENCES projectops_project_tasks(project_request_id, id)
+      ON DELETE SET NULL (task_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_activities (
     id TEXT NOT NULL,
     project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -235,6 +251,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_notes (project_request_id, status, visibility)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_tasks_request_status_idx
     ON projectops_project_tasks (project_request_id, status, priority, due_at)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_work_logs_request_time_idx
+    ON projectops_project_work_logs (project_request_id, logged_at DESC, billable)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
     ON projectops_project_activities (project_request_id, happened_at DESC)`,
 ] as const);
@@ -978,6 +996,56 @@ export function completeProjectTaskSql(task: ProjectTask): SqlStatement {
   });
 }
 
+export function insertProjectWorkLogSql(workLog: ProjectWorkLog): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_work_logs (
+      id,
+      project_request_id,
+      task_id,
+      actor,
+      minutes,
+      billable,
+      note,
+      logged_at,
+      created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING *`,
+    params: Object.freeze([
+      workLog.id,
+      workLog.projectRequestId,
+      workLog.taskId ?? null,
+      workLog.actor,
+      workLog.minutes,
+      workLog.billable,
+      workLog.note ?? null,
+      workLog.loggedAtIso,
+      workLog.createdAtIso,
+    ]),
+  });
+}
+
+export function selectProjectWorkLogsSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_work_logs
+      WHERE project_request_id = $1
+      ORDER BY logged_at DESC, created_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectWorkLogByIdSql(
+  projectRequestId: string,
+  workLogId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_work_logs
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, workLogId]),
+  });
+}
+
 export function insertProjectActivitySql(activity: ProjectActivity): SqlStatement {
   return Object.freeze({
     sql: `INSERT INTO projectops_project_activities (
@@ -1115,6 +1183,10 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(ts.high_open_tasks, 0) AS high_open_task_count,
       COALESCE(ts.completed_tasks, 0) AS completed_task_count,
       ts.next_task_due_at,
+      COALESCE(wl.work_log_count, 0) AS work_log_count,
+      COALESCE(wl.billable_minutes, 0) AS billable_work_minutes,
+      COALESCE(wl.non_billable_minutes, 0) AS non_billable_work_minutes,
+      wl.latest_work_logged_at,
       act.latest_activity_at,
       act.latest_activity_summary,
       pr.updated_at
@@ -1200,6 +1272,16 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_tasks
       GROUP BY project_request_id
     ) ts ON ts.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) AS work_log_count,
+        COALESCE(SUM(minutes) FILTER (WHERE billable = TRUE), 0) AS billable_minutes,
+        COALESCE(SUM(minutes) FILTER (WHERE billable = FALSE), 0) AS non_billable_minutes,
+        MAX(logged_at) AS latest_work_logged_at
+      FROM projectops_project_work_logs
+      GROUP BY project_request_id
+    ) wl ON wl.project_request_id = pr.id
     LEFT JOIN (
       SELECT DISTINCT ON (project_request_id)
         project_request_id,
