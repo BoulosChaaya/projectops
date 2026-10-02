@@ -113,6 +113,22 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   });
   const paidInvoice = await repo.markProjectInvoicePaid('req-1', 'invoice-1', T3);
   const invoices = await repo.listProjectInvoices('req-1');
+  const changeRequest = await repo.createProjectChangeRequest('req-1', {
+    id: 'change-1',
+    projectRequestId: 'req-1',
+    title: 'Add analytics event tracking',
+    description: 'Track contact form conversions after launch.',
+    requestedBy: 'Boulos',
+    estimateDeltaCents: 45000,
+    estimateCurrency: 'USD',
+    requestedAtIso: T3,
+  });
+  const approvedChangeRequest = await repo.approveProjectChangeRequest('req-1', 'change-1', {
+    decidedBy: 'Client',
+    decidedAtIso: T3,
+    decisionNote: 'Approved for launch reporting.',
+  });
+  const changeRequests = await repo.listProjectChangeRequests('req-1');
   const activity = await repo.createProjectActivity('req-1', {
     id: 'activity-1',
     projectRequestId: 'req-1',
@@ -144,6 +160,10 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(paidInvoice.status, 'paid');
   assert.equal(invoices.length, 1);
   assert.equal(invoices[0]?.paidAtIso, T3);
+  assert.equal(changeRequest.status, 'proposed');
+  assert.equal(approvedChangeRequest.status, 'approved');
+  assert.equal(changeRequests.length, 1);
+  assert.equal(changeRequests[0]?.decisionNote, 'Approved for launch reporting.');
   assert.equal(activity.eventType, 'note_added');
   assert.equal(activities.length, 1);
   assert.equal(activities[0]?.summary, 'Client approved paid invoice and handoff.');
@@ -160,6 +180,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(snapshot.projectMilestones[0]?.status, 'completed');
   assert.equal(snapshot.projectDeliverables[0]?.status, 'accepted');
   assert.equal(snapshot.projectInvoices[0]?.status, 'paid');
+  assert.equal(snapshot.projectChangeRequests[0]?.status, 'approved');
   assert.equal(snapshot.projectActivities[0]?.summary, 'Client approved paid invoice and handoff.');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.approved, 1);
@@ -170,11 +191,14 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.issuedInvoices, 0);
   assert.equal(dashboard.paidInvoices, 1);
   assert.equal(dashboard.paidInvoiceAmountCents, 320000);
+  assert.equal(dashboard.proposedChangeRequests, 0);
+  assert.equal(dashboard.approvedChangeRequests, 1);
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
   assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
   assert.equal(dashboard.rows[0]?.acceptedDeliverableCount, 1);
   assert.equal(dashboard.rows[0]?.paidInvoiceAmountCents, 320000);
+  assert.equal(dashboard.rows[0]?.approvedChangeRequestCount, 1);
   assert.equal(dashboard.rows[0]?.latestActivitySummary, 'Client approved paid invoice and handoff.');
 });
 
