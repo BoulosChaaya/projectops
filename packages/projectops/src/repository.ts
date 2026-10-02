@@ -11,8 +11,11 @@ import {
 import {
   insertClientSql,
   insertProjectRequestSql,
+  selectClientByIdSql,
+  selectClientsSql,
   selectDashboardRowsSql,
   selectProjectRequestByIdSql,
+  selectProjectRequestsSql,
   updateProjectRequestStatusSql,
   type SqlStatement,
 } from './sql.ts';
@@ -43,6 +46,24 @@ export class ProjectOpsRepository {
     const request = createProjectRequest(input);
     const rows = await this.sql.query<ProjectRequest>(insertProjectRequestSql(request));
     return rows[0] ?? request;
+  }
+
+  public async listClients(): Promise<readonly ProjectOpsClient[]> {
+    return await this.sql.query<ProjectOpsClient>(selectClientsSql());
+  }
+
+  public async getClient(id: string): Promise<ProjectOpsClient | undefined> {
+    const rows = await this.sql.query<ProjectOpsClient>(selectClientByIdSql(id));
+    return rows[0];
+  }
+
+  public async listProjectRequests(): Promise<readonly ProjectRequest[]> {
+    return await this.sql.query<ProjectRequest>(selectProjectRequestsSql());
+  }
+
+  public async getProjectRequest(id: string): Promise<ProjectRequest | undefined> {
+    const rows = await this.sql.query<ProjectRequest>(selectProjectRequestByIdSql(id));
+    return rows[0];
   }
 
   public async transitionProjectRequest(
