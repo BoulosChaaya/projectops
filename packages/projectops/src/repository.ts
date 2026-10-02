@@ -2,6 +2,7 @@ import {
   ProjectOpsOperationError,
   acceptProjectDeliverable,
   addressProjectFeedback,
+  archiveProjectDocument,
   approveProjectChangeRequest,
   approveProjectRequest,
   completeProjectMilestone,
@@ -9,6 +10,7 @@ import {
   createProjectActivity,
   createClient,
   createProjectDeliverable,
+  createProjectDocument,
   createProjectFeedback,
   createProjectInvoice,
   createProjectIssue,
@@ -20,12 +22,14 @@ import {
   resolveProjectIssue,
   transitionProjectRequest,
   type AddressProjectFeedbackInput,
+  type ArchiveProjectDocumentInput,
   type ApproveProjectRequestInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
+  type NewProjectDocumentInput,
   type NewProjectFeedbackInput,
   type NewProjectInvoiceInput,
   type NewProjectIssueInput,
@@ -35,6 +39,7 @@ import {
   type ProjectActivity,
   type ProjectChangeRequest,
   type ProjectDeliverable,
+  type ProjectDocument,
   type ProjectFeedback,
   type ProjectInvoice,
   type ProjectIssue,
@@ -47,6 +52,7 @@ import {
 import {
   acceptProjectDeliverableSql,
   addressProjectFeedbackSql,
+  archiveProjectDocumentSql,
   approveProjectRequestSql,
   completeProjectMilestoneSql,
   estimateProjectRequestSql,
@@ -54,6 +60,7 @@ import {
   insertProjectActivitySql,
   insertProjectChangeRequestSql,
   insertProjectDeliverableSql,
+  insertProjectDocumentSql,
   insertProjectFeedbackSql,
   insertProjectInvoiceSql,
   insertProjectIssueSql,
@@ -69,6 +76,8 @@ import {
   selectProjectChangeRequestsSql,
   selectProjectDeliverableByIdSql,
   selectProjectDeliverablesSql,
+  selectProjectDocumentByIdSql,
+  selectProjectDocumentsSql,
   selectProjectFeedbackByIdSql,
   selectProjectFeedbackSql,
   selectProjectInvoiceByIdSql,
@@ -513,6 +522,62 @@ export class ProjectOpsRepository {
     return this.requirePersistedProjectFeedback(rows, projectRequestId, feedbackId);
   }
 
+  public async createProjectDocument(
+    projectRequestId: string,
+    input: NewProjectDocumentInput
+  ): Promise<ProjectDocument> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const document = createProjectDocument(request, input);
+    if (document.deliverableId) {
+      await this.requireProjectDeliverable(projectRequestId, document.deliverableId);
+    }
+
+    const existing = await this.getProjectDocument(projectRequestId, document.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_DOCUMENT_ALREADY_EXISTS',
+        `ProjectOps project document already exists: ${document.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectDocument>(insertProjectDocumentSql(document));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project document insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectDocuments(
+    projectRequestId: string
+  ): Promise<readonly ProjectDocument[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectDocument>(selectProjectDocumentsSql(projectRequestId));
+  }
+
+  public async getProjectDocument(
+    projectRequestId: string,
+    documentId: string
+  ): Promise<ProjectDocument | undefined> {
+    const rows = await this.sql.query<ProjectDocument>(
+      selectProjectDocumentByIdSql(projectRequestId, documentId)
+    );
+    return rows[0];
+  }
+
+  public async archiveProjectDocument(
+    projectRequestId: string,
+    documentId: string,
+    input: ArchiveProjectDocumentInput
+  ): Promise<ProjectDocument> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectDocument(projectRequestId, documentId);
+    const archived = archiveProjectDocument(current, input);
+    const rows = await this.sql.query<ProjectDocument>(archiveProjectDocumentSql(archived));
+    return this.requirePersistedProjectDocument(rows, projectRequestId, documentId);
+  }
+
   public async createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -695,6 +760,21 @@ export class ProjectOpsRepository {
     return feedback;
   }
 
+  private async requireProjectDocument(
+    projectRequestId: string,
+    documentId: string
+  ): Promise<ProjectDocument> {
+    const document = await this.getProjectDocument(projectRequestId, documentId);
+    if (!document) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_DOCUMENT_NOT_FOUND',
+        `Project document not found: ${documentId}.`
+      );
+    }
+    return document;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -801,6 +881,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_FEEDBACK_NOT_FOUND',
         `Project feedback not found: ${projectRequestId}/${feedbackId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectDocument(
+    rows: readonly ProjectDocument[],
+    projectRequestId: string,
+    documentId: string
+  ): ProjectDocument {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_DOCUMENT_NOT_FOUND',
+        `Project document not found: ${projectRequestId}/${documentId}.`
       );
     }
     return persisted;
