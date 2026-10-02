@@ -9,6 +9,7 @@ type ProjectOpsTable =
   | 'projectops_project_milestones'
   | 'projectops_project_deliverables'
   | 'projectops_project_invoices'
+  | 'projectops_project_change_requests'
   | 'projectops_project_activities';
 
 export interface ProjectOpsQueryConnection {
@@ -41,6 +42,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private readonly projectMilestones = new Map<string, ProjectOpsMilestoneRow>();
   private readonly projectDeliverables = new Map<string, ProjectOpsDeliverableRow>();
   private readonly projectInvoices = new Map<string, ProjectOpsInvoiceRow>();
+  private readonly projectChangeRequests = new Map<string, ProjectOpsChangeRequestRow>();
   private readonly projectActivities = new Map<string, ProjectOpsActivityRow>();
   private readonly migratedTables = new Set<ProjectOpsTable>();
 
@@ -70,6 +72,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_PROJECT_INVOICES')) {
       this.migratedTables.add('projectops_project_invoices');
+      return Object.freeze([]);
+    }
+
+    if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_PROJECT_CHANGE_REQUESTS')) {
+      this.migratedTables.add('projectops_project_change_requests');
       return Object.freeze([]);
     }
 
@@ -107,6 +114,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_INVOICES')) {
       const row = this.insertProjectInvoice(statement.params);
+      return Object.freeze([row as T]);
+    }
+
+    if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_CHANGE_REQUESTS')) {
+      const row = this.insertProjectChangeRequest(statement.params);
       return Object.freeze([row as T]);
     }
 
@@ -183,6 +195,22 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       return Object.freeze(row ? [row as T] : []);
     }
 
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_CHANGE_REQUESTS WHERE PROJECT_REQUEST_ID = $1 AND ID = $2')) {
+      const key = changeRequestKey(String(statement.params[0]), String(statement.params[1]));
+      const row = this.projectChangeRequests.get(key);
+      return Object.freeze(row ? [toProjectChangeRequest(row) as T] : []);
+    }
+
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_CHANGE_REQUESTS WHERE PROJECT_REQUEST_ID = $1')) {
+      const projectRequestId = String(statement.params[0]);
+      return Object.freeze(this.selectProjectChangeRequests(projectRequestId) as T[]);
+    }
+
+    if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_CHANGE_REQUESTS')) {
+      const row = this.updateProjectChangeRequestDecision(statement.params);
+      return Object.freeze(row ? [row as T] : []);
+    }
+
     if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_ACTIVITIES WHERE PROJECT_REQUEST_ID = $1 AND ID = $2')) {
       const key = activityKey(String(statement.params[0]), String(statement.params[1]));
       const row = this.projectActivities.get(key);
@@ -222,6 +250,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     projectMilestones: readonly ProjectOpsMilestoneRow[];
     projectDeliverables: readonly ProjectOpsDeliverableRow[];
     projectInvoices: readonly ProjectOpsInvoiceRow[];
+    projectChangeRequests: readonly ProjectOpsChangeRequestRow[];
     projectActivities: readonly ProjectOpsActivityRow[];
   }> {
     return Object.freeze({
@@ -238,6 +267,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       projectInvoices: Object.freeze(
         [...this.projectInvoices.values()].map((row) => Object.freeze({ ...row }))
       ),
+      projectChangeRequests: Object.freeze(
+        [...this.projectChangeRequests.values()].map((row) => Object.freeze({ ...row }))
+      ),
       projectActivities: Object.freeze(
         [...this.projectActivities.values()].map((row) => Object.freeze({ ...row }))
       ),
@@ -251,6 +283,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       !this.migratedTables.has('projectops_project_milestones') ||
       !this.migratedTables.has('projectops_project_deliverables') ||
       !this.migratedTables.has('projectops_project_invoices') ||
+      !this.migratedTables.has('projectops_project_change_requests') ||
       !this.migratedTables.has('projectops_project_activities')
     ) {
       throw new Error('ProjectOps schema has not been migrated.');
@@ -399,6 +432,36 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
+  private insertProjectChangeRequest(params: readonly unknown[]): ProjectOpsChangeRequestRow {
+    const projectRequestId = asString(params[1], 'projectChangeRequest.projectRequestId');
+    if (!this.projectRequests.has(projectRequestId)) {
+      throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
+    }
+
+    const row = Object.freeze({
+      id: asString(params[0], 'projectChangeRequest.id'),
+      projectRequestId,
+      title: asString(params[2], 'projectChangeRequest.title'),
+      description: asString(params[3], 'projectChangeRequest.description'),
+      requestedBy: asString(params[4], 'projectChangeRequest.requestedBy'),
+      estimateDeltaCents: asOptionalNumber(params[5]),
+      estimateCurrency: asOptionalString(params[6]),
+      status: asString(params[7], 'projectChangeRequest.status'),
+      requestedAtIso: asString(params[8], 'projectChangeRequest.requestedAtIso'),
+      decidedAtIso: asOptionalString(params[9]),
+      decidedBy: asOptionalString(params[10]),
+      decisionNote: asOptionalString(params[11]),
+      updatedAtIso: asString(params[12], 'projectChangeRequest.updatedAtIso'),
+    } satisfies ProjectOpsChangeRequestRow);
+
+    const key = changeRequestKey(projectRequestId, row.id);
+    if (this.projectChangeRequests.has(key)) {
+      throw new Error(`Duplicate ProjectOps project change request id: ${projectRequestId}/${row.id}`);
+    }
+    this.projectChangeRequests.set(key, row);
+    return row;
+  }
+
   private insertProjectActivity(params: readonly unknown[]): ProjectOpsActivityRow {
     const projectRequestId = asString(params[1], 'projectActivity.projectRequestId');
     if (!this.projectRequests.has(projectRequestId)) {
@@ -518,6 +581,24 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return next;
   }
 
+  private updateProjectChangeRequestDecision(params: readonly unknown[]): ProjectOpsChangeRequestRow | undefined {
+    const projectRequestId = asString(params[0], 'projectChangeRequest.projectRequestId');
+    const id = asString(params[1], 'projectChangeRequest.id');
+    const current = this.projectChangeRequests.get(changeRequestKey(projectRequestId, id));
+    if (!current) return undefined;
+
+    const next = Object.freeze({
+      ...current,
+      status: asString(params[2], 'projectChangeRequest.status'),
+      decidedAtIso: asOptionalString(params[3]),
+      decidedBy: asOptionalString(params[4]),
+      decisionNote: asOptionalString(params[5]),
+      updatedAtIso: asString(params[6], 'projectChangeRequest.updatedAtIso'),
+    });
+    this.projectChangeRequests.set(changeRequestKey(projectRequestId, id), next);
+    return next;
+  }
+
   private selectClients(): readonly ProjectOpsClientRow[] {
     return Object.freeze(
       [...this.clients.values()]
@@ -569,6 +650,15 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     );
   }
 
+  private selectProjectChangeRequests(projectRequestId: string): readonly ProjectOpsChangeRequestRow[] {
+    return Object.freeze(
+      [...this.projectChangeRequests.values()]
+        .filter((changeRequest) => changeRequest.projectRequestId === projectRequestId)
+        .sort((a, b) => b.requestedAtIso.localeCompare(a.requestedAtIso) || a.id.localeCompare(b.id))
+        .map(toProjectChangeRequest)
+    );
+  }
+
   private selectProjectActivities(projectRequestId: string): readonly ProjectOpsActivityRow[] {
     return Object.freeze(
       [...this.projectActivities.values()]
@@ -614,6 +704,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
             paidInvoiceCount: this.countInvoices(request.id, 'paid'),
             outstandingInvoiceAmountCents: this.sumInvoices(request.id, 'issued'),
             paidInvoiceAmountCents: this.sumInvoices(request.id, 'paid'),
+            proposedChangeRequestCount: this.countChangeRequests(request.id, 'proposed'),
+            approvedChangeRequestCount: this.countChangeRequests(request.id, 'approved'),
+            rejectedChangeRequestCount: this.countChangeRequests(request.id, 'rejected'),
             latestActivityAtIso: this.latestActivity(request.id)?.happenedAtIso,
             latestActivitySummary: this.latestActivity(request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -646,6 +739,12 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       .reduce((total, invoice) => total + invoice.amountCents, 0);
   }
 
+  private countChangeRequests(projectRequestId: string, status: string): number {
+    return [...this.projectChangeRequests.values()].filter(
+      (changeRequest) => changeRequest.projectRequestId === projectRequestId && changeRequest.status === status
+    ).length;
+  }
+
   private latestActivity(projectRequestId: string): ProjectOpsActivityRow | undefined {
     return this.selectProjectActivities(projectRequestId)[0];
   }
@@ -671,6 +770,10 @@ function toProjectInvoice(row: ProjectOpsInvoiceRow): ProjectOpsInvoiceRow {
   return Object.freeze({ ...row });
 }
 
+function toProjectChangeRequest(row: ProjectOpsChangeRequestRow): ProjectOpsChangeRequestRow {
+  return Object.freeze({ ...row });
+}
+
 function toProjectActivity(row: ProjectOpsActivityRow): ProjectOpsActivityRow {
   return Object.freeze({ ...row });
 }
@@ -689,6 +792,10 @@ function deliverableKey(projectRequestId: string, deliverableId: string): string
 
 function invoiceKey(projectRequestId: string, invoiceId: string): string {
   return `${projectRequestId}\0${invoiceId}`;
+}
+
+function changeRequestKey(projectRequestId: string, changeRequestId: string): string {
+  return `${projectRequestId}\0${changeRequestId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -745,6 +852,16 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
     ...(source.issued_at !== undefined ? { issuedAtIso: normalizeIsoValue(source.issued_at) } : {}),
     ...(source.due_at !== undefined ? { dueAtIso: normalizeOptionalIsoValue(source.due_at) } : {}),
     ...(source.paid_at !== undefined ? { paidAtIso: normalizeOptionalIsoValue(source.paid_at) } : {}),
+    ...(source.requested_by !== undefined ? { requestedBy: source.requested_by } : {}),
+    ...(source.estimate_delta_cents !== undefined
+      ? { estimateDeltaCents: normalizeOptionalNumberValue(source.estimate_delta_cents) }
+      : {}),
+    ...(source.requested_at !== undefined ? { requestedAtIso: normalizeIsoValue(source.requested_at) } : {}),
+    ...(source.decided_at !== undefined
+      ? { decidedAtIso: normalizeOptionalIsoValue(source.decided_at) }
+      : {}),
+    ...(source.decided_by !== undefined ? { decidedBy: normalizeOptionalValue(source.decided_by) } : {}),
+    ...(source.decision_note !== undefined ? { decisionNote: normalizeOptionalValue(source.decision_note) } : {}),
     ...(source.event_type !== undefined ? { eventType: source.event_type } : {}),
     ...(source.happened_at !== undefined ? { happenedAtIso: normalizeIsoValue(source.happened_at) } : {}),
     ...(source.open_milestone_count !== undefined
@@ -770,6 +887,15 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
       : {}),
     ...(source.paid_invoice_amount_cents !== undefined
       ? { paidInvoiceAmountCents: normalizeOptionalNumberValue(source.paid_invoice_amount_cents) }
+      : {}),
+    ...(source.proposed_change_request_count !== undefined
+      ? { proposedChangeRequestCount: normalizeOptionalNumberValue(source.proposed_change_request_count) }
+      : {}),
+    ...(source.approved_change_request_count !== undefined
+      ? { approvedChangeRequestCount: normalizeOptionalNumberValue(source.approved_change_request_count) }
+      : {}),
+    ...(source.rejected_change_request_count !== undefined
+      ? { rejectedChangeRequestCount: normalizeOptionalNumberValue(source.rejected_change_request_count) }
       : {}),
     ...(source.latest_activity_at !== undefined
       ? { latestActivityAtIso: normalizeOptionalIsoValue(source.latest_activity_at) }
@@ -894,6 +1020,20 @@ function mapProjectOpsStorageError(error: unknown, statement: SqlStatement): unk
       'Project invoice relationship not found.'
     );
   }
+  if (code === '23505' && statement.sql.includes('projectops_project_change_requests')) {
+    return new ProjectOpsOperationError(
+      'conflict',
+      'PROJECTOPS_CHANGE_REQUEST_ALREADY_EXISTS',
+      'ProjectOps project change request already exists.'
+    );
+  }
+  if (code === '23503' && statement.sql.includes('projectops_project_change_requests')) {
+    return new ProjectOpsOperationError(
+      'not_found',
+      'PROJECTOPS_REQUEST_NOT_FOUND',
+      'Project request not found.'
+    );
+  }
   if (code === '23505' && statement.sql.includes('projectops_project_activities')) {
     return new ProjectOpsOperationError(
       'conflict',
@@ -975,6 +1115,22 @@ interface ProjectOpsInvoiceRow {
   readonly updatedAtIso: string;
 }
 
+interface ProjectOpsChangeRequestRow {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly requestedBy: string;
+  readonly estimateDeltaCents?: number;
+  readonly estimateCurrency?: string;
+  readonly status: string;
+  readonly requestedAtIso: string;
+  readonly decidedAtIso?: string;
+  readonly decidedBy?: string;
+  readonly decisionNote?: string;
+  readonly updatedAtIso: string;
+}
+
 interface ProjectOpsActivityRow {
   readonly id: string;
   readonly projectRequestId: string;
@@ -1006,6 +1162,9 @@ interface ProjectOpsDashboardStorageRow {
   readonly paidInvoiceCount?: number;
   readonly outstandingInvoiceAmountCents?: number;
   readonly paidInvoiceAmountCents?: number;
+  readonly proposedChangeRequestCount?: number;
+  readonly approvedChangeRequestCount?: number;
+  readonly rejectedChangeRequestCount?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
