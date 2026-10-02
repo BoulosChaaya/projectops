@@ -91,6 +91,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Request</th>
           <th scope="col">Client</th>
           <th scope="col">Status</th>
+          <th scope="col">Estimate</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
         </tr>
@@ -110,6 +111,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     </td>
     <td>${escapeHtml(row.clientName)}</td>
     <td><span class="pill">${escapeHtml(formatStatus(row.status))}</span></td>
+    <td>${escapeHtml(formatEstimate(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
   </tr>`;
@@ -138,6 +140,17 @@ function formatStatus(status: ProjectRequestStatus): string {
 
 function formatPriority(priority: ProjectOpsDashboardRow['priority']): string {
   return priority[0].toUpperCase() + priority.slice(1);
+}
+
+function formatEstimate(row: ProjectOpsDashboardRow): string {
+  if (row.estimateAmountCents === undefined || !row.estimateCurrency) {
+    return 'Not estimated';
+  }
+  const amount = (row.estimateAmountCents / 100).toLocaleString('en', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${row.estimateCurrency} ${amount}`;
 }
 
 function formatDate(value: string): string {
