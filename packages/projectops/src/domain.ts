@@ -12,6 +12,8 @@ export type ProjectDocumentStatus = 'active' | 'archived';
 export type ProjectDocumentType = 'proposal' | 'contract' | 'asset' | 'handoff' | 'other';
 export type ProjectNoteStatus = 'active' | 'archived';
 export type ProjectNoteVisibility = 'internal' | 'client';
+export type ProjectTaskStatus = 'open' | 'completed';
+export type ProjectTaskPriority = 'low' | 'medium' | 'high';
 export type ProjectActivityEventType =
   | 'request_created'
   | 'request_estimated'
@@ -169,6 +171,21 @@ export interface ProjectNote {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectTask {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly assignee?: string;
+  readonly priority: ProjectTaskPriority;
+  readonly status: ProjectTaskStatus;
+  readonly dueAtIso?: string;
+  readonly createdAtIso: string;
+  readonly completedAtIso?: string;
+  readonly completedBy?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface ProjectActivity {
   readonly id: string;
   readonly projectRequestId: string;
@@ -315,6 +332,22 @@ export interface ArchiveProjectNoteInput {
   readonly archivedAtIso: string;
 }
 
+export interface NewProjectTaskInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly assignee?: string;
+  readonly priority?: ProjectTaskPriority;
+  readonly dueAtIso?: string;
+  readonly createdAtIso: string;
+}
+
+export interface CompleteProjectTaskInput {
+  readonly completedBy: string;
+  readonly completedAtIso: string;
+}
+
 export interface NewProjectActivityInput {
   readonly id: string;
   readonly projectRequestId: string;
@@ -428,6 +461,17 @@ export const projectNoteVisibilities = Object.freeze([
   'internal',
   'client',
 ] satisfies readonly ProjectNoteVisibility[]);
+
+export const projectTaskStatuses = Object.freeze([
+  'open',
+  'completed',
+] satisfies readonly ProjectTaskStatus[]);
+
+export const projectTaskPriorities = Object.freeze([
+  'low',
+  'medium',
+  'high',
+] satisfies readonly ProjectTaskPriority[]);
 
 export const projectActivityEventTypes = Object.freeze([
   'request_created',
@@ -1087,6 +1131,81 @@ export function archiveProjectNote(
     archivedAtIso,
     archivedBy: requireText('projectNote.archivedBy', input.archivedBy, 120),
     updatedAtIso: archivedAtIso,
+  });
+}
+
+export function createProjectTask(
+  request: ProjectRequest,
+  input: NewProjectTaskInput
+): ProjectTask {
+  if (request.status === 'new' || request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_TASKS',
+      'Project request must be estimated, approved, in progress, or delivered before adding tasks.'
+    );
+  }
+
+  const id = requireIdentifier('projectTask.id', input.id);
+  const projectRequestId = requireIdentifier('projectTask.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_TASK_REQUEST_MISMATCH',
+      'Project task must belong to the selected project request.'
+    );
+  }
+
+  const priority = input.priority ?? 'medium';
+  if (!projectTaskPriorities.includes(priority)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_TASK_PRIORITY',
+      `Unsupported project task priority: ${priority}`
+    );
+  }
+
+  const createdAtIso = assertIsoTimestamp('projectTask.createdAtIso', input.createdAtIso);
+  const dueAtIso = optionalIsoTimestamp('projectTask.dueAtIso', input.dueAtIso);
+  if (dueAtIso && Date.parse(dueAtIso) < Date.parse(createdAtIso)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_TASK_DUE_DATE',
+      'projectTask.dueAtIso must not be earlier than projectTask.createdAtIso.'
+    );
+  }
+
+  return Object.freeze({
+    id,
+    projectRequestId,
+    title: requireText('projectTask.title', input.title, 160),
+    description: optionalText('projectTask.description', input.description, 1000),
+    assignee: optionalText('projectTask.assignee', input.assignee, 120),
+    priority,
+    status: 'open',
+    dueAtIso,
+    createdAtIso,
+    updatedAtIso: createdAtIso,
+  });
+}
+
+export function completeProjectTask(
+  task: ProjectTask,
+  input: CompleteProjectTaskInput
+): ProjectTask {
+  if (task.status === 'completed') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_TASK_ALREADY_COMPLETED',
+      'Project task is already completed.'
+    );
+  }
+
+  const completedAtIso = assertIsoTimestamp('projectTask.completedAtIso', input.completedAtIso);
+  return Object.freeze({
+    ...task,
+    status: 'completed',
+    completedAtIso,
+    completedBy: requireText('projectTask.completedBy', input.completedBy, 120),
+    updatedAtIso: completedAtIso,
   });
 }
 
