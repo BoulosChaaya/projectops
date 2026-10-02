@@ -1,26 +1,34 @@
 import {
   ProjectOpsOperationError,
   approveProjectRequest,
+  completeProjectMilestone,
   createClient,
+  createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
   transitionProjectRequest,
   type ApproveProjectRequestInput,
   type EstimateProjectRequestInput,
+  type NewProjectMilestoneInput,
   type NewClientInput,
   type NewProjectRequestInput,
   type ProjectOpsClient,
+  type ProjectMilestone,
   type ProjectRequest,
   type ProjectRequestStatus,
 } from './domain.ts';
 import {
   approveProjectRequestSql,
+  completeProjectMilestoneSql,
   estimateProjectRequestSql,
   insertClientSql,
+  insertProjectMilestoneSql,
   insertProjectRequestSql,
   selectClientByIdSql,
   selectClientsSql,
   selectDashboardRowsSql,
+  selectProjectMilestoneByIdSql,
+  selectProjectMilestonesSql,
   selectProjectRequestByIdSql,
   selectProjectRequestsSql,
   updateProjectRequestStatusSql,
@@ -108,6 +116,58 @@ export class ProjectOpsRepository {
     return rows[0];
   }
 
+  public async createProjectMilestone(
+    projectRequestId: string,
+    input: NewProjectMilestoneInput
+  ): Promise<ProjectMilestone> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const milestone = createProjectMilestone(request, input);
+    const existing = await this.getProjectMilestone(projectRequestId, milestone.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_MILESTONE_ALREADY_EXISTS',
+        `ProjectOps project milestone already exists: ${milestone.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectMilestone>(insertProjectMilestoneSql(milestone));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project milestone insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectMilestones(
+    projectRequestId: string
+  ): Promise<readonly ProjectMilestone[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectMilestone>(selectProjectMilestonesSql(projectRequestId));
+  }
+
+  public async getProjectMilestone(
+    projectRequestId: string,
+    milestoneId: string
+  ): Promise<ProjectMilestone | undefined> {
+    const rows = await this.sql.query<ProjectMilestone>(
+      selectProjectMilestoneByIdSql(projectRequestId, milestoneId)
+    );
+    return rows[0];
+  }
+
+  public async completeProjectMilestone(
+    projectRequestId: string,
+    milestoneId: string,
+    completedAtIso: string
+  ): Promise<ProjectMilestone> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectMilestone(projectRequestId, milestoneId);
+    const completed = completeProjectMilestone(current, completedAtIso);
+    const rows = await this.sql.query<ProjectMilestone>(completeProjectMilestoneSql(completed));
+    return this.requirePersistedProjectMilestone(rows, projectRequestId, milestoneId);
+  }
+
   public async estimateProjectRequest(
     id: string,
     input: EstimateProjectRequestInput
@@ -160,6 +220,21 @@ export class ProjectOpsRepository {
     return current;
   }
 
+  private async requireProjectMilestone(
+    projectRequestId: string,
+    milestoneId: string
+  ): Promise<ProjectMilestone> {
+    const milestone = await this.getProjectMilestone(projectRequestId, milestoneId);
+    if (!milestone) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_MILESTONE_NOT_FOUND',
+        `Project milestone not found: ${milestoneId}.`
+      );
+    }
+    return milestone;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -170,6 +245,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_REQUEST_NOT_FOUND',
         `Project request not found: ${id}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectMilestone(
+    rows: readonly ProjectMilestone[],
+    projectRequestId: string,
+    milestoneId: string
+  ): ProjectMilestone {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_MILESTONE_NOT_FOUND',
+        `Project milestone not found: ${projectRequestId}/${milestoneId}.`
       );
     }
     return persisted;
