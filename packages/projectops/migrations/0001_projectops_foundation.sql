@@ -74,6 +74,31 @@ CREATE TABLE IF NOT EXISTS projectops_project_invoices (
     ON DELETE SET NULL (deliverable_id)
 );
 
+CREATE TABLE IF NOT EXISTS projectops_project_activities (
+  id TEXT NOT NULL,
+  project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL CHECK (
+    event_type IN (
+      'request_created',
+      'request_estimated',
+      'request_approved',
+      'status_changed',
+      'milestone_created',
+      'milestone_completed',
+      'deliverable_submitted',
+      'deliverable_accepted',
+      'invoice_issued',
+      'invoice_paid',
+      'note_added'
+    )
+  ),
+  summary TEXT NOT NULL,
+  actor TEXT,
+  happened_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_request_id, id)
+);
+
 CREATE INDEX IF NOT EXISTS projectops_project_requests_client_status_idx
   ON projectops_project_requests (client_id, status);
 
@@ -88,3 +113,6 @@ CREATE INDEX IF NOT EXISTS projectops_project_deliverables_request_status_idx
 
 CREATE INDEX IF NOT EXISTS projectops_project_invoices_request_status_idx
   ON projectops_project_invoices (project_request_id, status);
+
+CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
+  ON projectops_project_activities (project_request_id, happened_at DESC);
