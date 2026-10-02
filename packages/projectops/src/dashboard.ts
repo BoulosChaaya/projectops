@@ -15,6 +15,8 @@ export interface ProjectOpsDashboardRow {
   readonly approvedBy?: string;
   readonly openMilestoneCount?: number;
   readonly completedMilestoneCount?: number;
+  readonly submittedDeliverableCount?: number;
+  readonly acceptedDeliverableCount?: number;
   readonly updatedAtIso: string;
 }
 
@@ -24,6 +26,8 @@ export interface ProjectOpsDashboardView {
   readonly highPriorityOpen: number;
   readonly openMilestones: number;
   readonly completedMilestones: number;
+  readonly submittedDeliverables: number;
+  readonly acceptedDeliverables: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -43,6 +47,8 @@ export function composeProjectOpsDashboard(
   let highPriorityOpen = 0;
   let openMilestones = 0;
   let completedMilestones = 0;
+  let submittedDeliverables = 0;
+  let acceptedDeliverables = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -52,6 +58,8 @@ export function composeProjectOpsDashboard(
     }
     openMilestones += row.openMilestoneCount ?? 0;
     completedMilestones += row.completedMilestoneCount ?? 0;
+    submittedDeliverables += row.submittedDeliverableCount ?? 0;
+    acceptedDeliverables += row.acceptedDeliverableCount ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -63,6 +71,8 @@ export function composeProjectOpsDashboard(
     highPriorityOpen,
     openMilestones,
     completedMilestones,
+    submittedDeliverables,
+    acceptedDeliverables,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
