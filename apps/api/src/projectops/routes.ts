@@ -7,6 +7,7 @@ import {
 } from '../../../../packages/projectops/src/index.ts';
 import type {
   AddressProjectFeedbackInput,
+  ArchiveProjectDocumentInput,
   ApproveProjectRequestInput,
   DecideProjectChangeRequestInput,
   EstimateProjectRequestInput,
@@ -14,6 +15,7 @@ import type {
   NewProjectActivityInput,
   NewProjectChangeRequestInput,
   NewProjectDeliverableInput,
+  NewProjectDocumentInput,
   NewProjectFeedbackInput,
   NewProjectInvoiceInput,
   NewProjectIssueInput,
@@ -23,6 +25,7 @@ import type {
   ProjectActivity,
   ProjectChangeRequest,
   ProjectFeedback,
+  ProjectDocument,
   ProjectInvoice,
   ProjectIssue,
   ProjectOpsClient,
@@ -105,6 +108,16 @@ export interface ProjectOpsApiService {
     feedbackId: string,
     input: AddressProjectFeedbackInput
   ): Promise<ProjectFeedback>;
+  createProjectDocument(
+    projectRequestId: string,
+    input: NewProjectDocumentInput
+  ): Promise<ProjectDocument>;
+  listProjectDocuments(projectRequestId: string): Promise<readonly ProjectDocument[]>;
+  archiveProjectDocument(
+    projectRequestId: string,
+    documentId: string,
+    input: ArchiveProjectDocumentInput
+  ): Promise<ProjectDocument>;
   createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -329,6 +342,32 @@ export function createProjectOpsRoutes(
             params.id,
             params.feedbackId,
             readAddressFeedbackInput(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/documents',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectDocuments(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/documents',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectDocument(params.id, readDocumentInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/documents/:documentId/archive',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.archiveProjectDocument(
+            params.id,
+            params.documentId,
+            readArchiveDocumentInput(request.body, clock)
           )
         ),
     },
@@ -636,6 +675,35 @@ function readAddressFeedbackInput(
   });
 }
 
+function readDocumentInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectDocumentInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    deliverableId: readOptionalString(value.deliverableId, 'deliverableId'),
+    title: readString(value.title, 'title'),
+    documentType: readOptionalDocumentType(value.documentType),
+    url: readString(value.url, 'url'),
+    uploadedBy: readString(value.uploadedBy, 'uploadedBy'),
+    uploadedAtIso: readOptionalString(value.uploadedAtIso, 'uploadedAtIso') ?? clock(),
+  });
+}
+
+function readArchiveDocumentInput(
+  body: unknown,
+  clock: () => string
+): ArchiveProjectDocumentInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    archivedBy: readString(value.archivedBy, 'archivedBy'),
+    archivedAtIso: readOptionalString(value.archivedAtIso, 'archivedAtIso') ?? clock(),
+  });
+}
+
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
@@ -716,6 +784,20 @@ function readOptionalFeedbackSentiment(value: unknown): NewProjectFeedbackInput[
   if (value === undefined || value === null) return undefined;
   if (value === 'positive' || value === 'neutral' || value === 'negative') return value;
   throw new HttpError(400, 'INVALID_PROJECTOPS_FEEDBACK_SENTIMENT', 'Unsupported project feedback sentiment.');
+}
+
+function readOptionalDocumentType(value: unknown): NewProjectDocumentInput['documentType'] {
+  if (value === undefined || value === null) return undefined;
+  if (
+    value === 'proposal' ||
+    value === 'contract' ||
+    value === 'asset' ||
+    value === 'handoff' ||
+    value === 'other'
+  ) {
+    return value;
+  }
+  throw new HttpError(400, 'INVALID_PROJECTOPS_DOCUMENT_TYPE', 'Unsupported project document type.');
 }
 
 function readActivityEventType(value: unknown): NewProjectActivityInput['eventType'] {
