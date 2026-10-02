@@ -178,6 +178,22 @@ CREATE TABLE IF NOT EXISTS projectops_project_tasks (
   PRIMARY KEY (project_request_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS projectops_project_work_logs (
+  id TEXT NOT NULL,
+  project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+  task_id TEXT,
+  actor TEXT NOT NULL,
+  minutes INTEGER NOT NULL CHECK (minutes > 0 AND minutes <= 1440),
+  billable BOOLEAN NOT NULL,
+  note TEXT,
+  logged_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_request_id, id),
+  FOREIGN KEY (project_request_id, task_id)
+    REFERENCES projectops_project_tasks(project_request_id, id)
+    ON DELETE SET NULL (task_id)
+);
+
 CREATE TABLE IF NOT EXISTS projectops_project_activities (
   id TEXT NOT NULL,
   project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -235,6 +251,9 @@ CREATE INDEX IF NOT EXISTS projectops_project_notes_request_status_idx
 
 CREATE INDEX IF NOT EXISTS projectops_project_tasks_request_status_idx
   ON projectops_project_tasks (project_request_id, status, priority, due_at);
+
+CREATE INDEX IF NOT EXISTS projectops_project_work_logs_request_time_idx
+  ON projectops_project_work_logs (project_request_id, logged_at DESC, billable);
 
 CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
   ON projectops_project_activities (project_request_id, happened_at DESC);
