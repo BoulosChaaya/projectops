@@ -8,6 +8,7 @@ import {
 import type {
   AddressProjectFeedbackInput,
   ArchiveProjectDocumentInput,
+  ArchiveProjectNoteInput,
   ApproveProjectRequestInput,
   DecideProjectChangeRequestInput,
   EstimateProjectRequestInput,
@@ -20,6 +21,7 @@ import type {
   NewProjectInvoiceInput,
   NewProjectIssueInput,
   NewProjectMilestoneInput,
+  NewProjectNoteInput,
   NewProjectRequestInput,
   ProjectDeliverable,
   ProjectActivity,
@@ -31,6 +33,7 @@ import type {
   ProjectOpsClient,
   ProjectOpsDashboardView,
   ProjectMilestone,
+  ProjectNote,
   ProjectRequest,
   ProjectRequestStatus,
   ResolveProjectIssueInput,
@@ -118,6 +121,16 @@ export interface ProjectOpsApiService {
     documentId: string,
     input: ArchiveProjectDocumentInput
   ): Promise<ProjectDocument>;
+  createProjectNote(
+    projectRequestId: string,
+    input: NewProjectNoteInput
+  ): Promise<ProjectNote>;
+  listProjectNotes(projectRequestId: string): Promise<readonly ProjectNote[]>;
+  archiveProjectNote(
+    projectRequestId: string,
+    noteId: string,
+    input: ArchiveProjectNoteInput
+  ): Promise<ProjectNote>;
   createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -368,6 +381,32 @@ export function createProjectOpsRoutes(
             params.id,
             params.documentId,
             readArchiveDocumentInput(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/notes',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectNotes(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/notes',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectNote(params.id, readNoteInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/notes/:noteId/archive',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.archiveProjectNote(
+            params.id,
+            params.noteId,
+            readArchiveNoteInput(request.body, clock)
           )
         ),
     },
@@ -704,6 +743,33 @@ function readArchiveDocumentInput(
   });
 }
 
+function readNoteInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectNoteInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    author: readString(value.author, 'author'),
+    visibility: readOptionalNoteVisibility(value.visibility),
+    body: readString(value.body, 'body'),
+    createdAtIso: readOptionalString(value.createdAtIso, 'createdAtIso') ?? clock(),
+  });
+}
+
+function readArchiveNoteInput(
+  body: unknown,
+  clock: () => string
+): ArchiveProjectNoteInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    archivedBy: readString(value.archivedBy, 'archivedBy'),
+    archivedAtIso: readOptionalString(value.archivedAtIso, 'archivedAtIso') ?? clock(),
+  });
+}
+
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
@@ -798,6 +864,12 @@ function readOptionalDocumentType(value: unknown): NewProjectDocumentInput['docu
     return value;
   }
   throw new HttpError(400, 'INVALID_PROJECTOPS_DOCUMENT_TYPE', 'Unsupported project document type.');
+}
+
+function readOptionalNoteVisibility(value: unknown): NewProjectNoteInput['visibility'] {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'internal' || value === 'client') return value;
+  throw new HttpError(400, 'INVALID_PROJECTOPS_NOTE_VISIBILITY', 'Unsupported project note visibility.');
 }
 
 function readActivityEventType(value: unknown): NewProjectActivityInput['eventType'] {
