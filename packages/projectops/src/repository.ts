@@ -5,17 +5,21 @@ import {
   completeProjectMilestone,
   createClient,
   createProjectDeliverable,
+  createProjectInvoice,
   createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
+  markProjectInvoicePaid,
   transitionProjectRequest,
   type ApproveProjectRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectDeliverableInput,
+  type NewProjectInvoiceInput,
   type NewProjectMilestoneInput,
   type NewClientInput,
   type NewProjectRequestInput,
   type ProjectDeliverable,
+  type ProjectInvoice,
   type ProjectOpsClient,
   type ProjectMilestone,
   type ProjectRequest,
@@ -28,13 +32,17 @@ import {
   estimateProjectRequestSql,
   insertClientSql,
   insertProjectDeliverableSql,
+  insertProjectInvoiceSql,
   insertProjectMilestoneSql,
   insertProjectRequestSql,
+  markProjectInvoicePaidSql,
   selectClientByIdSql,
   selectClientsSql,
   selectDashboardRowsSql,
   selectProjectDeliverableByIdSql,
   selectProjectDeliverablesSql,
+  selectProjectInvoiceByIdSql,
+  selectProjectInvoicesSql,
   selectProjectMilestoneByIdSql,
   selectProjectMilestonesSql,
   selectProjectRequestByIdSql,
@@ -232,6 +240,69 @@ export class ProjectOpsRepository {
     return this.requirePersistedProjectDeliverable(rows, projectRequestId, deliverableId);
   }
 
+  public async createProjectInvoice(
+    projectRequestId: string,
+    input: NewProjectInvoiceInput
+  ): Promise<ProjectInvoice> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const invoice = createProjectInvoice(request, input);
+    if (invoice.deliverableId) {
+      const deliverable = await this.requireProjectDeliverable(projectRequestId, invoice.deliverableId);
+      if (deliverable.status !== 'accepted') {
+        throw new ProjectOpsOperationError(
+          'invalid_state',
+          'PROJECTOPS_DELIVERABLE_NOT_ACCEPTED',
+          'Project deliverable must be accepted before issuing an attached invoice.'
+        );
+      }
+    }
+
+    const existing = await this.getProjectInvoice(projectRequestId, invoice.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_INVOICE_ALREADY_EXISTS',
+        `ProjectOps project invoice already exists: ${invoice.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectInvoice>(insertProjectInvoiceSql(invoice));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project invoice insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectInvoices(
+    projectRequestId: string
+  ): Promise<readonly ProjectInvoice[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectInvoice>(selectProjectInvoicesSql(projectRequestId));
+  }
+
+  public async getProjectInvoice(
+    projectRequestId: string,
+    invoiceId: string
+  ): Promise<ProjectInvoice | undefined> {
+    const rows = await this.sql.query<ProjectInvoice>(
+      selectProjectInvoiceByIdSql(projectRequestId, invoiceId)
+    );
+    return rows[0];
+  }
+
+  public async markProjectInvoicePaid(
+    projectRequestId: string,
+    invoiceId: string,
+    paidAtIso: string
+  ): Promise<ProjectInvoice> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectInvoice(projectRequestId, invoiceId);
+    const paid = markProjectInvoicePaid(current, paidAtIso);
+    const rows = await this.sql.query<ProjectInvoice>(markProjectInvoicePaidSql(paid));
+    return this.requirePersistedProjectInvoice(rows, projectRequestId, invoiceId);
+  }
+
   public async estimateProjectRequest(
     id: string,
     input: EstimateProjectRequestInput
@@ -314,6 +385,21 @@ export class ProjectOpsRepository {
     return deliverable;
   }
 
+  private async requireProjectInvoice(
+    projectRequestId: string,
+    invoiceId: string
+  ): Promise<ProjectInvoice> {
+    const invoice = await this.getProjectInvoice(projectRequestId, invoiceId);
+    if (!invoice) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_INVOICE_NOT_FOUND',
+        `Project invoice not found: ${invoiceId}.`
+      );
+    }
+    return invoice;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -356,6 +442,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_DELIVERABLE_NOT_FOUND',
         `Project deliverable not found: ${projectRequestId}/${deliverableId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectInvoice(
+    rows: readonly ProjectInvoice[],
+    projectRequestId: string,
+    invoiceId: string
+  ): ProjectInvoice {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_INVOICE_NOT_FOUND',
+        `Project invoice not found: ${projectRequestId}/${invoiceId}.`
       );
     }
     return persisted;
