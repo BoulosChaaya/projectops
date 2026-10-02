@@ -1,32 +1,40 @@
 import {
   ProjectOpsOperationError,
+  acceptProjectDeliverable,
   approveProjectRequest,
   completeProjectMilestone,
   createClient,
+  createProjectDeliverable,
   createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
   transitionProjectRequest,
   type ApproveProjectRequestInput,
   type EstimateProjectRequestInput,
+  type NewProjectDeliverableInput,
   type NewProjectMilestoneInput,
   type NewClientInput,
   type NewProjectRequestInput,
+  type ProjectDeliverable,
   type ProjectOpsClient,
   type ProjectMilestone,
   type ProjectRequest,
   type ProjectRequestStatus,
 } from './domain.ts';
 import {
+  acceptProjectDeliverableSql,
   approveProjectRequestSql,
   completeProjectMilestoneSql,
   estimateProjectRequestSql,
   insertClientSql,
+  insertProjectDeliverableSql,
   insertProjectMilestoneSql,
   insertProjectRequestSql,
   selectClientByIdSql,
   selectClientsSql,
   selectDashboardRowsSql,
+  selectProjectDeliverableByIdSql,
+  selectProjectDeliverablesSql,
   selectProjectMilestoneByIdSql,
   selectProjectMilestonesSql,
   selectProjectRequestByIdSql,
@@ -168,6 +176,62 @@ export class ProjectOpsRepository {
     return this.requirePersistedProjectMilestone(rows, projectRequestId, milestoneId);
   }
 
+  public async createProjectDeliverable(
+    projectRequestId: string,
+    input: NewProjectDeliverableInput
+  ): Promise<ProjectDeliverable> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const deliverable = createProjectDeliverable(request, input);
+    if (deliverable.milestoneId) {
+      await this.requireProjectMilestone(projectRequestId, deliverable.milestoneId);
+    }
+
+    const existing = await this.getProjectDeliverable(projectRequestId, deliverable.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_DELIVERABLE_ALREADY_EXISTS',
+        `ProjectOps project deliverable already exists: ${deliverable.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectDeliverable>(insertProjectDeliverableSql(deliverable));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project deliverable insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectDeliverables(
+    projectRequestId: string
+  ): Promise<readonly ProjectDeliverable[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectDeliverable>(selectProjectDeliverablesSql(projectRequestId));
+  }
+
+  public async getProjectDeliverable(
+    projectRequestId: string,
+    deliverableId: string
+  ): Promise<ProjectDeliverable | undefined> {
+    const rows = await this.sql.query<ProjectDeliverable>(
+      selectProjectDeliverableByIdSql(projectRequestId, deliverableId)
+    );
+    return rows[0];
+  }
+
+  public async acceptProjectDeliverable(
+    projectRequestId: string,
+    deliverableId: string,
+    acceptedAtIso: string
+  ): Promise<ProjectDeliverable> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectDeliverable(projectRequestId, deliverableId);
+    const accepted = acceptProjectDeliverable(current, acceptedAtIso);
+    const rows = await this.sql.query<ProjectDeliverable>(acceptProjectDeliverableSql(accepted));
+    return this.requirePersistedProjectDeliverable(rows, projectRequestId, deliverableId);
+  }
+
   public async estimateProjectRequest(
     id: string,
     input: EstimateProjectRequestInput
@@ -235,6 +299,21 @@ export class ProjectOpsRepository {
     return milestone;
   }
 
+  private async requireProjectDeliverable(
+    projectRequestId: string,
+    deliverableId: string
+  ): Promise<ProjectDeliverable> {
+    const deliverable = await this.getProjectDeliverable(projectRequestId, deliverableId);
+    if (!deliverable) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_DELIVERABLE_NOT_FOUND',
+        `Project deliverable not found: ${deliverableId}.`
+      );
+    }
+    return deliverable;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -261,6 +340,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_MILESTONE_NOT_FOUND',
         `Project milestone not found: ${projectRequestId}/${milestoneId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectDeliverable(
+    rows: readonly ProjectDeliverable[],
+    projectRequestId: string,
+    deliverableId: string
+  ): ProjectDeliverable {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_DELIVERABLE_NOT_FOUND',
+        `Project deliverable not found: ${projectRequestId}/${deliverableId}.`
       );
     }
     return persisted;
