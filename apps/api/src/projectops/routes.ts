@@ -14,17 +14,20 @@ import type {
   NewProjectChangeRequestInput,
   NewProjectDeliverableInput,
   NewProjectInvoiceInput,
+  NewProjectIssueInput,
   NewProjectMilestoneInput,
   NewProjectRequestInput,
   ProjectDeliverable,
   ProjectActivity,
   ProjectChangeRequest,
   ProjectInvoice,
+  ProjectIssue,
   ProjectOpsClient,
   ProjectOpsDashboardView,
   ProjectMilestone,
   ProjectRequest,
   ProjectRequestStatus,
+  ResolveProjectIssueInput,
 } from '../../../../packages/projectops/src/index.ts';
 
 export interface ProjectOpsApiService {
@@ -79,6 +82,16 @@ export interface ProjectOpsApiService {
     changeRequestId: string,
     input: DecideProjectChangeRequestInput
   ): Promise<ProjectChangeRequest>;
+  createProjectIssue(
+    projectRequestId: string,
+    input: NewProjectIssueInput
+  ): Promise<ProjectIssue>;
+  listProjectIssues(projectRequestId: string): Promise<readonly ProjectIssue[]>;
+  resolveProjectIssue(
+    projectRequestId: string,
+    issueId: string,
+    input: ResolveProjectIssueInput
+  ): Promise<ProjectIssue>;
   createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -251,6 +264,32 @@ export function createProjectOpsRoutes(
             params.id,
             params.changeRequestId,
             readChangeRequestDecisionInput(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/issues',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectIssues(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/issues',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectIssue(params.id, readIssueInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/issues/:issueId/resolve',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.resolveProjectIssue(
+            params.id,
+            params.issueId,
+            readResolveIssueInput(request.body, clock)
           )
         ),
     },
@@ -504,6 +543,31 @@ function readChangeRequestDecisionInput(
   });
 }
 
+function readIssueInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectIssueInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    title: readString(value.title, 'title'),
+    description: readString(value.description, 'description'),
+    severity: readOptionalIssueSeverity(value.severity),
+    owner: readOptionalString(value.owner, 'owner'),
+    openedAtIso: readOptionalString(value.openedAtIso, 'openedAtIso') ?? clock(),
+  });
+}
+
+function readResolveIssueInput(body: unknown, clock: () => string): ResolveProjectIssueInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    resolvedAtIso: readOptionalString(value.resolvedAtIso, 'resolvedAtIso') ?? clock(),
+    resolutionNote: readOptionalString(value.resolutionNote, 'resolutionNote'),
+  });
+}
+
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
@@ -572,6 +636,12 @@ function readStatus(value: unknown): ProjectRequestStatus {
     return value;
   }
   throw new HttpError(400, 'INVALID_PROJECTOPS_STATUS', 'Unsupported project request status.');
+}
+
+function readOptionalIssueSeverity(value: unknown): NewProjectIssueInput['severity'] {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  throw new HttpError(400, 'INVALID_PROJECTOPS_ISSUE_SEVERITY', 'Unsupported project issue severity.');
 }
 
 function readActivityEventType(value: unknown): NewProjectActivityInput['eventType'] {
