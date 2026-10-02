@@ -2,6 +2,7 @@ import type {
   ProjectActivity,
   ProjectChangeRequest,
   ProjectDeliverable,
+  ProjectFeedback,
   ProjectInvoice,
   ProjectIssue,
   ProjectMilestone,
@@ -121,6 +122,24 @@ export const projectOpsSchemaSql = Object.freeze([
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (project_request_id, id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_feedback (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    deliverable_id TEXT,
+    author TEXT NOT NULL,
+    sentiment TEXT NOT NULL CHECK (sentiment IN ('positive', 'neutral', 'negative')),
+    message TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('open', 'addressed')),
+    received_at TIMESTAMPTZ NOT NULL,
+    addressed_at TIMESTAMPTZ,
+    addressed_by TEXT,
+    response_note TEXT,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id),
+    FOREIGN KEY (project_request_id, deliverable_id)
+      REFERENCES projectops_project_deliverables(project_request_id, id)
+      ON DELETE SET NULL (deliverable_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_activities (
     id TEXT NOT NULL,
     project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -159,6 +178,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_change_requests (project_request_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_issues_request_status_idx
     ON projectops_project_issues (project_request_id, status, severity)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_feedback_request_status_idx
+    ON projectops_project_feedback (project_request_id, status, sentiment)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
     ON projectops_project_activities (project_request_id, happened_at DESC)`,
 ] as const);
@@ -613,6 +634,80 @@ export function resolveProjectIssueSql(issue: ProjectIssue): SqlStatement {
   });
 }
 
+export function insertProjectFeedbackSql(feedback: ProjectFeedback): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_feedback (
+      id,
+      project_request_id,
+      deliverable_id,
+      author,
+      sentiment,
+      message,
+      status,
+      received_at,
+      addressed_at,
+      addressed_by,
+      response_note,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    RETURNING *`,
+    params: Object.freeze([
+      feedback.id,
+      feedback.projectRequestId,
+      feedback.deliverableId ?? null,
+      feedback.author,
+      feedback.sentiment,
+      feedback.message,
+      feedback.status,
+      feedback.receivedAtIso,
+      feedback.addressedAtIso ?? null,
+      feedback.addressedBy ?? null,
+      feedback.responseNote ?? null,
+      feedback.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectFeedbackSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_feedback
+      WHERE project_request_id = $1
+      ORDER BY received_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectFeedbackByIdSql(
+  projectRequestId: string,
+  feedbackId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_feedback
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, feedbackId]),
+  });
+}
+
+export function addressProjectFeedbackSql(feedback: ProjectFeedback): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_feedback
+      SET status = $3, addressed_at = $4, addressed_by = $5, response_note = $6, updated_at = $7
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      feedback.projectRequestId,
+      feedback.id,
+      feedback.status,
+      feedback.addressedAtIso ?? null,
+      feedback.addressedBy ?? null,
+      feedback.responseNote ?? null,
+      feedback.updatedAtIso,
+    ]),
+  });
+}
+
 export function insertProjectActivitySql(activity: ProjectActivity): SqlStatement {
   return Object.freeze({
     sql: `INSERT INTO projectops_project_activities (
@@ -738,6 +833,9 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(iss.open_issues, 0) AS open_issue_count,
       COALESCE(iss.high_open_issues, 0) AS high_open_issue_count,
       COALESCE(iss.resolved_issues, 0) AS resolved_issue_count,
+      COALESCE(fb.open_feedback, 0) AS open_feedback_count,
+      COALESCE(fb.addressed_feedback, 0) AS addressed_feedback_count,
+      COALESCE(fb.negative_open_feedback, 0) AS negative_open_feedback_count,
       act.latest_activity_at,
       act.latest_activity_summary,
       pr.updated_at
@@ -787,6 +885,15 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_issues
       GROUP BY project_request_id
     ) iss ON iss.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'open') AS open_feedback,
+        COUNT(*) FILTER (WHERE status = 'addressed') AS addressed_feedback,
+        COUNT(*) FILTER (WHERE status = 'open' AND sentiment = 'negative') AS negative_open_feedback
+      FROM projectops_project_feedback
+      GROUP BY project_request_id
+    ) fb ON fb.project_request_id = pr.id
     LEFT JOIN (
       SELECT DISTINCT ON (project_request_id)
         project_request_id,
