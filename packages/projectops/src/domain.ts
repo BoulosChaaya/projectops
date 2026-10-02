@@ -59,6 +59,20 @@ export class ProjectOpsValidationError extends Error {
   }
 }
 
+export type ProjectOpsOperationErrorKind = 'conflict' | 'not_found' | 'invalid_state';
+
+export class ProjectOpsOperationError extends Error {
+  readonly code: string;
+  readonly kind: ProjectOpsOperationErrorKind;
+
+  constructor(kind: ProjectOpsOperationErrorKind, code: string, message: string) {
+    super(message);
+    this.name = 'ProjectOpsOperationError';
+    this.kind = kind;
+    this.code = code;
+  }
+}
+
 export const projectRequestStatuses = Object.freeze([
   'new',
   'estimated',
@@ -148,7 +162,11 @@ export function transitionProjectRequest(
 ): ProjectRequest {
   const allowed = workflowTransitions[request.status];
   if (!allowed.includes(nextStatus)) {
-    throw new Error(`Illegal project request transition: ${request.status} -> ${nextStatus}`);
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_INVALID_STATUS_TRANSITION',
+      `Illegal project request transition: ${request.status} -> ${nextStatus}.`
+    );
   }
 
   return Object.freeze({
