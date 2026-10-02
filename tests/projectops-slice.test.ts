@@ -201,6 +201,80 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
   assert.equal(page.summary.nextDeadline?.id, 'req-1');
 });
 
+unitTest('PROJECTOPS-006: product domain rejects unsafe or malformed input', () => {
+  assert.throws(
+    () =>
+      createClient({
+        id: '../client',
+        name: 'Zad Studio',
+        createdAtIso: T0,
+      }),
+    /client.id must start with a letter or number/
+  );
+
+  assert.throws(
+    () =>
+      createClient({
+        id: 'client-1',
+        name: 'Zad Studio',
+        email: 'not-an-email',
+        createdAtIso: T0,
+      }),
+    /client.email must be a valid email/
+  );
+
+  assert.throws(
+    () =>
+      createProjectRequest({
+        id: 'req-1',
+        clientId: 'client-1',
+        title: 'Delivery board',
+        brief: 'A'.repeat(4001),
+        createdAtIso: T0,
+      }),
+    /projectRequest.brief must be 4000 characters or fewer/
+  );
+
+  assert.throws(
+    () =>
+      createProjectRequest({
+        id: 'req-1',
+        clientId: 'client-1',
+        title: 'Delivery board',
+        brief: 'Valid brief.',
+        deadlineIso: '2026-09-28T08:00:00.000Z',
+        createdAtIso: T0,
+      }),
+    /deadlineIso must not be earlier/
+  );
+});
+
+unitTest('PROJECTOPS-007: API maps product validation failures to client errors', async () => {
+  const service = createMemoryProjectOpsService();
+  const server = await startHttpListener({
+    port: 0,
+    routes: createProjectOpsRoutes(service, () => T0),
+  });
+
+  try {
+    const response = await fetch(`${server.origin}/projectops/clients`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: '../client',
+        name: 'Zad Studio',
+      }),
+    });
+    const body = await response.json() as { code: string; status: number };
+
+    assert.equal(response.status, 400);
+    assert.equal(body.status, 400);
+    assert.equal(body.code, 'INVALID_PROJECTOPS_IDENTIFIER');
+  } finally {
+    await server.close();
+  }
+});
+
 function createMemoryProjectOpsService(): ProjectOpsApiService {
   const clients = new Map<string, ProjectOpsClient>();
   const requests = new Map<string, ProjectRequest>();
