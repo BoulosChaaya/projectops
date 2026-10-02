@@ -2,6 +2,7 @@ export type ClientStatus = 'active' | 'archived';
 export type ProjectPriority = 'low' | 'medium' | 'high';
 export type ProjectMilestoneStatus = 'open' | 'completed';
 export type ProjectDeliverableStatus = 'submitted' | 'accepted';
+export type ProjectInvoiceStatus = 'issued' | 'paid';
 export type ProjectRequestStatus =
   | 'new'
   | 'estimated'
@@ -60,6 +61,20 @@ export interface ProjectDeliverable {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectInvoice {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly deliverableId?: string;
+  readonly invoiceNumber: string;
+  readonly amountCents: number;
+  readonly currency: string;
+  readonly status: ProjectInvoiceStatus;
+  readonly issuedAtIso: string;
+  readonly dueAtIso?: string;
+  readonly paidAtIso?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface NewClientInput {
   readonly id: string;
   readonly name: string;
@@ -105,6 +120,17 @@ export interface NewProjectDeliverableInput {
   readonly title: string;
   readonly artifactUrl: string;
   readonly submittedAtIso: string;
+}
+
+export interface NewProjectInvoiceInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly deliverableId?: string;
+  readonly invoiceNumber: string;
+  readonly amountCents: number;
+  readonly currency: string;
+  readonly issuedAtIso: string;
+  readonly dueAtIso?: string;
 }
 
 export class ProjectOpsValidationError extends Error {
@@ -155,6 +181,11 @@ export const projectDeliverableStatuses = Object.freeze([
   'submitted',
   'accepted',
 ] satisfies readonly ProjectDeliverableStatus[]);
+
+export const projectInvoiceStatuses = Object.freeze([
+  'issued',
+  'paid',
+] satisfies readonly ProjectInvoiceStatus[]);
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -395,6 +426,76 @@ export function acceptProjectDeliverable(
     status: 'accepted',
     acceptedAtIso: acceptedAt,
     updatedAtIso: acceptedAt,
+  });
+}
+
+export function createProjectInvoice(
+  request: ProjectRequest,
+  input: NewProjectInvoiceInput
+): ProjectInvoice {
+  if (
+    request.status !== 'approved' &&
+    request.status !== 'in_progress' &&
+    request.status !== 'delivered'
+  ) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_INVOICES',
+      'Project request must be approved, in progress, or delivered before issuing invoices.'
+    );
+  }
+
+  const id = requireIdentifier('projectInvoice.id', input.id);
+  const projectRequestId = requireIdentifier('projectInvoice.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_INVOICE_REQUEST_MISMATCH',
+      'Project invoice must belong to the selected project request.'
+    );
+  }
+
+  const issuedAtIso = assertIsoTimestamp('projectInvoice.issuedAtIso', input.issuedAtIso);
+  const dueAtIso = optionalIsoTimestamp('projectInvoice.dueAtIso', input.dueAtIso);
+  if (dueAtIso && Date.parse(dueAtIso) < Date.parse(issuedAtIso)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECT_INVOICE_DUE_DATE',
+      'projectInvoice.dueAtIso must not be earlier than projectInvoice.issuedAtIso.'
+    );
+  }
+
+  return Object.freeze({
+    id,
+    projectRequestId,
+    deliverableId: optionalIdentifier('projectInvoice.deliverableId', input.deliverableId),
+    invoiceNumber: requireText('projectInvoice.invoiceNumber', input.invoiceNumber, 80),
+    amountCents: requireMoneyCents('projectInvoice.amountCents', input.amountCents),
+    currency: requireCurrency('projectInvoice.currency', input.currency),
+    status: 'issued',
+    issuedAtIso,
+    dueAtIso,
+    updatedAtIso: issuedAtIso,
+  });
+}
+
+export function markProjectInvoicePaid(
+  invoice: ProjectInvoice,
+  paidAtIso: string
+): ProjectInvoice {
+  if (invoice.status === 'paid') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_INVOICE_ALREADY_PAID',
+      'Project invoice is already paid.'
+    );
+  }
+
+  const paidAt = assertIsoTimestamp('projectInvoice.paidAtIso', paidAtIso);
+  return Object.freeze({
+    ...invoice,
+    status: 'paid',
+    paidAtIso: paidAt,
+    updatedAtIso: paidAt,
   });
 }
 
