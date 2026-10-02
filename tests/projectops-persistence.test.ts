@@ -7,6 +7,7 @@ import {
   projectOpsFoundationMigration,
   projectOpsSchemaSql,
   type ProjectOpsDashboardView,
+  type ProjectDeliverable,
   type ProjectMilestone,
   type ProjectRequest,
 } from '../packages/projectops/src/index.ts';
@@ -90,6 +91,16 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
     createdAtIso: T2,
   });
   const completedMilestone = await repo.completeProjectMilestone('req-1', 'milestone-1', T3);
+  const deliverable = await repo.createProjectDeliverable('req-1', {
+    id: 'deliverable-1',
+    projectRequestId: 'req-1',
+    milestoneId: 'milestone-1',
+    title: 'Accepted handoff',
+    artifactUrl: 'https://example.com/projectops/accepted-handoff',
+    submittedAtIso: T3,
+  });
+  const acceptedDeliverable = await repo.acceptProjectDeliverable('req-1', 'deliverable-1', T3);
+  const deliverables = await repo.listProjectDeliverables('req-1');
   const milestones = await repo.listProjectMilestones('req-1');
   const clients = await repo.listClients();
   const fetchedClient = await repo.getClient('client-1');
@@ -104,6 +115,10 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(approved.approvedBy, 'Boulos');
   assert.equal(milestone.status, 'open');
   assert.equal(completedMilestone.status, 'completed');
+  assert.equal(deliverable.status, 'submitted');
+  assert.equal(acceptedDeliverable.status, 'accepted');
+  assert.equal(deliverables.length, 1);
+  assert.equal(deliverables[0]?.acceptedAtIso, T3);
   assert.equal(milestones.length, 1);
   assert.equal(milestones[0]?.completedAtIso, T3);
   assert.equal(clients.length, 1);
@@ -115,13 +130,17 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(fetchedRequest?.estimateCurrency, 'USD');
   assert.equal(snapshot.projectRequests[0]?.status, 'approved');
   assert.equal(snapshot.projectMilestones[0]?.status, 'completed');
+  assert.equal(snapshot.projectDeliverables[0]?.status, 'accepted');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.approved, 1);
   assert.equal(dashboard.openMilestones, 0);
   assert.equal(dashboard.completedMilestones, 1);
+  assert.equal(dashboard.submittedDeliverables, 0);
+  assert.equal(dashboard.acceptedDeliverables, 1);
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
   assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
+  assert.equal(dashboard.rows[0]?.acceptedDeliverableCount, 1);
 });
 
 unitTest('PROJECTOPS-PERSIST-004: repository maps write conflicts and missing relationships to product errors', async () => {
@@ -190,6 +209,22 @@ unitTest('PROJECTOPS-PERSIST-004: repository maps write conflicts and missing re
       error.name === 'ProjectOpsOperationError' &&
       error.kind === 'invalid_state' &&
       error.code === 'PROJECTOPS_MILESTONE_REQUEST_MISMATCH'
+  );
+
+  await assert.rejects(
+    () =>
+      repo.createProjectDeliverable('req-1', {
+        id: 'deliverable-missing-milestone',
+        projectRequestId: 'req-1',
+        milestoneId: 'missing-milestone',
+        title: 'Missing milestone',
+        artifactUrl: 'https://example.com/projectops/missing',
+        submittedAtIso: T2,
+      }),
+    (error: Error & { code?: string; kind?: string }) =>
+      error.name === 'ProjectOpsOperationError' &&
+      error.kind === 'not_found' &&
+      error.code === 'PROJECTOPS_MILESTONE_NOT_FOUND'
   );
 
   await assert.rejects(
@@ -302,6 +337,29 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     );
     assert.equal(completedMilestone.status, 'completed');
 
+    const deliverable = await expectOkJson<ProjectDeliverable>(
+      `${server.origin}/projectops/project-requests/req-1/deliverables`,
+      {
+        id: 'deliverable-1',
+        milestoneId: 'milestone-1',
+        title: 'Client handoff',
+        artifactUrl: 'https://example.com/projectops/client-handoff',
+        submittedAtIso: T3,
+      }
+    );
+    assert.equal(deliverable.status, 'submitted');
+
+    const deliverablesRes = await fetch(`${server.origin}/projectops/project-requests/req-1/deliverables`);
+    assert.equal(deliverablesRes.status, 200);
+    const deliverables = await deliverablesRes.json() as readonly ProjectDeliverable[];
+    assert.equal(deliverables.length, 1);
+
+    const acceptedDeliverable = await expectOkJson<ProjectDeliverable>(
+      `${server.origin}/projectops/project-requests/req-1/deliverables/deliverable-1/accept`,
+      { acceptedAtIso: T3 }
+    );
+    assert.equal(acceptedDeliverable.status, 'accepted');
+
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
     const clients = await clientsRes.json() as readonly { id: string }[];
@@ -333,8 +391,10 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.totalActiveRequests, 1);
     assert.equal(dashboard.byStatus.approved, 1);
     assert.equal(dashboard.completedMilestones, 1);
+    assert.equal(dashboard.acceptedDeliverables, 1);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
     assert.equal(sql.snapshot().projectMilestones[0]?.status, 'completed');
+    assert.equal(sql.snapshot().projectDeliverables[0]?.status, 'accepted');
   } finally {
     await server.close();
   }
@@ -392,6 +452,12 @@ unitTest('PROJECTOPS-PERSIST-006: API exposes stable write-side error contracts'
       id: 'milestone-not-ready',
       title: 'Not ready',
     }, 400, 'PROJECTOPS_REQUEST_NOT_READY_FOR_MILESTONES');
+
+    await expectProjectOpsError(`${server.origin}/projectops/project-requests/req-1/deliverables`, {
+      id: 'deliverable-not-ready',
+      title: 'Too early',
+      artifactUrl: 'https://example.com/projectops/too-early',
+    }, 400, 'PROJECTOPS_REQUEST_NOT_READY_FOR_DELIVERABLES');
   } finally {
     await server.close();
   }
