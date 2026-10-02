@@ -1,4 +1,9 @@
-import type { ProjectOpsClient, ProjectRequest, ProjectRequestStatus } from './domain.ts';
+import type {
+  ProjectMilestone,
+  ProjectOpsClient,
+  ProjectRequest,
+  ProjectRequestStatus,
+} from './domain.ts';
 
 export interface SqlStatement {
   readonly sql: string;
@@ -33,10 +38,23 @@ export const projectOpsSchemaSql = Object.freeze([
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_milestones (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    due_at TIMESTAMPTZ,
+    status TEXT NOT NULL CHECK (status IN ('open', 'completed')),
+    created_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id)
+  )`,
   `CREATE INDEX IF NOT EXISTS projectops_project_requests_client_status_idx
     ON projectops_project_requests (client_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_requests_status_updated_idx
     ON projectops_project_requests (status, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_milestones_request_status_idx
+    ON projectops_project_milestones (project_request_id, status)`,
 ] as const);
 
 export function insertClientSql(client: ProjectOpsClient): SqlStatement {
@@ -138,6 +156,70 @@ export function approveProjectRequestSql(request: ProjectRequest): SqlStatement 
   });
 }
 
+export function insertProjectMilestoneSql(milestone: ProjectMilestone): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_milestones (
+      id,
+      project_request_id,
+      title,
+      due_at,
+      status,
+      created_at,
+      completed_at,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    RETURNING *`,
+    params: Object.freeze([
+      milestone.id,
+      milestone.projectRequestId,
+      milestone.title,
+      milestone.dueAtIso ?? null,
+      milestone.status,
+      milestone.createdAtIso,
+      milestone.completedAtIso ?? null,
+      milestone.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectMilestonesSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_milestones
+      WHERE project_request_id = $1
+      ORDER BY due_at ASC NULLS LAST, created_at ASC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectMilestoneByIdSql(
+  projectRequestId: string,
+  milestoneId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_milestones
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, milestoneId]),
+  });
+}
+
+export function completeProjectMilestoneSql(milestone: ProjectMilestone): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_milestones
+      SET status = $3, completed_at = $4, updated_at = $5
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      milestone.projectRequestId,
+      milestone.id,
+      milestone.status,
+      milestone.completedAtIso ?? null,
+      milestone.updatedAtIso,
+    ]),
+  });
+}
+
 export function selectClientsSql(): SqlStatement {
   return Object.freeze({
     sql: `SELECT *
@@ -203,9 +285,19 @@ export function selectDashboardRowsSql(): SqlStatement {
       pr.estimated_at,
       pr.approved_at,
       pr.approved_by,
+      COALESCE(ms.open_milestones, 0) AS open_milestone_count,
+      COALESCE(ms.completed_milestones, 0) AS completed_milestone_count,
       pr.updated_at
     FROM projectops_project_requests pr
     JOIN projectops_clients c ON c.id = pr.client_id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'open') AS open_milestones,
+        COUNT(*) FILTER (WHERE status = 'completed') AS completed_milestones
+      FROM projectops_project_milestones
+      GROUP BY project_request_id
+    ) ms ON ms.project_request_id = pr.id
     WHERE pr.status != 'archived'
     ORDER BY pr.updated_at DESC, pr.created_at DESC`,
     params: Object.freeze([]),
