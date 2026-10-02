@@ -39,7 +39,7 @@ export interface ServerError {
 }
 
 export function classifyHttpError(error: unknown): ClientError | ServerError {
-  if (error instanceof HttpError) {
+  if (isHttpError(error)) {
     if (error.status >= 400 && error.status < 500) {
       return Object.freeze({
         kind: 'client',
@@ -74,4 +74,18 @@ export function classifyHttpError(error: unknown): ClientError | ServerError {
     code: 'INTERNAL_SERVER_ERROR',
     message: 'An unexpected internal server error occurred.',
   });
+}
+
+function isHttpError(error: unknown): error is HttpError {
+  return (
+    error instanceof HttpError ||
+    (
+      Boolean(error) &&
+      typeof error === 'object' &&
+      (error as { name?: unknown }).name === 'HttpError' &&
+      typeof (error as { status?: unknown }).status === 'number' &&
+      typeof (error as { code?: unknown }).code === 'string' &&
+      typeof (error as { message?: unknown }).message === 'string'
+    )
+  );
 }
