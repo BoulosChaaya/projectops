@@ -32,6 +32,10 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
       completedMilestoneCount: 1,
       submittedDeliverableCount: 1,
       acceptedDeliverableCount: 2,
+      issuedInvoiceCount: 1,
+      paidInvoiceCount: 2,
+      outstandingInvoiceAmountCents: 125000,
+      paidInvoiceAmountCents: 250000,
       updatedAtIso: T1,
     },
   ]);
@@ -46,12 +50,14 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /High priority open/);
   assert.match(rendered.html, /Open milestones/);
   assert.match(rendered.html, /Submitted deliverables/);
+  assert.match(rendered.html, /Outstanding invoices/);
   assert.match(rendered.html, /Launch dashboard/);
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /In Progress/);
   assert.match(rendered.html, /USD 1,250\.00/);
   assert.match(rendered.html, /1 done \/ 2 open/);
   assert.match(rendered.html, /2 accepted \/ 1 submitted/);
+  assert.match(rendered.html, /2 paid \/ 1 open \(USD 1,250\.00\)/);
   assert.match(rendered.html, /High/);
 });
 
@@ -177,6 +183,16 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     artifactUrl: 'https://example.com/projectops/launch-package',
     submittedAtIso: T1,
   });
+  await repo.acceptProjectDeliverable('req-1', 'deliverable-1', T1);
+  await repo.createProjectInvoice('req-1', {
+    id: 'invoice-1',
+    projectRequestId: 'req-1',
+    deliverableId: 'deliverable-1',
+    invoiceNumber: 'INV-001',
+    amountCents: 210000,
+    currency: 'USD',
+    issuedAtIso: T1,
+  });
 
   const server = await startHttpListener({
     port: 0,
@@ -197,7 +213,8 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     assert.match(html, /Approved/);
     assert.match(html, /USD 2,100\.00/);
     assert.match(html, /0 done \/ 1 open/);
-    assert.match(html, /0 accepted \/ 1 submitted/);
+    assert.match(html, /1 accepted \/ 0 submitted/);
+    assert.match(html, /0 paid \/ 1 open \(USD 2,100\.00\)/);
     assert.match(html, /Zad Studio/);
   } finally {
     await server.close();
