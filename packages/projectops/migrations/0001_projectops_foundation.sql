@@ -55,6 +55,25 @@ CREATE TABLE IF NOT EXISTS projectops_project_deliverables (
     ON DELETE SET NULL (milestone_id)
 );
 
+CREATE TABLE IF NOT EXISTS projectops_project_invoices (
+  id TEXT NOT NULL,
+  project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+  deliverable_id TEXT,
+  invoice_number TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  currency TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  status TEXT NOT NULL CHECK (status IN ('issued', 'paid')),
+  issued_at TIMESTAMPTZ NOT NULL,
+  due_at TIMESTAMPTZ,
+  paid_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_request_id, id),
+  UNIQUE (project_request_id, invoice_number),
+  FOREIGN KEY (project_request_id, deliverable_id)
+    REFERENCES projectops_project_deliverables(project_request_id, id)
+    ON DELETE SET NULL (deliverable_id)
+);
+
 CREATE INDEX IF NOT EXISTS projectops_project_requests_client_status_idx
   ON projectops_project_requests (client_id, status);
 
@@ -66,3 +85,6 @@ CREATE INDEX IF NOT EXISTS projectops_project_milestones_request_status_idx
 
 CREATE INDEX IF NOT EXISTS projectops_project_deliverables_request_status_idx
   ON projectops_project_deliverables (project_request_id, status);
+
+CREATE INDEX IF NOT EXISTS projectops_project_invoices_request_status_idx
+  ON projectops_project_invoices (project_request_id, status);
