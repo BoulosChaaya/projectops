@@ -11,6 +11,7 @@ import type {
   ProjectOpsClient,
   ProjectRequest,
   ProjectRequestStatus,
+  ProjectTask,
 } from './domain.ts';
 
 export interface SqlStatement {
@@ -173,6 +174,21 @@ export const projectOpsSchemaSql = Object.freeze([
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (project_request_id, id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_tasks (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    assignee TEXT,
+    priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high')),
+    status TEXT NOT NULL CHECK (status IN ('open', 'completed')),
+    due_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    completed_by TEXT,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id)
+  )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_activities (
     id TEXT NOT NULL,
     project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -217,6 +233,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_documents (project_request_id, status, document_type)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_notes_request_status_idx
     ON projectops_project_notes (project_request_id, status, visibility)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_tasks_request_status_idx
+    ON projectops_project_tasks (project_request_id, status, priority, due_at)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
     ON projectops_project_activities (project_request_id, happened_at DESC)`,
 ] as const);
@@ -887,6 +905,79 @@ export function archiveProjectNoteSql(note: ProjectNote): SqlStatement {
   });
 }
 
+export function insertProjectTaskSql(task: ProjectTask): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_tasks (
+      id,
+      project_request_id,
+      title,
+      description,
+      assignee,
+      priority,
+      status,
+      due_at,
+      created_at,
+      completed_at,
+      completed_by,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    RETURNING *`,
+    params: Object.freeze([
+      task.id,
+      task.projectRequestId,
+      task.title,
+      task.description ?? null,
+      task.assignee ?? null,
+      task.priority,
+      task.status,
+      task.dueAtIso ?? null,
+      task.createdAtIso,
+      task.completedAtIso ?? null,
+      task.completedBy ?? null,
+      task.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectTasksSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_tasks
+      WHERE project_request_id = $1
+      ORDER BY due_at ASC NULLS LAST, created_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectTaskByIdSql(
+  projectRequestId: string,
+  taskId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_tasks
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, taskId]),
+  });
+}
+
+export function completeProjectTaskSql(task: ProjectTask): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_tasks
+      SET status = $3, completed_at = $4, completed_by = $5, updated_at = $6
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      task.projectRequestId,
+      task.id,
+      task.status,
+      task.completedAtIso ?? null,
+      task.completedBy ?? null,
+      task.updatedAtIso,
+    ]),
+  });
+}
+
 export function insertProjectActivitySql(activity: ProjectActivity): SqlStatement {
   return Object.freeze({
     sql: `INSERT INTO projectops_project_activities (
@@ -1020,6 +1111,10 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(nt.active_notes, 0) AS active_note_count,
       COALESCE(nt.archived_notes, 0) AS archived_note_count,
       COALESCE(nt.client_visible_notes, 0) AS client_visible_note_count,
+      COALESCE(ts.open_tasks, 0) AS open_task_count,
+      COALESCE(ts.high_open_tasks, 0) AS high_open_task_count,
+      COALESCE(ts.completed_tasks, 0) AS completed_task_count,
+      ts.next_task_due_at,
       act.latest_activity_at,
       act.latest_activity_summary,
       pr.updated_at
@@ -1095,6 +1190,16 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_notes
       GROUP BY project_request_id
     ) nt ON nt.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'open') AS open_tasks,
+        COUNT(*) FILTER (WHERE status = 'open' AND priority = 'high') AS high_open_tasks,
+        COUNT(*) FILTER (WHERE status = 'completed') AS completed_tasks,
+        MIN(due_at) FILTER (WHERE status = 'open') AS next_task_due_at
+      FROM projectops_project_tasks
+      GROUP BY project_request_id
+    ) ts ON ts.project_request_id = pr.id
     LEFT JOIN (
       SELECT DISTINCT ON (project_request_id)
         project_request_id,
