@@ -26,6 +26,8 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
       priority: 'high',
       status: 'in_progress',
       deadlineIso: '2026-10-10T00:00:00.000Z',
+      estimateAmountCents: 125000,
+      estimateCurrency: 'USD',
       updatedAtIso: T1,
     },
   ]);
@@ -41,6 +43,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /Launch dashboard/);
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /In Progress/);
+  assert.match(rendered.html, /USD 1,250\.00/);
   assert.match(rendered.html, /High/);
 });
 
@@ -91,7 +94,11 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
     priority: 'medium',
     createdAtIso: T0,
   });
-  await repo.transitionProjectRequest('req-1', 'estimated', T1);
+  await repo.estimateProjectRequest('req-1', {
+    amountCents: 175000,
+    currency: 'USD',
+    estimatedAtIso: T1,
+  });
 
   const summary = await repo.getDashboard();
   const page = composeProjectOpsDashboardPageFromSummary(summary);
@@ -100,6 +107,7 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
   assert.match(rendered.html, /Repository UI/);
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /Estimated/);
+  assert.match(rendered.html, /USD 1,750\.00/);
   assert.match(rendered.html, /1 shown/);
 });
 
@@ -138,8 +146,15 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     priority: 'high',
     createdAtIso: T0,
   });
-  await repo.transitionProjectRequest('req-1', 'estimated', T1);
-  await repo.transitionProjectRequest('req-1', 'approved', T1);
+  await repo.estimateProjectRequest('req-1', {
+    amountCents: 210000,
+    currency: 'USD',
+    estimatedAtIso: T1,
+  });
+  await repo.approveProjectRequest('req-1', {
+    approvedBy: 'Boulos',
+    approvedAtIso: T1,
+  });
 
   const server = await startHttpListener({
     port: 0,
@@ -158,6 +173,7 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     assert.match(html, /ProjectOps Dashboard/);
     assert.match(html, /Browser dashboard/);
     assert.match(html, /Approved/);
+    assert.match(html, /USD 2,100\.00/);
     assert.match(html, /Zad Studio/);
   } finally {
     await server.close();
