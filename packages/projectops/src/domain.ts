@@ -24,6 +24,11 @@ export interface ProjectRequest {
   readonly brief: string;
   readonly budgetRange?: string;
   readonly deadlineIso?: string;
+  readonly estimateAmountCents?: number;
+  readonly estimateCurrency?: string;
+  readonly estimatedAtIso?: string;
+  readonly approvedAtIso?: string;
+  readonly approvedBy?: string;
   readonly priority: ProjectPriority;
   readonly status: ProjectRequestStatus;
   readonly createdAtIso: string;
@@ -47,6 +52,17 @@ export interface NewProjectRequestInput {
   readonly deadlineIso?: string;
   readonly priority?: ProjectPriority;
   readonly createdAtIso: string;
+}
+
+export interface EstimateProjectRequestInput {
+  readonly amountCents: number;
+  readonly currency: string;
+  readonly estimatedAtIso: string;
+}
+
+export interface ApproveProjectRequestInput {
+  readonly approvedBy: string;
+  readonly approvedAtIso: string;
 }
 
 export class ProjectOpsValidationError extends Error {
@@ -176,10 +192,64 @@ export function transitionProjectRequest(
   });
 }
 
+export function estimateProjectRequest(
+  request: ProjectRequest,
+  input: EstimateProjectRequestInput
+): ProjectRequest {
+  const estimated = transitionProjectRequest(request, 'estimated', input.estimatedAtIso);
+  return Object.freeze({
+    ...estimated,
+    estimateAmountCents: requireMoneyCents('projectRequest.estimateAmountCents', input.amountCents),
+    estimateCurrency: requireCurrency('projectRequest.estimateCurrency', input.currency),
+    estimatedAtIso: assertIsoTimestamp('projectRequest.estimatedAtIso', input.estimatedAtIso),
+  });
+}
+
+export function approveProjectRequest(
+  request: ProjectRequest,
+  input: ApproveProjectRequestInput
+): ProjectRequest {
+  if (request.estimateAmountCents === undefined || !request.estimateCurrency || !request.estimatedAtIso) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_ESTIMATE_REQUIRED',
+      'Project request must be estimated before approval.'
+    );
+  }
+
+  const approved = transitionProjectRequest(request, 'approved', input.approvedAtIso);
+  return Object.freeze({
+    ...approved,
+    approvedAtIso: assertIsoTimestamp('projectRequest.approvedAtIso', input.approvedAtIso),
+    approvedBy: requireText('projectRequest.approvedBy', input.approvedBy, 120),
+  });
+}
+
 export function getAllowedProjectRequestTransitions(
   status: ProjectRequestStatus
 ): readonly ProjectRequestStatus[] {
   return workflowTransitions[status];
+}
+
+function requireMoneyCents(name: string, value: number): number {
+  if (!Number.isInteger(value) || value <= 0 || value > 1_000_000_000) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_MONEY',
+      `${name} must be a positive integer number of cents.`
+    );
+  }
+  return value;
+}
+
+function requireCurrency(name: string, value: string): string {
+  const currency = value.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_CURRENCY',
+      `${name} must be a three-letter ISO currency code.`
+    );
+  }
+  return currency;
 }
 
 function requireIdentifier(name: string, value: string): string {
