@@ -1,4 +1,5 @@
 import type { RawQueryResult } from '../../db/src/connection/connect.ts';
+import { ProjectOpsOperationError } from './domain.ts';
 import type { ProjectOpsSqlExecutor } from './repository.ts';
 import type { SqlStatement } from './sql.ts';
 
@@ -19,8 +20,12 @@ export class ProjectOpsConnectionSqlExecutor implements ProjectOpsSqlExecutor {
   }
 
   public async query<T>(statement: SqlStatement): Promise<readonly T[]> {
-    const result = await this.connection.query<T>(statement.sql, statement.params);
-    return Object.freeze(result.rows);
+    try {
+      const result = await this.connection.query<T>(statement.sql, statement.params);
+      return Object.freeze(result.rows);
+    } catch (error) {
+      throw mapProjectOpsStorageError(error, statement);
+    }
   }
 }
 
@@ -241,6 +246,32 @@ function asOptionalString(value: unknown): string | undefined {
     throw new Error('Expected optional ProjectOps SQL value to be a string.');
   }
   return value;
+}
+
+function mapProjectOpsStorageError(error: unknown, statement: SqlStatement): unknown {
+  const code = (error as { code?: unknown })?.code;
+  if (code === '23505' && statement.sql.includes('projectops_clients')) {
+    return new ProjectOpsOperationError(
+      'conflict',
+      'PROJECTOPS_CLIENT_ALREADY_EXISTS',
+      'ProjectOps client already exists.'
+    );
+  }
+  if (code === '23505' && statement.sql.includes('projectops_project_requests')) {
+    return new ProjectOpsOperationError(
+      'conflict',
+      'PROJECTOPS_REQUEST_ALREADY_EXISTS',
+      'ProjectOps project request already exists.'
+    );
+  }
+  if (code === '23503' && statement.sql.includes('projectops_project_requests')) {
+    return new ProjectOpsOperationError(
+      'not_found',
+      'PROJECTOPS_CLIENT_NOT_FOUND',
+      'ProjectOps client not found.'
+    );
+  }
+  return error;
 }
 
 interface ProjectOpsClientRow {
