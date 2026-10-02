@@ -27,6 +27,9 @@ export interface ProjectOpsDashboardRow {
   readonly openIssueCount?: number;
   readonly highOpenIssueCount?: number;
   readonly resolvedIssueCount?: number;
+  readonly openFeedbackCount?: number;
+  readonly addressedFeedbackCount?: number;
+  readonly negativeOpenFeedbackCount?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
@@ -50,6 +53,9 @@ export interface ProjectOpsDashboardView {
   readonly openIssues: number;
   readonly highOpenIssues: number;
   readonly resolvedIssues: number;
+  readonly openFeedback: number;
+  readonly addressedFeedback: number;
+  readonly negativeOpenFeedback: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -81,6 +87,9 @@ export function composeProjectOpsDashboard(
   let openIssues = 0;
   let highOpenIssues = 0;
   let resolvedIssues = 0;
+  let openFeedback = 0;
+  let addressedFeedback = 0;
+  let negativeOpenFeedback = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -102,6 +111,9 @@ export function composeProjectOpsDashboard(
     openIssues += row.openIssueCount ?? 0;
     highOpenIssues += row.highOpenIssueCount ?? 0;
     resolvedIssues += row.resolvedIssueCount ?? 0;
+    openFeedback += row.openFeedbackCount ?? 0;
+    addressedFeedback += row.addressedFeedbackCount ?? 0;
+    negativeOpenFeedback += row.negativeOpenFeedbackCount ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -125,6 +137,9 @@ export function composeProjectOpsDashboard(
     openIssues,
     highOpenIssues,
     resolvedIssues,
+    openFeedback,
+    addressedFeedback,
+    negativeOpenFeedback,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
