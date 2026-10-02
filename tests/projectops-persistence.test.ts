@@ -113,6 +113,15 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   });
   const paidInvoice = await repo.markProjectInvoicePaid('req-1', 'invoice-1', T3);
   const invoices = await repo.listProjectInvoices('req-1');
+  const activity = await repo.createProjectActivity('req-1', {
+    id: 'activity-1',
+    projectRequestId: 'req-1',
+    eventType: 'note_added',
+    summary: 'Client approved paid invoice and handoff.',
+    actor: 'Boulos',
+    happenedAtIso: T3,
+  });
+  const activities = await repo.listProjectActivities('req-1');
   const milestones = await repo.listProjectMilestones('req-1');
   const clients = await repo.listClients();
   const fetchedClient = await repo.getClient('client-1');
@@ -135,6 +144,9 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(paidInvoice.status, 'paid');
   assert.equal(invoices.length, 1);
   assert.equal(invoices[0]?.paidAtIso, T3);
+  assert.equal(activity.eventType, 'note_added');
+  assert.equal(activities.length, 1);
+  assert.equal(activities[0]?.summary, 'Client approved paid invoice and handoff.');
   assert.equal(milestones.length, 1);
   assert.equal(milestones[0]?.completedAtIso, T3);
   assert.equal(clients.length, 1);
@@ -148,6 +160,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(snapshot.projectMilestones[0]?.status, 'completed');
   assert.equal(snapshot.projectDeliverables[0]?.status, 'accepted');
   assert.equal(snapshot.projectInvoices[0]?.status, 'paid');
+  assert.equal(snapshot.projectActivities[0]?.summary, 'Client approved paid invoice and handoff.');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.approved, 1);
   assert.equal(dashboard.openMilestones, 0);
@@ -162,6 +175,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
   assert.equal(dashboard.rows[0]?.acceptedDeliverableCount, 1);
   assert.equal(dashboard.rows[0]?.paidInvoiceAmountCents, 320000);
+  assert.equal(dashboard.rows[0]?.latestActivitySummary, 'Client approved paid invoice and handoff.');
 });
 
 unitTest('PROJECTOPS-PERSIST-004: repository maps write conflicts and missing relationships to product errors', async () => {
