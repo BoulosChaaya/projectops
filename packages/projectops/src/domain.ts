@@ -3,6 +3,7 @@ export type ProjectPriority = 'low' | 'medium' | 'high';
 export type ProjectMilestoneStatus = 'open' | 'completed';
 export type ProjectDeliverableStatus = 'submitted' | 'accepted';
 export type ProjectInvoiceStatus = 'issued' | 'paid';
+export type ProjectChangeRequestStatus = 'proposed' | 'approved' | 'rejected';
 export type ProjectActivityEventType =
   | 'request_created'
   | 'request_estimated'
@@ -87,6 +88,22 @@ export interface ProjectInvoice {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectChangeRequest {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly requestedBy: string;
+  readonly estimateDeltaCents?: number;
+  readonly estimateCurrency?: string;
+  readonly status: ProjectChangeRequestStatus;
+  readonly requestedAtIso: string;
+  readonly decidedAtIso?: string;
+  readonly decidedBy?: string;
+  readonly decisionNote?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface ProjectActivity {
   readonly id: string;
   readonly projectRequestId: string;
@@ -155,6 +172,23 @@ export interface NewProjectInvoiceInput {
   readonly dueAtIso?: string;
 }
 
+export interface NewProjectChangeRequestInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly requestedBy: string;
+  readonly estimateDeltaCents?: number;
+  readonly estimateCurrency?: string;
+  readonly requestedAtIso: string;
+}
+
+export interface DecideProjectChangeRequestInput {
+  readonly decidedBy: string;
+  readonly decidedAtIso: string;
+  readonly decisionNote?: string;
+}
+
 export interface NewProjectActivityInput {
   readonly id: string;
   readonly projectRequestId: string;
@@ -217,6 +251,12 @@ export const projectInvoiceStatuses = Object.freeze([
   'issued',
   'paid',
 ] satisfies readonly ProjectInvoiceStatus[]);
+
+export const projectChangeRequestStatuses = Object.freeze([
+  'proposed',
+  'approved',
+  'rejected',
+] satisfies readonly ProjectChangeRequestStatus[]);
 
 export const projectActivityEventTypes = Object.freeze([
   'request_created',
@@ -544,6 +584,76 @@ export function markProjectInvoicePaid(
   });
 }
 
+export function createProjectChangeRequest(
+  request: ProjectRequest,
+  input: NewProjectChangeRequestInput
+): ProjectChangeRequest {
+  if (
+    request.status !== 'approved' &&
+    request.status !== 'in_progress' &&
+    request.status !== 'delivered'
+  ) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_CHANGE_REQUESTS',
+      'Project request must be approved, in progress, or delivered before adding change requests.'
+    );
+  }
+
+  const id = requireIdentifier('projectChangeRequest.id', input.id);
+  const projectRequestId = requireIdentifier('projectChangeRequest.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_CHANGE_REQUEST_REQUEST_MISMATCH',
+      'Project change request must belong to the selected project request.'
+    );
+  }
+
+  const estimateDeltaCents = optionalMoneyCents(
+    'projectChangeRequest.estimateDeltaCents',
+    input.estimateDeltaCents
+  );
+  const estimateCurrency = optionalCurrency(
+    'projectChangeRequest.estimateCurrency',
+    input.estimateCurrency
+  );
+  if ((estimateDeltaCents === undefined) !== (estimateCurrency === undefined)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_CHANGE_REQUEST_ESTIMATE',
+      'projectChangeRequest estimate delta and currency must be provided together.'
+    );
+  }
+
+  const requestedAtIso = assertIsoTimestamp('projectChangeRequest.requestedAtIso', input.requestedAtIso);
+  return Object.freeze({
+    id,
+    projectRequestId,
+    title: requireText('projectChangeRequest.title', input.title, 160),
+    description: requireText('projectChangeRequest.description', input.description, 2000),
+    requestedBy: requireText('projectChangeRequest.requestedBy', input.requestedBy, 120),
+    estimateDeltaCents,
+    estimateCurrency,
+    status: 'proposed',
+    requestedAtIso,
+    updatedAtIso: requestedAtIso,
+  });
+}
+
+export function approveProjectChangeRequest(
+  changeRequest: ProjectChangeRequest,
+  input: DecideProjectChangeRequestInput
+): ProjectChangeRequest {
+  return decideProjectChangeRequest(changeRequest, 'approved', input);
+}
+
+export function rejectProjectChangeRequest(
+  changeRequest: ProjectChangeRequest,
+  input: DecideProjectChangeRequestInput
+): ProjectChangeRequest {
+  return decideProjectChangeRequest(changeRequest, 'rejected', input);
+}
+
 export function createProjectActivity(
   request: ProjectRequest,
   input: NewProjectActivityInput
@@ -593,6 +703,11 @@ function requireMoneyCents(name: string, value: number): number {
   return value;
 }
 
+function optionalMoneyCents(name: string, value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return requireMoneyCents(name, value);
+}
+
 function requireCurrency(name: string, value: string): string {
   const currency = value.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) {
@@ -602,6 +717,35 @@ function requireCurrency(name: string, value: string): string {
     );
   }
   return currency;
+}
+
+function optionalCurrency(name: string, value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return requireCurrency(name, value);
+}
+
+function decideProjectChangeRequest(
+  changeRequest: ProjectChangeRequest,
+  status: Extract<ProjectChangeRequestStatus, 'approved' | 'rejected'>,
+  input: DecideProjectChangeRequestInput
+): ProjectChangeRequest {
+  if (changeRequest.status !== 'proposed') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_CHANGE_REQUEST_ALREADY_DECIDED',
+      'Project change request has already been decided.'
+    );
+  }
+
+  const decidedAtIso = assertIsoTimestamp('projectChangeRequest.decidedAtIso', input.decidedAtIso);
+  return Object.freeze({
+    ...changeRequest,
+    status,
+    decidedAtIso,
+    decidedBy: requireText('projectChangeRequest.decidedBy', input.decidedBy, 120),
+    decisionNote: optionalText('projectChangeRequest.decisionNote', input.decisionNote, 500),
+    updatedAtIso: decidedAtIso,
+  });
 }
 
 function requireIdentifier(name: string, value: string): string {
