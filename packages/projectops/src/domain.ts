@@ -14,6 +14,7 @@ export type ProjectNoteStatus = 'active' | 'archived';
 export type ProjectNoteVisibility = 'internal' | 'client';
 export type ProjectTaskStatus = 'open' | 'completed';
 export type ProjectTaskPriority = 'low' | 'medium' | 'high';
+export type ProjectWorkLogBillable = boolean;
 export type ProjectActivityEventType =
   | 'request_created'
   | 'request_estimated'
@@ -186,6 +187,18 @@ export interface ProjectTask {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectWorkLog {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly taskId?: string;
+  readonly actor: string;
+  readonly minutes: number;
+  readonly billable: ProjectWorkLogBillable;
+  readonly note?: string;
+  readonly loggedAtIso: string;
+  readonly createdAtIso: string;
+}
+
 export interface ProjectActivity {
   readonly id: string;
   readonly projectRequestId: string;
@@ -346,6 +359,17 @@ export interface NewProjectTaskInput {
 export interface CompleteProjectTaskInput {
   readonly completedBy: string;
   readonly completedAtIso: string;
+}
+
+export interface NewProjectWorkLogInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly taskId?: string;
+  readonly actor: string;
+  readonly minutes: number;
+  readonly billable?: ProjectWorkLogBillable;
+  readonly note?: string;
+  readonly loggedAtIso: string;
 }
 
 export interface NewProjectActivityInput {
@@ -1209,6 +1233,44 @@ export function completeProjectTask(
   });
 }
 
+export function createProjectWorkLog(
+  request: ProjectRequest,
+  input: NewProjectWorkLogInput
+): ProjectWorkLog {
+  if (request.status === 'new' || request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_WORK_LOGS',
+      'Project request must be estimated, approved, in progress, or delivered before logging work.'
+    );
+  }
+
+  const id = requireIdentifier('projectWorkLog.id', input.id);
+  const projectRequestId = requireIdentifier('projectWorkLog.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_WORK_LOG_REQUEST_MISMATCH',
+      'Project work log must belong to the selected project request.'
+    );
+  }
+
+  const loggedAtIso = assertIsoTimestamp('projectWorkLog.loggedAtIso', input.loggedAtIso);
+  const minutes = requireWorkMinutes('projectWorkLog.minutes', input.minutes);
+
+  return Object.freeze({
+    id,
+    projectRequestId,
+    taskId: optionalIdentifier('projectWorkLog.taskId', input.taskId),
+    actor: requireText('projectWorkLog.actor', input.actor, 120),
+    minutes,
+    billable: input.billable ?? true,
+    note: optionalText('projectWorkLog.note', input.note, 1000),
+    loggedAtIso,
+    createdAtIso: loggedAtIso,
+  });
+}
+
 export function createProjectActivity(
   request: ProjectRequest,
   input: NewProjectActivityInput
@@ -1253,6 +1315,16 @@ function requireMoneyCents(name: string, value: number): number {
     throw new ProjectOpsValidationError(
       'INVALID_PROJECTOPS_MONEY',
       `${name} must be a positive integer number of cents.`
+    );
+  }
+  return value;
+}
+
+function requireWorkMinutes(name: string, value: number): number {
+  if (!Number.isInteger(value) || value <= 0 || value > 1_440) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_WORK_MINUTES',
+      `${name} must be a positive integer number of minutes up to 1440.`
     );
   }
   return value;
