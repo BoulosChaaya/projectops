@@ -6,6 +6,7 @@ import {
   archiveProjectNote,
   approveProjectChangeRequest,
   approveProjectRequest,
+  completeProjectTask,
   completeProjectMilestone,
   createProjectChangeRequest,
   createProjectActivity,
@@ -18,6 +19,7 @@ import {
   createProjectMilestone,
   createProjectNote,
   createProjectRequest,
+  createProjectTask,
   estimateProjectRequest,
   markProjectInvoicePaid,
   rejectProjectChangeRequest,
@@ -27,6 +29,7 @@ import {
   type ArchiveProjectDocumentInput,
   type ArchiveProjectNoteInput,
   type ApproveProjectRequestInput,
+  type CompleteProjectTaskInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
@@ -40,6 +43,7 @@ import {
   type NewProjectNoteInput,
   type NewClientInput,
   type NewProjectRequestInput,
+  type NewProjectTaskInput,
   type ProjectActivity,
   type ProjectChangeRequest,
   type ProjectDeliverable,
@@ -52,6 +56,7 @@ import {
   type ProjectNote,
   type ProjectRequest,
   type ProjectRequestStatus,
+  type ProjectTask,
   type ResolveProjectIssueInput,
 } from './domain.ts';
 import {
@@ -60,6 +65,7 @@ import {
   archiveProjectDocumentSql,
   archiveProjectNoteSql,
   approveProjectRequestSql,
+  completeProjectTaskSql,
   completeProjectMilestoneSql,
   estimateProjectRequestSql,
   insertClientSql,
@@ -73,6 +79,7 @@ import {
   insertProjectMilestoneSql,
   insertProjectNoteSql,
   insertProjectRequestSql,
+  insertProjectTaskSql,
   markProjectInvoicePaidSql,
   selectClientByIdSql,
   selectClientsSql,
@@ -97,6 +104,8 @@ import {
   selectProjectNotesSql,
   selectProjectRequestByIdSql,
   selectProjectRequestsSql,
+  selectProjectTaskByIdSql,
+  selectProjectTasksSql,
   resolveProjectIssueSql,
   updateProjectChangeRequestDecisionSql,
   updateProjectRequestStatusSql,
@@ -637,6 +646,56 @@ export class ProjectOpsRepository {
     return this.requirePersistedProjectNote(rows, projectRequestId, noteId);
   }
 
+  public async createProjectTask(
+    projectRequestId: string,
+    input: NewProjectTaskInput
+  ): Promise<ProjectTask> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const task = createProjectTask(request, input);
+    const existing = await this.getProjectTask(projectRequestId, task.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_TASK_ALREADY_EXISTS',
+        `ProjectOps project task already exists: ${task.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectTask>(insertProjectTaskSql(task));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project task insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectTasks(projectRequestId: string): Promise<readonly ProjectTask[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectTask>(selectProjectTasksSql(projectRequestId));
+  }
+
+  public async getProjectTask(
+    projectRequestId: string,
+    taskId: string
+  ): Promise<ProjectTask | undefined> {
+    const rows = await this.sql.query<ProjectTask>(
+      selectProjectTaskByIdSql(projectRequestId, taskId)
+    );
+    return rows[0];
+  }
+
+  public async completeProjectTask(
+    projectRequestId: string,
+    taskId: string,
+    input: CompleteProjectTaskInput
+  ): Promise<ProjectTask> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectTask(projectRequestId, taskId);
+    const completed = completeProjectTask(current, input);
+    const rows = await this.sql.query<ProjectTask>(completeProjectTaskSql(completed));
+    return this.requirePersistedProjectTask(rows, projectRequestId, taskId);
+  }
+
   public async createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -849,6 +908,21 @@ export class ProjectOpsRepository {
     return note;
   }
 
+  private async requireProjectTask(
+    projectRequestId: string,
+    taskId: string
+  ): Promise<ProjectTask> {
+    const task = await this.getProjectTask(projectRequestId, taskId);
+    if (!task) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_TASK_NOT_FOUND',
+        `Project task not found: ${taskId}.`
+      );
+    }
+    return task;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -987,6 +1061,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_NOTE_NOT_FOUND',
         `Project note not found: ${projectRequestId}/${noteId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectTask(
+    rows: readonly ProjectTask[],
+    projectRequestId: string,
+    taskId: string
+  ): ProjectTask {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_TASK_NOT_FOUND',
+        `Project task not found: ${projectRequestId}/${taskId}.`
       );
     }
     return persisted;
