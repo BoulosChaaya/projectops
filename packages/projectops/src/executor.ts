@@ -3,7 +3,10 @@ import { ProjectOpsOperationError } from './domain.ts';
 import type { ProjectOpsSqlExecutor } from './repository.ts';
 import type { SqlStatement } from './sql.ts';
 
-type ProjectOpsTable = 'projectops_clients' | 'projectops_project_requests';
+type ProjectOpsTable =
+  | 'projectops_clients'
+  | 'projectops_project_requests'
+  | 'projectops_project_milestones';
 
 export interface ProjectOpsQueryConnection {
   query<TRow = Record<string, unknown>>(
@@ -32,6 +35,7 @@ export class ProjectOpsConnectionSqlExecutor implements ProjectOpsSqlExecutor {
 export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private readonly clients = new Map<string, ProjectOpsClientRow>();
   private readonly projectRequests = new Map<string, ProjectOpsRequestRow>();
+  private readonly projectMilestones = new Map<string, ProjectOpsMilestoneRow>();
   private readonly migratedTables = new Set<ProjectOpsTable>();
 
   public async query<T>(statement: SqlStatement): Promise<readonly T[]> {
@@ -45,6 +49,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_PROJECT_REQUESTS')) {
       this.migratedTables.add('projectops_project_requests');
+      return Object.freeze([]);
+    }
+
+    if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_PROJECT_MILESTONES')) {
+      this.migratedTables.add('projectops_project_milestones');
       return Object.freeze([]);
     }
 
@@ -62,6 +71,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_REQUESTS')) {
       const row = this.insertProjectRequest(statement.params);
+      return Object.freeze([row as T]);
+    }
+
+    if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_MILESTONES')) {
+      const row = this.insertProjectMilestone(statement.params);
       return Object.freeze([row as T]);
     }
 
@@ -83,6 +97,22 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       const id = String(statement.params[0]);
       const row = this.projectRequests.get(id);
       return Object.freeze(row ? [toProjectRequest(row) as T] : []);
+    }
+
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_MILESTONES WHERE PROJECT_REQUEST_ID = $1 AND ID = $2')) {
+      const key = milestoneKey(String(statement.params[0]), String(statement.params[1]));
+      const row = this.projectMilestones.get(key);
+      return Object.freeze(row ? [toProjectMilestone(row) as T] : []);
+    }
+
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_MILESTONES WHERE PROJECT_REQUEST_ID = $1')) {
+      const projectRequestId = String(statement.params[0]);
+      return Object.freeze(this.selectProjectMilestones(projectRequestId) as T[]);
+    }
+
+    if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_MILESTONES')) {
+      const row = this.completeProjectMilestone(statement.params);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_REQUESTS') && upper.includes('ESTIMATE_AMOUNT_CENTS')) {
@@ -110,11 +140,15 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   public snapshot(): Readonly<{
     clients: readonly ProjectOpsClientRow[];
     projectRequests: readonly ProjectOpsRequestRow[];
+    projectMilestones: readonly ProjectOpsMilestoneRow[];
   }> {
     return Object.freeze({
       clients: Object.freeze([...this.clients.values()].map((row) => Object.freeze({ ...row }))),
       projectRequests: Object.freeze(
         [...this.projectRequests.values()].map((row) => Object.freeze({ ...row }))
+      ),
+      projectMilestones: Object.freeze(
+        [...this.projectMilestones.values()].map((row) => Object.freeze({ ...row }))
       ),
     });
   }
@@ -122,7 +156,8 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private assertMigrated(): void {
     if (
       !this.migratedTables.has('projectops_clients') ||
-      !this.migratedTables.has('projectops_project_requests')
+      !this.migratedTables.has('projectops_project_requests') ||
+      !this.migratedTables.has('projectops_project_milestones')
     ) {
       throw new Error('ProjectOps schema has not been migrated.');
     }
@@ -176,6 +211,31 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
+  private insertProjectMilestone(params: readonly unknown[]): ProjectOpsMilestoneRow {
+    const projectRequestId = asString(params[1], 'projectMilestone.projectRequestId');
+    if (!this.projectRequests.has(projectRequestId)) {
+      throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
+    }
+
+    const row = Object.freeze({
+      id: asString(params[0], 'projectMilestone.id'),
+      projectRequestId,
+      title: asString(params[2], 'projectMilestone.title'),
+      dueAtIso: asOptionalString(params[3]),
+      status: asString(params[4], 'projectMilestone.status'),
+      createdAtIso: asString(params[5], 'projectMilestone.createdAtIso'),
+      completedAtIso: asOptionalString(params[6]),
+      updatedAtIso: asString(params[7], 'projectMilestone.updatedAtIso'),
+    } satisfies ProjectOpsMilestoneRow);
+
+    const key = milestoneKey(projectRequestId, row.id);
+    if (this.projectMilestones.has(key)) {
+      throw new Error(`Duplicate ProjectOps project milestone id: ${projectRequestId}/${row.id}`);
+    }
+    this.projectMilestones.set(key, row);
+    return row;
+  }
+
   private estimateProjectRequest(params: readonly unknown[]): ProjectOpsRequestRow | undefined {
     const id = asString(params[0], 'projectRequest.id');
     const current = this.projectRequests.get(id);
@@ -223,6 +283,22 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return next;
   }
 
+  private completeProjectMilestone(params: readonly unknown[]): ProjectOpsMilestoneRow | undefined {
+    const projectRequestId = asString(params[0], 'projectMilestone.projectRequestId');
+    const id = asString(params[1], 'projectMilestone.id');
+    const current = this.projectMilestones.get(milestoneKey(projectRequestId, id));
+    if (!current) return undefined;
+
+    const next = Object.freeze({
+      ...current,
+      status: asString(params[2], 'projectMilestone.status'),
+      completedAtIso: asOptionalString(params[3]),
+      updatedAtIso: asString(params[4], 'projectMilestone.updatedAtIso'),
+    });
+    this.projectMilestones.set(milestoneKey(projectRequestId, id), next);
+    return next;
+  }
+
   private selectClients(): readonly ProjectOpsClientRow[] {
     return Object.freeze(
       [...this.clients.values()]
@@ -240,6 +316,19 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
           a.id.localeCompare(b.id)
         ))
         .map(toProjectRequest)
+    );
+  }
+
+  private selectProjectMilestones(projectRequestId: string): readonly ProjectOpsMilestoneRow[] {
+    return Object.freeze(
+      [...this.projectMilestones.values()]
+        .filter((milestone) => milestone.projectRequestId === projectRequestId)
+        .sort((a, b) => (
+          compareOptionalIso(a.dueAtIso, b.dueAtIso) ||
+          a.createdAtIso.localeCompare(b.createdAtIso) ||
+          a.id.localeCompare(b.id)
+        ))
+        .map(toProjectMilestone)
     );
   }
 
@@ -267,10 +356,18 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
             estimatedAtIso: request.estimatedAtIso,
             approvedAtIso: request.approvedAtIso,
             approvedBy: request.approvedBy,
+            openMilestoneCount: this.countMilestones(request.id, 'open'),
+            completedMilestoneCount: this.countMilestones(request.id, 'completed'),
             updatedAtIso: request.updatedAtIso,
           });
         })
     );
+  }
+
+  private countMilestones(projectRequestId: string, status: string): number {
+    return [...this.projectMilestones.values()].filter(
+      (milestone) => milestone.projectRequestId === projectRequestId && milestone.status === status
+    ).length;
   }
 }
 
@@ -282,8 +379,23 @@ function toProjectRequest(row: ProjectOpsRequestRow): ProjectOpsRequestRow {
   return Object.freeze({ ...row });
 }
 
+function toProjectMilestone(row: ProjectOpsMilestoneRow): ProjectOpsMilestoneRow {
+  return Object.freeze({ ...row });
+}
+
 function normalizeSql(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim();
+}
+
+function milestoneKey(projectRequestId: string, milestoneId: string): string {
+  return `${projectRequestId}\0${milestoneId}`;
+}
+
+function compareOptionalIso(a: string | undefined, b: string | undefined): number {
+  if (a && b) return a.localeCompare(b);
+  if (a) return -1;
+  if (b) return 1;
+  return 0;
 }
 
 function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
@@ -293,10 +405,12 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
     ...source,
     ...(source.client_id !== undefined ? { clientId: source.client_id } : {}),
     ...(source.client_name !== undefined ? { clientName: source.client_name } : {}),
+    ...(source.project_request_id !== undefined ? { projectRequestId: source.project_request_id } : {}),
     ...(source.contact_name !== undefined ? { contactName: source.contact_name } : {}),
     ...(source.created_at !== undefined ? { createdAtIso: normalizeIsoValue(source.created_at) } : {}),
     ...(source.updated_at !== undefined ? { updatedAtIso: normalizeIsoValue(source.updated_at) } : {}),
     ...(source.deadline_at !== undefined ? { deadlineIso: normalizeOptionalIsoValue(source.deadline_at) } : {}),
+    ...(source.due_at !== undefined ? { dueAtIso: normalizeOptionalIsoValue(source.due_at) } : {}),
     ...(source.estimate_amount_cents !== undefined
       ? { estimateAmountCents: normalizeOptionalValue(source.estimate_amount_cents) }
       : {}),
@@ -310,6 +424,15 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
       ? { approvedAtIso: normalizeOptionalIsoValue(source.approved_at) }
       : {}),
     ...(source.approved_by !== undefined ? { approvedBy: normalizeOptionalValue(source.approved_by) } : {}),
+    ...(source.completed_at !== undefined
+      ? { completedAtIso: normalizeOptionalIsoValue(source.completed_at) }
+      : {}),
+    ...(source.open_milestone_count !== undefined
+      ? { openMilestoneCount: normalizeOptionalNumberValue(source.open_milestone_count) }
+      : {}),
+    ...(source.completed_milestone_count !== undefined
+      ? { completedMilestoneCount: normalizeOptionalNumberValue(source.completed_milestone_count) }
+      : {}),
   }) as TRow;
 }
 
@@ -324,6 +447,12 @@ function normalizeOptionalIsoValue(value: unknown): unknown {
 
 function normalizeOptionalValue(value: unknown): unknown {
   return value === null ? undefined : value;
+}
+
+function normalizeOptionalNumberValue(value: unknown): unknown {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+  return value;
 }
 
 function asString(value: unknown, name: string): string {
@@ -372,6 +501,20 @@ function mapProjectOpsStorageError(error: unknown, statement: SqlStatement): unk
       'ProjectOps client not found.'
     );
   }
+  if (code === '23505' && statement.sql.includes('projectops_project_milestones')) {
+    return new ProjectOpsOperationError(
+      'conflict',
+      'PROJECTOPS_MILESTONE_ALREADY_EXISTS',
+      'ProjectOps project milestone already exists.'
+    );
+  }
+  if (code === '23503' && statement.sql.includes('projectops_project_milestones')) {
+    return new ProjectOpsOperationError(
+      'not_found',
+      'PROJECTOPS_REQUEST_NOT_FOUND',
+      'Project request not found.'
+    );
+  }
   return error;
 }
 
@@ -402,6 +545,17 @@ interface ProjectOpsRequestRow {
   readonly updatedAtIso: string;
 }
 
+interface ProjectOpsMilestoneRow {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly dueAtIso?: string;
+  readonly status: string;
+  readonly createdAtIso: string;
+  readonly completedAtIso?: string;
+  readonly updatedAtIso: string;
+}
+
 interface ProjectOpsDashboardStorageRow {
   readonly id: string;
   readonly clientId: string;
@@ -415,5 +569,7 @@ interface ProjectOpsDashboardStorageRow {
   readonly estimatedAtIso?: string;
   readonly approvedAtIso?: string;
   readonly approvedBy?: string;
+  readonly openMilestoneCount?: number;
+  readonly completedMilestoneCount?: number;
   readonly updatedAtIso: string;
 }
