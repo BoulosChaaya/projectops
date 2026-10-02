@@ -293,6 +293,18 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       requests.set(request.id, request);
       return request;
     },
+    async listClients(): Promise<readonly ProjectOpsClient[]> {
+      return Object.freeze([...clients.values()]);
+    },
+    async getClient(id: string): Promise<ProjectOpsClient | undefined> {
+      return clients.get(id);
+    },
+    async listProjectRequests(): Promise<readonly ProjectRequest[]> {
+      return Object.freeze([...requests.values()]);
+    },
+    async getProjectRequest(id: string): Promise<ProjectRequest | undefined> {
+      return requests.get(id);
+    },
     async transitionProjectRequest(
       id: string,
       nextStatus: ProjectRequestStatus,
