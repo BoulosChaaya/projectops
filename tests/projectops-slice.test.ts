@@ -12,18 +12,21 @@ import {
   estimateProjectRequest,
   markProjectInvoicePaid,
   completeProjectMilestone,
+  createProjectActivity,
   insertClientSql,
   insertProjectRequestSql,
   projectOpsSchemaSql,
   transitionProjectRequest,
   type ApproveProjectRequestInput,
   type EstimateProjectRequestInput,
+  type NewProjectActivityInput,
   type NewProjectDeliverableInput,
   type NewProjectInvoiceInput,
   type NewClientInput,
   type NewProjectMilestoneInput,
   type NewProjectRequestInput,
   type ProjectDeliverable,
+  type ProjectActivity,
   type ProjectInvoice,
   type ProjectOpsClient,
   type ProjectOpsDashboardView,
@@ -155,6 +158,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_requests/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_deliverables/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_invoices/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
   assert.equal(clientInsert.sql.includes('Zad Studio'), false);
@@ -387,6 +391,27 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(payInvoiceRes.status, 200);
     assert.equal(paidInvoice.status, 'paid');
 
+    const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'activity-1',
+        eventType: 'note_added',
+        summary: 'Client confirmed invoice payment.',
+        actor: 'Boulos',
+        happenedAtIso: T3,
+      }),
+    });
+    const activity = await activityRes.json() as ProjectActivity;
+    assert.equal(activityRes.status, 200);
+    assert.equal(activity.eventType, 'note_added');
+
+    const activitiesRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`);
+    assert.equal(activitiesRes.status, 200);
+    const activities = await activitiesRes.json() as readonly ProjectActivity[];
+    assert.equal(activities.length, 1);
+    assert.equal(activities[0]?.summary, 'Client confirmed invoice payment.');
+
     const dashboardRes = await fetch(`${server.origin}/projectops/dashboard`);
     assert.equal(dashboardRes.status, 200);
     const dashboard = await dashboardRes.json() as ProjectOpsDashboardView;
@@ -400,6 +425,10 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.issuedInvoices, 0);
     assert.equal(dashboard.paidInvoices, 1);
     assert.equal(dashboard.paidInvoiceAmountCents, 180000);
+    assert.equal(
+      dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
+      'Client confirmed invoice payment.'
+    );
   } finally {
     await server.close();
   }
@@ -428,6 +457,8 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       paidInvoiceCount: 2,
       outstandingInvoiceAmountCents: 120000,
       paidInvoiceAmountCents: 240000,
+      latestActivityAtIso: T3,
+      latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
     },
   ]);
@@ -518,6 +549,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const milestones = new Map<string, ProjectMilestone>();
   const deliverables = new Map<string, ProjectDeliverable>();
   const invoices = new Map<string, ProjectInvoice>();
+  const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
     async createClient(input: NewClientInput): Promise<ProjectOpsClient> {
@@ -646,6 +678,25 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       invoices.set(key, next);
       return next;
     },
+    async createProjectActivity(
+      projectRequestId: string,
+      input: NewProjectActivityInput
+    ): Promise<ProjectActivity> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      const activity = createProjectActivity(request, input);
+      activities.set(activityKey(projectRequestId, activity.id), activity);
+      return activity;
+    },
+    async listProjectActivities(projectRequestId: string): Promise<readonly ProjectActivity[]> {
+      return Object.freeze(
+        [...activities.values()]
+          .filter((activity) => activity.projectRequestId === projectRequestId)
+          .sort((a, b) => b.happenedAtIso.localeCompare(a.happenedAtIso) || a.id.localeCompare(b.id))
+      );
+    },
     async estimateProjectRequest(
       id: string,
       input: EstimateProjectRequestInput
@@ -709,6 +760,8 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             paidInvoiceCount: countInvoices(invoices, request.id, 'paid'),
             outstandingInvoiceAmountCents: sumInvoices(invoices, request.id, 'issued'),
             paidInvoiceAmountCents: sumInvoices(invoices, request.id, 'paid'),
+            latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
+            latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
           };
         })
@@ -727,6 +780,10 @@ function deliverableKey(projectRequestId: string, deliverableId: string): string
 
 function invoiceKey(projectRequestId: string, invoiceId: string): string {
   return `${projectRequestId}\0${invoiceId}`;
+}
+
+function activityKey(projectRequestId: string, activityId: string): string {
+  return `${projectRequestId}\0${activityId}`;
 }
 
 function countMilestones(
@@ -767,4 +824,13 @@ function sumInvoices(
   return [...invoices.values()]
     .filter((invoice) => invoice.projectRequestId === projectRequestId && invoice.status === status)
     .reduce((total, invoice) => total + invoice.amountCents, 0);
+}
+
+function latestActivity(
+  activities: ReadonlyMap<string, ProjectActivity>,
+  projectRequestId: string
+): ProjectActivity | undefined {
+  return [...activities.values()]
+    .filter((activity) => activity.projectRequestId === projectRequestId)
+    .sort((a, b) => b.happenedAtIso.localeCompare(a.happenedAtIso) || a.id.localeCompare(b.id))[0];
 }
