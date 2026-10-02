@@ -10,9 +10,11 @@ import type {
   EstimateProjectRequestInput,
   NewClientInput,
   NewProjectDeliverableInput,
+  NewProjectInvoiceInput,
   NewProjectMilestoneInput,
   NewProjectRequestInput,
   ProjectDeliverable,
+  ProjectInvoice,
   ProjectOpsClient,
   ProjectOpsDashboardView,
   ProjectMilestone,
@@ -47,6 +49,16 @@ export interface ProjectOpsApiService {
     deliverableId: string,
     acceptedAtIso: string
   ): Promise<ProjectDeliverable>;
+  createProjectInvoice(
+    projectRequestId: string,
+    input: NewProjectInvoiceInput
+  ): Promise<ProjectInvoice>;
+  listProjectInvoices(projectRequestId: string): Promise<readonly ProjectInvoice[]>;
+  markProjectInvoicePaid(
+    projectRequestId: string,
+    invoiceId: string,
+    paidAtIso: string
+  ): Promise<ProjectInvoice>;
   estimateProjectRequest(
     id: string,
     input: EstimateProjectRequestInput
@@ -147,6 +159,32 @@ export function createProjectOpsRoutes(
             params.id,
             params.deliverableId,
             readAcceptedAtIso(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/invoices',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectInvoices(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/invoices',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectInvoice(params.id, readInvoiceInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/invoices/:invoiceId/pay',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.markProjectInvoicePaid(
+            params.id,
+            params.invoiceId,
+            readPaidAtIso(request.body, clock)
           )
         ),
     },
@@ -331,6 +369,29 @@ function readDeliverableInput(
 function readAcceptedAtIso(body: unknown, clock: () => string): string {
   const value = readRecord(body);
   return readOptionalString(value.acceptedAtIso, 'acceptedAtIso') ?? clock();
+}
+
+function readInvoiceInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectInvoiceInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    deliverableId: readOptionalString(value.deliverableId, 'deliverableId'),
+    invoiceNumber: readString(value.invoiceNumber, 'invoiceNumber'),
+    amountCents: readPositiveInteger(value.amountCents, 'amountCents'),
+    currency: readString(value.currency, 'currency'),
+    issuedAtIso: readOptionalString(value.issuedAtIso, 'issuedAtIso') ?? clock(),
+    dueAtIso: readOptionalString(value.dueAtIso, 'dueAtIso'),
+  });
+}
+
+function readPaidAtIso(body: unknown, clock: () => string): string {
+  const value = readRecord(body);
+  return readOptionalString(value.paidAtIso, 'paidAtIso') ?? clock();
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
