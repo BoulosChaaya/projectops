@@ -1,6 +1,7 @@
 export type ClientStatus = 'active' | 'archived';
 export type ProjectPriority = 'low' | 'medium' | 'high';
 export type ProjectMilestoneStatus = 'open' | 'completed';
+export type ProjectDeliverableStatus = 'submitted' | 'accepted';
 export type ProjectRequestStatus =
   | 'new'
   | 'estimated'
@@ -47,6 +48,18 @@ export interface ProjectMilestone {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectDeliverable {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly milestoneId?: string;
+  readonly title: string;
+  readonly artifactUrl: string;
+  readonly status: ProjectDeliverableStatus;
+  readonly submittedAtIso: string;
+  readonly acceptedAtIso?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface NewClientInput {
   readonly id: string;
   readonly name: string;
@@ -83,6 +96,15 @@ export interface NewProjectMilestoneInput {
   readonly title: string;
   readonly dueAtIso?: string;
   readonly createdAtIso: string;
+}
+
+export interface NewProjectDeliverableInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly milestoneId?: string;
+  readonly title: string;
+  readonly artifactUrl: string;
+  readonly submittedAtIso: string;
 }
 
 export class ProjectOpsValidationError extends Error {
@@ -128,6 +150,11 @@ export const projectMilestoneStatuses = Object.freeze([
   'open',
   'completed',
 ] satisfies readonly ProjectMilestoneStatus[]);
+
+export const projectDeliverableStatuses = Object.freeze([
+  'submitted',
+  'accepted',
+] satisfies readonly ProjectDeliverableStatus[]);
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -313,6 +340,64 @@ export function completeProjectMilestone(
   });
 }
 
+export function createProjectDeliverable(
+  request: ProjectRequest,
+  input: NewProjectDeliverableInput
+): ProjectDeliverable {
+  if (request.status !== 'approved' && request.status !== 'in_progress') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_DELIVERABLES',
+      'Project request must be approved or in progress before submitting deliverables.'
+    );
+  }
+
+  const id = requireIdentifier('projectDeliverable.id', input.id);
+  const projectRequestId = requireIdentifier('projectDeliverable.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_DELIVERABLE_REQUEST_MISMATCH',
+      'Project deliverable must belong to the selected project request.'
+    );
+  }
+
+  const milestoneId = optionalIdentifier('projectDeliverable.milestoneId', input.milestoneId);
+  const submittedAtIso = assertIsoTimestamp('projectDeliverable.submittedAtIso', input.submittedAtIso);
+
+  return Object.freeze({
+    id,
+    projectRequestId,
+    milestoneId,
+    title: requireText('projectDeliverable.title', input.title, 160),
+    artifactUrl: requireHttpUrl('projectDeliverable.artifactUrl', input.artifactUrl),
+    status: 'submitted',
+    submittedAtIso,
+    updatedAtIso: submittedAtIso,
+  });
+}
+
+export function acceptProjectDeliverable(
+  deliverable: ProjectDeliverable,
+  acceptedAtIso: string
+): ProjectDeliverable {
+  if (deliverable.status === 'accepted') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_DELIVERABLE_ALREADY_ACCEPTED',
+      'Project deliverable is already accepted.'
+    );
+  }
+
+  const acceptedAt = assertIsoTimestamp('projectDeliverable.acceptedAtIso', acceptedAtIso);
+  return Object.freeze({
+    ...deliverable,
+    status: 'accepted',
+    acceptedAtIso: acceptedAt,
+    updatedAtIso: acceptedAt,
+  });
+}
+
 export function getAllowedProjectRequestTransitions(
   status: ProjectRequestStatus
 ): readonly ProjectRequestStatus[] {
@@ -349,6 +434,31 @@ function requireIdentifier(name: string, value: string): string {
     );
   }
   return trimmed;
+}
+
+function optionalIdentifier(name: string, value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return requireIdentifier(name, value);
+}
+
+function requireHttpUrl(name: string, value: string): string {
+  const url = requireText(name, value, 2048);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_URL',
+      `${name} must be a valid HTTP or HTTPS URL.`
+    );
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_URL',
+      `${name} must be a valid HTTP or HTTPS URL.`
+    );
+  }
+  return url;
 }
 
 function requireText(name: string, value: string, maxLength: number): string {
