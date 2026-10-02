@@ -8,6 +8,8 @@ export type ProjectIssueStatus = 'open' | 'resolved';
 export type ProjectIssueSeverity = 'low' | 'medium' | 'high';
 export type ProjectFeedbackStatus = 'open' | 'addressed';
 export type ProjectFeedbackSentiment = 'positive' | 'neutral' | 'negative';
+export type ProjectDocumentStatus = 'active' | 'archived';
+export type ProjectDocumentType = 'proposal' | 'contract' | 'asset' | 'handoff' | 'other';
 export type ProjectActivityEventType =
   | 'request_created'
   | 'request_estimated'
@@ -137,6 +139,21 @@ export interface ProjectFeedback {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectDocument {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly deliverableId?: string;
+  readonly title: string;
+  readonly documentType: ProjectDocumentType;
+  readonly url: string;
+  readonly status: ProjectDocumentStatus;
+  readonly uploadedBy: string;
+  readonly uploadedAtIso: string;
+  readonly archivedAtIso?: string;
+  readonly archivedBy?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface ProjectActivity {
   readonly id: string;
   readonly projectRequestId: string;
@@ -253,6 +270,22 @@ export interface AddressProjectFeedbackInput {
   readonly responseNote?: string;
 }
 
+export interface NewProjectDocumentInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly deliverableId?: string;
+  readonly title: string;
+  readonly documentType?: ProjectDocumentType;
+  readonly url: string;
+  readonly uploadedBy: string;
+  readonly uploadedAtIso: string;
+}
+
+export interface ArchiveProjectDocumentInput {
+  readonly archivedBy: string;
+  readonly archivedAtIso: string;
+}
+
 export interface NewProjectActivityInput {
   readonly id: string;
   readonly projectRequestId: string;
@@ -343,6 +376,19 @@ export const projectFeedbackSentiments = Object.freeze([
   'neutral',
   'negative',
 ] satisfies readonly ProjectFeedbackSentiment[]);
+
+export const projectDocumentStatuses = Object.freeze([
+  'active',
+  'archived',
+] satisfies readonly ProjectDocumentStatus[]);
+
+export const projectDocumentTypes = Object.freeze([
+  'proposal',
+  'contract',
+  'asset',
+  'handoff',
+  'other',
+] satisfies readonly ProjectDocumentType[]);
 
 export const projectActivityEventTypes = Object.freeze([
   'request_created',
@@ -870,6 +916,73 @@ export function addressProjectFeedback(
     addressedBy: requireText('projectFeedback.addressedBy', input.addressedBy, 120),
     responseNote: optionalText('projectFeedback.responseNote', input.responseNote, 500),
     updatedAtIso: addressedAtIso,
+  });
+}
+
+export function createProjectDocument(
+  request: ProjectRequest,
+  input: NewProjectDocumentInput
+): ProjectDocument {
+  if (request.status === 'new' || request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_DOCUMENTS',
+      'Project request must be estimated, approved, in progress, or delivered before adding documents.'
+    );
+  }
+
+  const id = requireIdentifier('projectDocument.id', input.id);
+  const projectRequestId = requireIdentifier('projectDocument.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_DOCUMENT_REQUEST_MISMATCH',
+      'Project document must belong to the selected project request.'
+    );
+  }
+
+  const documentType = input.documentType ?? 'other';
+  if (!projectDocumentTypes.includes(documentType)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_DOCUMENT_TYPE',
+      `Unsupported project document type: ${documentType}`
+    );
+  }
+
+  const uploadedAtIso = assertIsoTimestamp('projectDocument.uploadedAtIso', input.uploadedAtIso);
+  return Object.freeze({
+    id,
+    projectRequestId,
+    deliverableId: optionalIdentifier('projectDocument.deliverableId', input.deliverableId),
+    title: requireText('projectDocument.title', input.title, 160),
+    documentType,
+    url: requireHttpUrl('projectDocument.url', input.url),
+    status: 'active',
+    uploadedBy: requireText('projectDocument.uploadedBy', input.uploadedBy, 120),
+    uploadedAtIso,
+    updatedAtIso: uploadedAtIso,
+  });
+}
+
+export function archiveProjectDocument(
+  document: ProjectDocument,
+  input: ArchiveProjectDocumentInput
+): ProjectDocument {
+  if (document.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_DOCUMENT_ALREADY_ARCHIVED',
+      'Project document is already archived.'
+    );
+  }
+
+  const archivedAtIso = assertIsoTimestamp('projectDocument.archivedAtIso', input.archivedAtIso);
+  return Object.freeze({
+    ...document,
+    status: 'archived',
+    archivedAtIso,
+    archivedBy: requireText('projectDocument.archivedBy', input.archivedBy, 120),
+    updatedAtIso: archivedAtIso,
   });
 }
 
