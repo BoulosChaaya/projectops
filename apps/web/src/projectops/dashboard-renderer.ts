@@ -54,6 +54,7 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('Proposed changes', String(summary.proposedChangeRequests))}
       ${renderMetric('Open issues', String(summary.openIssues))}
       ${renderMetric('Open feedback', String(summary.openFeedback))}
+      ${renderMetric('Active documents', String(summary.activeDocuments))}
       ${renderMetric('In progress', String(summary.byStatus.in_progress))}
       ${renderMetric('Delivered', String(summary.byStatus.delivered))}
     </section>
@@ -104,6 +105,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Changes</th>
           <th scope="col">Issues</th>
           <th scope="col">Feedback</th>
+          <th scope="col">Documents</th>
           <th scope="col">Latest Activity</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
@@ -131,6 +133,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatChangeRequests(row))}</td>
     <td>${escapeHtml(formatIssues(row))}</td>
     <td>${escapeHtml(formatFeedback(row))}</td>
+    <td>${escapeHtml(formatDocuments(row))}</td>
     <td>${escapeHtml(formatLatestActivity(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
@@ -196,6 +199,10 @@ function formatIssues(row: ProjectOpsDashboardRow): string {
 
 function formatFeedback(row: ProjectOpsDashboardRow): string {
   return `${row.openFeedbackCount ?? 0} open / ${row.negativeOpenFeedbackCount ?? 0} negative`;
+}
+
+function formatDocuments(row: ProjectOpsDashboardRow): string {
+  return `${row.activeDocumentCount ?? 0} active / ${row.archivedDocumentCount ?? 0} archived`;
 }
 
 function formatLatestActivity(row: ProjectOpsDashboardRow): string {
@@ -287,7 +294,7 @@ function dashboardCss(): string {
     }
 
     .metrics {
-      grid-template-columns: repeat(10, minmax(0, 1fr));
+      grid-template-columns: repeat(11, minmax(0, 1fr));
     }
 
     .workflow {
