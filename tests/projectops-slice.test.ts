@@ -2,12 +2,14 @@ import { unitTest, assert } from '../packages/testing-kit/src/unit/index.ts';
 import {
   ProjectOpsRepository,
   acceptProjectDeliverable,
+  addressProjectFeedback,
   approveProjectRequest,
   approveProjectChangeRequest,
   composeProjectOpsDashboard,
   createClient,
   createProjectChangeRequest,
   createProjectDeliverable,
+  createProjectFeedback,
   createProjectInvoice,
   createProjectIssue,
   createProjectMilestone,
@@ -22,12 +24,14 @@ import {
   insertProjectRequestSql,
   projectOpsSchemaSql,
   transitionProjectRequest,
+  type AddressProjectFeedbackInput,
   type ApproveProjectRequestInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
+  type NewProjectFeedbackInput,
   type NewProjectInvoiceInput,
   type NewProjectIssueInput,
   type NewClientInput,
@@ -36,6 +40,7 @@ import {
   type ProjectDeliverable,
   type ProjectActivity,
   type ProjectChangeRequest,
+  type ProjectFeedback,
   type ProjectInvoice,
   type ProjectIssue,
   type ProjectOpsClient,
@@ -180,6 +185,26 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(resolvedIssue.status, 'resolved');
   assert.equal(resolvedIssue.resolutionNote, 'Assets received.');
 
+  const feedback = createProjectFeedback(approved, {
+    id: 'feedback-1',
+    projectRequestId: request.id,
+    deliverableId: deliverable.id,
+    author: 'Client',
+    sentiment: 'negative',
+    message: 'The first draft needs clearer hero copy.',
+    receivedAtIso: T3,
+  });
+  assert.equal(feedback.status, 'open');
+  assert.equal(feedback.sentiment, 'negative');
+
+  const addressedFeedback = addressProjectFeedback(feedback, {
+    addressedBy: 'Boulos',
+    addressedAtIso: T3,
+    responseNote: 'Hero copy revised in the handoff package.',
+  });
+  assert.equal(addressedFeedback.status, 'addressed');
+  assert.equal(addressedFeedback.responseNote, 'Hero copy revised in the handoff package.');
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -211,6 +236,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_invoices/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_change_requests/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_issues/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_feedback/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
@@ -519,6 +545,44 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(resolveIssueRes.status, 200);
     assert.equal(resolvedIssue.status, 'resolved');
 
+    const feedbackRes = await fetch(`${server.origin}/projectops/project-requests/req-2/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'feedback-1',
+        deliverableId: 'deliverable-1',
+        author: 'Client',
+        sentiment: 'negative',
+        message: 'Please make the launch checklist clearer.',
+        receivedAtIso: T3,
+      }),
+    });
+    const feedback = await feedbackRes.json() as ProjectFeedback;
+    assert.equal(feedbackRes.status, 200);
+    assert.equal(feedback.status, 'open');
+    assert.equal(feedback.sentiment, 'negative');
+
+    const feedbackListRes = await fetch(`${server.origin}/projectops/project-requests/req-2/feedback`);
+    assert.equal(feedbackListRes.status, 200);
+    const feedbackList = await feedbackListRes.json() as readonly ProjectFeedback[];
+    assert.equal(feedbackList.length, 1);
+
+    const addressFeedbackRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/feedback/feedback-1/address`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          addressedBy: 'Boulos',
+          addressedAtIso: T3,
+          responseNote: 'Checklist rewritten with client acceptance notes.',
+        }),
+      }
+    );
+    const addressedFeedback = await addressFeedbackRes.json() as ProjectFeedback;
+    assert.equal(addressFeedbackRes.status, 200);
+    assert.equal(addressedFeedback.status, 'addressed');
+
     const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -557,6 +621,9 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.approvedChangeRequests, 1);
     assert.equal(dashboard.openIssues, 0);
     assert.equal(dashboard.resolvedIssues, 1);
+    assert.equal(dashboard.openFeedback, 0);
+    assert.equal(dashboard.addressedFeedback, 1);
+    assert.equal(dashboard.negativeOpenFeedback, 0);
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -595,6 +662,9 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       openIssueCount: 1,
       highOpenIssueCount: 1,
       resolvedIssueCount: 2,
+      openFeedbackCount: 1,
+      addressedFeedbackCount: 2,
+      negativeOpenFeedbackCount: 1,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -689,6 +759,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const invoices = new Map<string, ProjectInvoice>();
   const changeRequests = new Map<string, ProjectChangeRequest>();
   const issues = new Map<string, ProjectIssue>();
+  const feedback = new Map<string, ProjectFeedback>();
   const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
@@ -898,6 +969,42 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       issues.set(key, next);
       return next;
     },
+    async createProjectFeedback(
+      projectRequestId: string,
+      input: NewProjectFeedbackInput
+    ): Promise<ProjectFeedback> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      if (input.deliverableId && !deliverables.has(deliverableKey(projectRequestId, input.deliverableId))) {
+        throw new Error(`Project deliverable not found: ${projectRequestId}/${input.deliverableId}`);
+      }
+      const projectFeedback = createProjectFeedback(request, input);
+      feedback.set(feedbackKey(projectRequestId, projectFeedback.id), projectFeedback);
+      return projectFeedback;
+    },
+    async listProjectFeedback(projectRequestId: string): Promise<readonly ProjectFeedback[]> {
+      return Object.freeze(
+        [...feedback.values()]
+          .filter((projectFeedback) => projectFeedback.projectRequestId === projectRequestId)
+          .sort((a, b) => b.receivedAtIso.localeCompare(a.receivedAtIso) || a.id.localeCompare(b.id))
+      );
+    },
+    async addressProjectFeedback(
+      projectRequestId: string,
+      feedbackId: string,
+      input: AddressProjectFeedbackInput
+    ): Promise<ProjectFeedback> {
+      const key = feedbackKey(projectRequestId, feedbackId);
+      const current = feedback.get(key);
+      if (!current) {
+        throw new Error(`Project feedback not found: ${projectRequestId}/${feedbackId}`);
+      }
+      const next = addressProjectFeedback(current, input);
+      feedback.set(key, next);
+      return next;
+    },
     async createProjectActivity(
       projectRequestId: string,
       input: NewProjectActivityInput
@@ -986,6 +1093,9 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             openIssueCount: countIssues(issues, request.id, 'open'),
             highOpenIssueCount: countHighOpenIssues(issues, request.id),
             resolvedIssueCount: countIssues(issues, request.id, 'resolved'),
+            openFeedbackCount: countFeedback(feedback, request.id, 'open'),
+            addressedFeedbackCount: countFeedback(feedback, request.id, 'addressed'),
+            negativeOpenFeedbackCount: countNegativeOpenFeedback(feedback, request.id),
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -1014,6 +1124,10 @@ function changeRequestKey(projectRequestId: string, changeRequestId: string): st
 
 function issueKey(projectRequestId: string, issueId: string): string {
   return `${projectRequestId}\0${issueId}`;
+}
+
+function feedbackKey(projectRequestId: string, feedbackId: string): string {
+  return `${projectRequestId}\0${feedbackId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -1086,6 +1200,29 @@ function countHighOpenIssues(
 ): number {
   return [...issues.values()].filter(
     (issue) => issue.projectRequestId === projectRequestId && issue.status === 'open' && issue.severity === 'high'
+  ).length;
+}
+
+function countFeedback(
+  feedback: ReadonlyMap<string, ProjectFeedback>,
+  projectRequestId: string,
+  status: ProjectFeedback['status']
+): number {
+  return [...feedback.values()].filter(
+    (projectFeedback) => projectFeedback.projectRequestId === projectRequestId && projectFeedback.status === status
+  ).length;
+}
+
+function countNegativeOpenFeedback(
+  feedback: ReadonlyMap<string, ProjectFeedback>,
+  projectRequestId: string
+): number {
+  return [...feedback.values()].filter(
+    (projectFeedback) => (
+      projectFeedback.projectRequestId === projectRequestId &&
+      projectFeedback.status === 'open' &&
+      projectFeedback.sentiment === 'negative'
+    )
   ).length;
 }
 
