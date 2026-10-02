@@ -48,6 +48,7 @@ export function renderProjectOpsDashboardPage(
     <section class="metrics" aria-label="Project request summary">
       ${renderMetric('Active requests', String(summary.totalActiveRequests))}
       ${renderMetric('High priority open', String(summary.highPriorityOpen))}
+      ${renderMetric('Open milestones', String(summary.openMilestones))}
       ${renderMetric('In progress', String(summary.byStatus.in_progress))}
       ${renderMetric('Delivered', String(summary.byStatus.delivered))}
     </section>
@@ -92,6 +93,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Client</th>
           <th scope="col">Status</th>
           <th scope="col">Estimate</th>
+          <th scope="col">Milestones</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
         </tr>
@@ -112,6 +114,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(row.clientName)}</td>
     <td><span class="pill">${escapeHtml(formatStatus(row.status))}</span></td>
     <td>${escapeHtml(formatEstimate(row))}</td>
+    <td>${escapeHtml(formatMilestones(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
   </tr>`;
@@ -151,6 +154,10 @@ function formatEstimate(row: ProjectOpsDashboardRow): string {
     maximumFractionDigits: 2,
   });
   return `${row.estimateCurrency} ${amount}`;
+}
+
+function formatMilestones(row: ProjectOpsDashboardRow): string {
+  return `${row.completedMilestoneCount ?? 0} done / ${row.openMilestoneCount ?? 0} open`;
 }
 
 function formatDate(value: string): string {
@@ -227,7 +234,7 @@ function dashboardCss(): string {
     }
 
     .metrics {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
     }
 
     .workflow {
