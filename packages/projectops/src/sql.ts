@@ -1,4 +1,5 @@
 import type {
+  ProjectDeliverable,
   ProjectMilestone,
   ProjectOpsClient,
   ProjectRequest,
@@ -49,12 +50,29 @@ export const projectOpsSchemaSql = Object.freeze([
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (project_request_id, id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_deliverables (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    milestone_id TEXT,
+    title TEXT NOT NULL,
+    artifact_url TEXT NOT NULL CHECK (artifact_url ~ '^https?://'),
+    status TEXT NOT NULL CHECK (status IN ('submitted', 'accepted')),
+    submitted_at TIMESTAMPTZ NOT NULL,
+    accepted_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id),
+    FOREIGN KEY (project_request_id, milestone_id)
+      REFERENCES projectops_project_milestones(project_request_id, id)
+      ON DELETE SET NULL (milestone_id)
+  )`,
   `CREATE INDEX IF NOT EXISTS projectops_project_requests_client_status_idx
     ON projectops_project_requests (client_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_requests_status_updated_idx
     ON projectops_project_requests (status, updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_milestones_request_status_idx
     ON projectops_project_milestones (project_request_id, status)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_deliverables_request_status_idx
+    ON projectops_project_deliverables (project_request_id, status)`,
 ] as const);
 
 export function insertClientSql(client: ProjectOpsClient): SqlStatement {
@@ -220,6 +238,72 @@ export function completeProjectMilestoneSql(milestone: ProjectMilestone): SqlSta
   });
 }
 
+export function insertProjectDeliverableSql(deliverable: ProjectDeliverable): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_deliverables (
+      id,
+      project_request_id,
+      milestone_id,
+      title,
+      artifact_url,
+      status,
+      submitted_at,
+      accepted_at,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING *`,
+    params: Object.freeze([
+      deliverable.id,
+      deliverable.projectRequestId,
+      deliverable.milestoneId ?? null,
+      deliverable.title,
+      deliverable.artifactUrl,
+      deliverable.status,
+      deliverable.submittedAtIso,
+      deliverable.acceptedAtIso ?? null,
+      deliverable.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectDeliverablesSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_deliverables
+      WHERE project_request_id = $1
+      ORDER BY submitted_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectDeliverableByIdSql(
+  projectRequestId: string,
+  deliverableId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_deliverables
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, deliverableId]),
+  });
+}
+
+export function acceptProjectDeliverableSql(deliverable: ProjectDeliverable): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_deliverables
+      SET status = $3, accepted_at = $4, updated_at = $5
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      deliverable.projectRequestId,
+      deliverable.id,
+      deliverable.status,
+      deliverable.acceptedAtIso ?? null,
+      deliverable.updatedAtIso,
+    ]),
+  });
+}
+
 export function selectClientsSql(): SqlStatement {
   return Object.freeze({
     sql: `SELECT *
@@ -287,6 +371,8 @@ export function selectDashboardRowsSql(): SqlStatement {
       pr.approved_by,
       COALESCE(ms.open_milestones, 0) AS open_milestone_count,
       COALESCE(ms.completed_milestones, 0) AS completed_milestone_count,
+      COALESCE(ds.submitted_deliverables, 0) AS submitted_deliverable_count,
+      COALESCE(ds.accepted_deliverables, 0) AS accepted_deliverable_count,
       pr.updated_at
     FROM projectops_project_requests pr
     JOIN projectops_clients c ON c.id = pr.client_id
@@ -298,6 +384,14 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_milestones
       GROUP BY project_request_id
     ) ms ON ms.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'submitted') AS submitted_deliverables,
+        COUNT(*) FILTER (WHERE status = 'accepted') AS accepted_deliverables
+      FROM projectops_project_deliverables
+      GROUP BY project_request_id
+    ) ds ON ds.project_request_id = pr.id
     WHERE pr.status != 'archived'
     ORDER BY pr.updated_at DESC, pr.created_at DESC`,
     params: Object.freeze([]),
