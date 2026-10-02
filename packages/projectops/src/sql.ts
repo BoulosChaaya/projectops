@@ -1,5 +1,6 @@
 import type {
   ProjectDeliverable,
+  ProjectInvoice,
   ProjectMilestone,
   ProjectOpsClient,
   ProjectRequest,
@@ -65,6 +66,24 @@ export const projectOpsSchemaSql = Object.freeze([
       REFERENCES projectops_project_milestones(project_request_id, id)
       ON DELETE SET NULL (milestone_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_invoices (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    deliverable_id TEXT,
+    invoice_number TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    currency TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+    status TEXT NOT NULL CHECK (status IN ('issued', 'paid')),
+    issued_at TIMESTAMPTZ NOT NULL,
+    due_at TIMESTAMPTZ,
+    paid_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id),
+    UNIQUE (project_request_id, invoice_number),
+    FOREIGN KEY (project_request_id, deliverable_id)
+      REFERENCES projectops_project_deliverables(project_request_id, id)
+      ON DELETE SET NULL (deliverable_id)
+  )`,
   `CREATE INDEX IF NOT EXISTS projectops_project_requests_client_status_idx
     ON projectops_project_requests (client_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_requests_status_updated_idx
@@ -73,6 +92,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_milestones (project_request_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_deliverables_request_status_idx
     ON projectops_project_deliverables (project_request_id, status)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_invoices_request_status_idx
+    ON projectops_project_invoices (project_request_id, status)`,
 ] as const);
 
 export function insertClientSql(client: ProjectOpsClient): SqlStatement {
@@ -304,6 +325,76 @@ export function acceptProjectDeliverableSql(deliverable: ProjectDeliverable): Sq
   });
 }
 
+export function insertProjectInvoiceSql(invoice: ProjectInvoice): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_invoices (
+      id,
+      project_request_id,
+      deliverable_id,
+      invoice_number,
+      amount_cents,
+      currency,
+      status,
+      issued_at,
+      due_at,
+      paid_at,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    RETURNING *`,
+    params: Object.freeze([
+      invoice.id,
+      invoice.projectRequestId,
+      invoice.deliverableId ?? null,
+      invoice.invoiceNumber,
+      invoice.amountCents,
+      invoice.currency,
+      invoice.status,
+      invoice.issuedAtIso,
+      invoice.dueAtIso ?? null,
+      invoice.paidAtIso ?? null,
+      invoice.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectInvoicesSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_invoices
+      WHERE project_request_id = $1
+      ORDER BY issued_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectInvoiceByIdSql(
+  projectRequestId: string,
+  invoiceId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_invoices
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, invoiceId]),
+  });
+}
+
+export function markProjectInvoicePaidSql(invoice: ProjectInvoice): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_invoices
+      SET status = $3, paid_at = $4, updated_at = $5
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      invoice.projectRequestId,
+      invoice.id,
+      invoice.status,
+      invoice.paidAtIso ?? null,
+      invoice.updatedAtIso,
+    ]),
+  });
+}
+
 export function selectClientsSql(): SqlStatement {
   return Object.freeze({
     sql: `SELECT *
@@ -373,6 +464,10 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(ms.completed_milestones, 0) AS completed_milestone_count,
       COALESCE(ds.submitted_deliverables, 0) AS submitted_deliverable_count,
       COALESCE(ds.accepted_deliverables, 0) AS accepted_deliverable_count,
+      COALESCE(inv.issued_invoices, 0) AS issued_invoice_count,
+      COALESCE(inv.paid_invoices, 0) AS paid_invoice_count,
+      COALESCE(inv.outstanding_amount_cents, 0) AS outstanding_invoice_amount_cents,
+      COALESCE(inv.paid_amount_cents, 0) AS paid_invoice_amount_cents,
       pr.updated_at
     FROM projectops_project_requests pr
     JOIN projectops_clients c ON c.id = pr.client_id
@@ -392,6 +487,16 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_deliverables
       GROUP BY project_request_id
     ) ds ON ds.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'issued') AS issued_invoices,
+        COUNT(*) FILTER (WHERE status = 'paid') AS paid_invoices,
+        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'issued'), 0) AS outstanding_amount_cents,
+        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'paid'), 0) AS paid_amount_cents
+      FROM projectops_project_invoices
+      GROUP BY project_request_id
+    ) inv ON inv.project_request_id = pr.id
     WHERE pr.status != 'archived'
     ORDER BY pr.updated_at DESC, pr.created_at DESC`,
     params: Object.freeze([]),
