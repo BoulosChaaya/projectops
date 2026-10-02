@@ -91,7 +91,85 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
 });
 
-unitTest('PROJECTOPS-PERSIST-004: API can run on repository-backed persistence service', async () => {
+unitTest('PROJECTOPS-PERSIST-004: repository maps write conflicts and missing relationships to product errors', async () => {
+  const sql = new ProjectOpsMemorySqlExecutor();
+  await applyProjectOpsMigrations(sql);
+
+  const repo = new ProjectOpsRepository(sql);
+  await repo.createClient({
+    id: 'client-1',
+    name: 'Zad Studio',
+    createdAtIso: T0,
+  });
+  await repo.createProjectRequest({
+    id: 'req-1',
+    clientId: 'client-1',
+    title: 'Repository hardening',
+    brief: 'Exercise write-side error contracts.',
+    createdAtIso: T0,
+  });
+
+  await assert.rejects(
+    () =>
+      repo.createClient({
+        id: 'client-1',
+        name: 'Zad Studio',
+        createdAtIso: T0,
+      }),
+    (error: Error & { code?: string; kind?: string }) =>
+      error.name === 'ProjectOpsOperationError' &&
+      error.kind === 'conflict' &&
+      error.code === 'PROJECTOPS_CLIENT_ALREADY_EXISTS'
+  );
+
+  await assert.rejects(
+    () =>
+      repo.createProjectRequest({
+        id: 'req-missing-client',
+        clientId: 'missing-client',
+        title: 'Missing client',
+        brief: 'Should not attach to a missing client.',
+        createdAtIso: T0,
+      }),
+    (error: Error & { code?: string; kind?: string }) =>
+      error.name === 'ProjectOpsOperationError' &&
+      error.kind === 'not_found' &&
+      error.code === 'PROJECTOPS_CLIENT_NOT_FOUND'
+  );
+
+  await assert.rejects(
+    () =>
+      repo.createProjectRequest({
+        id: 'req-1',
+        clientId: 'client-1',
+        title: 'Duplicate request',
+        brief: 'Should not reuse request ids.',
+        createdAtIso: T0,
+      }),
+    (error: Error & { code?: string; kind?: string }) =>
+      error.name === 'ProjectOpsOperationError' &&
+      error.kind === 'conflict' &&
+      error.code === 'PROJECTOPS_REQUEST_ALREADY_EXISTS'
+  );
+
+  await assert.rejects(
+    () => repo.transitionProjectRequest('req-missing', 'estimated', T1),
+    (error: Error & { code?: string; kind?: string }) =>
+      error.name === 'ProjectOpsOperationError' &&
+      error.kind === 'not_found' &&
+      error.code === 'PROJECTOPS_REQUEST_NOT_FOUND'
+  );
+
+  await assert.rejects(
+    () => repo.transitionProjectRequest('req-1', 'delivered', T1),
+    (error: Error & { code?: string; kind?: string }) =>
+      error.name === 'ProjectOpsOperationError' &&
+      error.kind === 'invalid_state' &&
+      error.code === 'PROJECTOPS_INVALID_STATUS_TRANSITION'
+  );
+});
+
+unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence service', async () => {
   const sql = new ProjectOpsMemorySqlExecutor();
   await applyProjectOpsMigrations(sql);
 
@@ -144,6 +222,7 @@ unitTest('PROJECTOPS-PERSIST-004: API can run on repository-backed persistence s
 
     const missingRes = await fetch(`${server.origin}/projectops/project-requests/missing`);
     assert.equal(missingRes.status, 404);
+    assert.equal(((await missingRes.json()) as { code: string }).code, 'PROJECTOPS_REQUEST_NOT_FOUND');
 
     const dashboardRes = await fetch(`${server.origin}/projectops/dashboard`);
     assert.equal(dashboardRes.status, 200);
@@ -152,6 +231,54 @@ unitTest('PROJECTOPS-PERSIST-004: API can run on repository-backed persistence s
     assert.equal(dashboard.totalActiveRequests, 1);
     assert.equal(dashboard.byStatus.estimated, 1);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'estimated');
+  } finally {
+    await server.close();
+  }
+});
+
+unitTest('PROJECTOPS-PERSIST-006: API exposes stable write-side error contracts', async () => {
+  const sql = new ProjectOpsMemorySqlExecutor();
+  await applyProjectOpsMigrations(sql);
+
+  const server = await startHttpListener({
+    port: 0,
+    routes: createProjectOpsRoutes(createProjectOpsRepositoryService(sql), () => T0),
+  });
+
+  try {
+    await expectOkJson(`${server.origin}/projectops/clients`, {
+      id: 'client-1',
+      name: 'Zad Studio',
+    });
+    await expectOkJson(`${server.origin}/projectops/project-requests`, {
+      id: 'req-1',
+      clientId: 'client-1',
+      title: 'Stable errors',
+      brief: 'Errors are part of the contract.',
+    });
+
+    await expectProjectOpsError(`${server.origin}/projectops/clients`, {
+      id: 'client-1',
+      name: 'Zad Studio',
+    }, 409, 'PROJECTOPS_CLIENT_ALREADY_EXISTS');
+
+    await expectProjectOpsError(`${server.origin}/projectops/project-requests`, {
+      id: 'req-missing-client',
+      clientId: 'missing-client',
+      title: 'Missing client',
+      brief: 'This should return a resource error.',
+    }, 404, 'PROJECTOPS_CLIENT_NOT_FOUND');
+
+    await expectProjectOpsError(`${server.origin}/projectops/project-requests`, {
+      id: 'req-1',
+      clientId: 'client-1',
+      title: 'Duplicate request',
+      brief: 'This should return a conflict.',
+    }, 409, 'PROJECTOPS_REQUEST_ALREADY_EXISTS');
+
+    await expectProjectOpsError(`${server.origin}/projectops/project-requests/req-1/status`, {
+      status: 'delivered',
+    }, 400, 'PROJECTOPS_INVALID_STATUS_TRANSITION');
   } finally {
     await server.close();
   }
@@ -166,4 +293,23 @@ async function expectOkJson<T = unknown>(url: string, body: Record<string, unkno
 
   assert.equal(response.status, 200);
   return await response.json() as T;
+}
+
+async function expectProjectOpsError(
+  url: string,
+  body: Record<string, unknown>,
+  status: number,
+  code: string
+): Promise<void> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json() as { code: string; status: number; message: string };
+
+  assert.equal(response.status, status);
+  assert.equal(payload.status, status);
+  assert.equal(payload.code, code);
+  assert.equal(typeof payload.message, 'string');
 }
