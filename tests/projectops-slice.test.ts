@@ -4,6 +4,7 @@ import {
   acceptProjectDeliverable,
   addressProjectFeedback,
   archiveProjectDocument,
+  archiveProjectNote,
   approveProjectRequest,
   approveProjectChangeRequest,
   composeProjectOpsDashboard,
@@ -15,6 +16,7 @@ import {
   createProjectInvoice,
   createProjectIssue,
   createProjectMilestone,
+  createProjectNote,
   createProjectRequest,
   estimateProjectRequest,
   markProjectInvoicePaid,
@@ -28,6 +30,7 @@ import {
   transitionProjectRequest,
   type AddressProjectFeedbackInput,
   type ArchiveProjectDocumentInput,
+  type ArchiveProjectNoteInput,
   type ApproveProjectRequestInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
@@ -40,6 +43,7 @@ import {
   type NewProjectIssueInput,
   type NewClientInput,
   type NewProjectMilestoneInput,
+  type NewProjectNoteInput,
   type NewProjectRequestInput,
   type ProjectDeliverable,
   type ProjectActivity,
@@ -51,6 +55,7 @@ import {
   type ProjectOpsClient,
   type ProjectOpsDashboardView,
   type ProjectMilestone,
+  type ProjectNote,
   type ProjectRequest,
   type ProjectRequestStatus,
   type ResolveProjectIssueInput,
@@ -230,6 +235,24 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(archivedDocument.status, 'archived');
   assert.equal(archivedDocument.archivedBy, 'Boulos');
 
+  const note = createProjectNote(approved, {
+    id: 'note-1',
+    projectRequestId: request.id,
+    author: 'Boulos',
+    visibility: 'client',
+    body: 'Client asked for a clearer launch checklist.',
+    createdAtIso: T3,
+  });
+  assert.equal(note.status, 'active');
+  assert.equal(note.visibility, 'client');
+
+  const archivedNote = archiveProjectNote(note, {
+    archivedBy: 'Boulos',
+    archivedAtIso: T3,
+  });
+  assert.equal(archivedNote.status, 'archived');
+  assert.equal(archivedNote.archivedBy, 'Boulos');
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -263,6 +286,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_issues/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_feedback/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_documents/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_notes/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
@@ -647,6 +671,42 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(archiveDocumentRes.status, 200);
     assert.equal(archivedDocument.status, 'archived');
 
+    const noteRes = await fetch(`${server.origin}/projectops/project-requests/req-2/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'note-1',
+        author: 'Boulos',
+        visibility: 'client',
+        body: 'Client asked for a clearer launch checklist.',
+        createdAtIso: T3,
+      }),
+    });
+    const note = await noteRes.json() as ProjectNote;
+    assert.equal(noteRes.status, 200);
+    assert.equal(note.status, 'active');
+    assert.equal(note.visibility, 'client');
+
+    const notesRes = await fetch(`${server.origin}/projectops/project-requests/req-2/notes`);
+    assert.equal(notesRes.status, 200);
+    const notes = await notesRes.json() as readonly ProjectNote[];
+    assert.equal(notes.length, 1);
+
+    const archiveNoteRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/notes/note-1/archive`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          archivedBy: 'Boulos',
+          archivedAtIso: T3,
+        }),
+      }
+    );
+    const archivedNote = await archiveNoteRes.json() as ProjectNote;
+    assert.equal(archiveNoteRes.status, 200);
+    assert.equal(archivedNote.status, 'archived');
+
     const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -690,6 +750,9 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.negativeOpenFeedback, 0);
     assert.equal(dashboard.activeDocuments, 0);
     assert.equal(dashboard.archivedDocuments, 1);
+    assert.equal(dashboard.activeNotes, 0);
+    assert.equal(dashboard.archivedNotes, 1);
+    assert.equal(dashboard.clientVisibleNotes, 0);
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -733,6 +796,9 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       negativeOpenFeedbackCount: 1,
       activeDocumentCount: 2,
       archivedDocumentCount: 1,
+      activeNoteCount: 2,
+      archivedNoteCount: 1,
+      clientVisibleNoteCount: 1,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -829,6 +895,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const issues = new Map<string, ProjectIssue>();
   const feedback = new Map<string, ProjectFeedback>();
   const documents = new Map<string, ProjectDocument>();
+  const notes = new Map<string, ProjectNote>();
   const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
@@ -1110,6 +1177,39 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       documents.set(key, next);
       return next;
     },
+    async createProjectNote(
+      projectRequestId: string,
+      input: NewProjectNoteInput
+    ): Promise<ProjectNote> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      const note = createProjectNote(request, input);
+      notes.set(noteKey(projectRequestId, note.id), note);
+      return note;
+    },
+    async listProjectNotes(projectRequestId: string): Promise<readonly ProjectNote[]> {
+      return Object.freeze(
+        [...notes.values()]
+          .filter((note) => note.projectRequestId === projectRequestId)
+          .sort((a, b) => b.createdAtIso.localeCompare(a.createdAtIso) || a.id.localeCompare(b.id))
+      );
+    },
+    async archiveProjectNote(
+      projectRequestId: string,
+      noteId: string,
+      input: ArchiveProjectNoteInput
+    ): Promise<ProjectNote> {
+      const key = noteKey(projectRequestId, noteId);
+      const current = notes.get(key);
+      if (!current) {
+        throw new Error(`Project note not found: ${projectRequestId}/${noteId}`);
+      }
+      const next = archiveProjectNote(current, input);
+      notes.set(key, next);
+      return next;
+    },
     async createProjectActivity(
       projectRequestId: string,
       input: NewProjectActivityInput
@@ -1203,6 +1303,9 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             negativeOpenFeedbackCount: countNegativeOpenFeedback(feedback, request.id),
             activeDocumentCount: countDocuments(documents, request.id, 'active'),
             archivedDocumentCount: countDocuments(documents, request.id, 'archived'),
+            activeNoteCount: countNotes(notes, request.id, 'active'),
+            archivedNoteCount: countNotes(notes, request.id, 'archived'),
+            clientVisibleNoteCount: countClientVisibleNotes(notes, request.id),
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -1239,6 +1342,10 @@ function feedbackKey(projectRequestId: string, feedbackId: string): string {
 
 function documentKey(projectRequestId: string, documentId: string): string {
   return `${projectRequestId}\0${documentId}`;
+}
+
+function noteKey(projectRequestId: string, noteId: string): string {
+  return `${projectRequestId}\0${noteId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -1344,6 +1451,25 @@ function countDocuments(
 ): number {
   return [...documents.values()].filter(
     (document) => document.projectRequestId === projectRequestId && document.status === status
+  ).length;
+}
+
+function countNotes(
+  notes: ReadonlyMap<string, ProjectNote>,
+  projectRequestId: string,
+  status: ProjectNote['status']
+): number {
+  return [...notes.values()].filter(
+    (note) => note.projectRequestId === projectRequestId && note.status === status
+  ).length;
+}
+
+function countClientVisibleNotes(
+  notes: ReadonlyMap<string, ProjectNote>,
+  projectRequestId: string
+): number {
+  return [...notes.values()].filter(
+    (note) => note.projectRequestId === projectRequestId && note.status === 'active' && note.visibility === 'client'
   ).length;
 }
 
