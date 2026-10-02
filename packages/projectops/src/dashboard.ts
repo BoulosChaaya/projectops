@@ -21,6 +21,9 @@ export interface ProjectOpsDashboardRow {
   readonly paidInvoiceCount?: number;
   readonly outstandingInvoiceAmountCents?: number;
   readonly paidInvoiceAmountCents?: number;
+  readonly proposedChangeRequestCount?: number;
+  readonly approvedChangeRequestCount?: number;
+  readonly rejectedChangeRequestCount?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
@@ -38,6 +41,9 @@ export interface ProjectOpsDashboardView {
   readonly paidInvoices: number;
   readonly outstandingInvoiceAmountCents: number;
   readonly paidInvoiceAmountCents: number;
+  readonly proposedChangeRequests: number;
+  readonly approvedChangeRequests: number;
+  readonly rejectedChangeRequests: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -63,6 +69,9 @@ export function composeProjectOpsDashboard(
   let paidInvoices = 0;
   let outstandingInvoiceAmountCents = 0;
   let paidInvoiceAmountCents = 0;
+  let proposedChangeRequests = 0;
+  let approvedChangeRequests = 0;
+  let rejectedChangeRequests = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -78,6 +87,9 @@ export function composeProjectOpsDashboard(
     paidInvoices += row.paidInvoiceCount ?? 0;
     outstandingInvoiceAmountCents += row.outstandingInvoiceAmountCents ?? 0;
     paidInvoiceAmountCents += row.paidInvoiceAmountCents ?? 0;
+    proposedChangeRequests += row.proposedChangeRequestCount ?? 0;
+    approvedChangeRequests += row.approvedChangeRequestCount ?? 0;
+    rejectedChangeRequests += row.rejectedChangeRequestCount ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -95,6 +107,9 @@ export function composeProjectOpsDashboard(
     paidInvoices,
     outstandingInvoiceAmountCents,
     paidInvoiceAmountCents,
+    proposedChangeRequests,
+    approvedChangeRequests,
+    rejectedChangeRequests,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
