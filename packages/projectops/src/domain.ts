@@ -10,6 +10,8 @@ export type ProjectFeedbackStatus = 'open' | 'addressed';
 export type ProjectFeedbackSentiment = 'positive' | 'neutral' | 'negative';
 export type ProjectDocumentStatus = 'active' | 'archived';
 export type ProjectDocumentType = 'proposal' | 'contract' | 'asset' | 'handoff' | 'other';
+export type ProjectNoteStatus = 'active' | 'archived';
+export type ProjectNoteVisibility = 'internal' | 'client';
 export type ProjectActivityEventType =
   | 'request_created'
   | 'request_estimated'
@@ -154,6 +156,19 @@ export interface ProjectDocument {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectNote {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly author: string;
+  readonly visibility: ProjectNoteVisibility;
+  readonly body: string;
+  readonly status: ProjectNoteStatus;
+  readonly createdAtIso: string;
+  readonly archivedAtIso?: string;
+  readonly archivedBy?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface ProjectActivity {
   readonly id: string;
   readonly projectRequestId: string;
@@ -286,6 +301,20 @@ export interface ArchiveProjectDocumentInput {
   readonly archivedAtIso: string;
 }
 
+export interface NewProjectNoteInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly author: string;
+  readonly visibility?: ProjectNoteVisibility;
+  readonly body: string;
+  readonly createdAtIso: string;
+}
+
+export interface ArchiveProjectNoteInput {
+  readonly archivedBy: string;
+  readonly archivedAtIso: string;
+}
+
 export interface NewProjectActivityInput {
   readonly id: string;
   readonly projectRequestId: string;
@@ -389,6 +418,16 @@ export const projectDocumentTypes = Object.freeze([
   'handoff',
   'other',
 ] satisfies readonly ProjectDocumentType[]);
+
+export const projectNoteStatuses = Object.freeze([
+  'active',
+  'archived',
+] satisfies readonly ProjectNoteStatus[]);
+
+export const projectNoteVisibilities = Object.freeze([
+  'internal',
+  'client',
+] satisfies readonly ProjectNoteVisibility[]);
 
 export const projectActivityEventTypes = Object.freeze([
   'request_created',
@@ -982,6 +1021,71 @@ export function archiveProjectDocument(
     status: 'archived',
     archivedAtIso,
     archivedBy: requireText('projectDocument.archivedBy', input.archivedBy, 120),
+    updatedAtIso: archivedAtIso,
+  });
+}
+
+export function createProjectNote(
+  request: ProjectRequest,
+  input: NewProjectNoteInput
+): ProjectNote {
+  if (request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_NOTES',
+      'Project request must not be archived before adding notes.'
+    );
+  }
+
+  const id = requireIdentifier('projectNote.id', input.id);
+  const projectRequestId = requireIdentifier('projectNote.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_NOTE_REQUEST_MISMATCH',
+      'Project note must belong to the selected project request.'
+    );
+  }
+
+  const visibility = input.visibility ?? 'internal';
+  if (!projectNoteVisibilities.includes(visibility)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_NOTE_VISIBILITY',
+      `Unsupported project note visibility: ${visibility}`
+    );
+  }
+
+  const createdAtIso = assertIsoTimestamp('projectNote.createdAtIso', input.createdAtIso);
+  return Object.freeze({
+    id,
+    projectRequestId,
+    author: requireText('projectNote.author', input.author, 120),
+    visibility,
+    body: requireText('projectNote.body', input.body, 2000),
+    status: 'active',
+    createdAtIso,
+    updatedAtIso: createdAtIso,
+  });
+}
+
+export function archiveProjectNote(
+  note: ProjectNote,
+  input: ArchiveProjectNoteInput
+): ProjectNote {
+  if (note.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_NOTE_ALREADY_ARCHIVED',
+      'Project note is already archived.'
+    );
+  }
+
+  const archivedAtIso = assertIsoTimestamp('projectNote.archivedAtIso', input.archivedAtIso);
+  return Object.freeze({
+    ...note,
+    status: 'archived',
+    archivedAtIso,
+    archivedBy: requireText('projectNote.archivedBy', input.archivedBy, 120),
     updatedAtIso: archivedAtIso,
   });
 }
