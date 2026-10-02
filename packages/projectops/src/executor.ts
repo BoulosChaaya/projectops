@@ -60,6 +60,20 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       return Object.freeze([row as T]);
     }
 
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_CLIENTS ORDER BY CREATED_AT DESC')) {
+      return Object.freeze(this.selectClients() as T[]);
+    }
+
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_CLIENTS WHERE ID = $1')) {
+      const id = String(statement.params[0]);
+      const row = this.clients.get(id);
+      return Object.freeze(row ? [toClient(row) as T] : []);
+    }
+
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_REQUESTS ORDER BY UPDATED_AT DESC')) {
+      return Object.freeze(this.selectProjectRequests() as T[]);
+    }
+
     if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_REQUESTS WHERE ID = $1')) {
       const id = String(statement.params[0]);
       const row = this.projectRequests.get(id);
@@ -156,6 +170,26 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return next;
   }
 
+  private selectClients(): readonly ProjectOpsClientRow[] {
+    return Object.freeze(
+      [...this.clients.values()]
+        .sort((a, b) => b.createdAtIso.localeCompare(a.createdAtIso) || a.id.localeCompare(b.id))
+        .map(toClient)
+    );
+  }
+
+  private selectProjectRequests(): readonly ProjectOpsRequestRow[] {
+    return Object.freeze(
+      [...this.projectRequests.values()]
+        .sort((a, b) => (
+          b.updatedAtIso.localeCompare(a.updatedAtIso) ||
+          b.createdAtIso.localeCompare(a.createdAtIso) ||
+          a.id.localeCompare(b.id)
+        ))
+        .map(toProjectRequest)
+    );
+  }
+
   private selectDashboardRows(): readonly ProjectOpsDashboardStorageRow[] {
     return Object.freeze(
       [...this.projectRequests.values()]
@@ -180,6 +214,10 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
         })
     );
   }
+}
+
+function toClient(row: ProjectOpsClientRow): ProjectOpsClientRow {
+  return Object.freeze({ ...row });
 }
 
 function toProjectRequest(row: ProjectOpsRequestRow): ProjectOpsRequestRow {
