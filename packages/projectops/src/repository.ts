@@ -1,8 +1,12 @@
 import {
   ProjectOpsOperationError,
+  approveProjectRequest,
   createClient,
   createProjectRequest,
+  estimateProjectRequest,
   transitionProjectRequest,
+  type ApproveProjectRequestInput,
+  type EstimateProjectRequestInput,
   type NewClientInput,
   type NewProjectRequestInput,
   type ProjectOpsClient,
@@ -10,6 +14,8 @@ import {
   type ProjectRequestStatus,
 } from './domain.ts';
 import {
+  approveProjectRequestSql,
+  estimateProjectRequestSql,
   insertClientSql,
   insertProjectRequestSql,
   selectClientByIdSql,
@@ -102,11 +108,46 @@ export class ProjectOpsRepository {
     return rows[0];
   }
 
+  public async estimateProjectRequest(
+    id: string,
+    input: EstimateProjectRequestInput
+  ): Promise<ProjectRequest> {
+    const current = await this.requireProjectRequest(id);
+    const estimated = estimateProjectRequest(current, input);
+    const rows = await this.sql.query<ProjectRequest>(estimateProjectRequestSql(estimated));
+    return this.requirePersistedProjectRequest(rows, id);
+  }
+
+  public async approveProjectRequest(
+    id: string,
+    input: ApproveProjectRequestInput
+  ): Promise<ProjectRequest> {
+    const current = await this.requireProjectRequest(id);
+    const approved = approveProjectRequest(current, input);
+    const rows = await this.sql.query<ProjectRequest>(approveProjectRequestSql(approved));
+    return this.requirePersistedProjectRequest(rows, id);
+  }
+
   public async transitionProjectRequest(
     id: string,
     nextStatus: ProjectRequestStatus,
     nowIso: string
   ): Promise<ProjectRequest> {
+    const current = await this.requireProjectRequest(id);
+
+    const transitioned = transitionProjectRequest(current, nextStatus, nowIso);
+    const rows = await this.sql.query<ProjectRequest>(
+      updateProjectRequestStatusSql(id, transitioned.status, transitioned.updatedAtIso)
+    );
+    return this.requirePersistedProjectRequest(rows, id);
+  }
+
+  public async getDashboard(): Promise<ProjectOpsDashboardView> {
+    const rows = await this.sql.query<ProjectOpsDashboardRow>(selectDashboardRowsSql());
+    return composeProjectOpsDashboard(rows);
+  }
+
+  private async requireProjectRequest(id: string): Promise<ProjectRequest> {
     const currentRows = await this.sql.query<ProjectRequest>(selectProjectRequestByIdSql(id));
     const current = currentRows[0];
     if (!current) {
@@ -116,11 +157,13 @@ export class ProjectOpsRepository {
         `Project request not found: ${id}.`
       );
     }
+    return current;
+  }
 
-    const transitioned = transitionProjectRequest(current, nextStatus, nowIso);
-    const rows = await this.sql.query<ProjectRequest>(
-      updateProjectRequestStatusSql(id, transitioned.status, transitioned.updatedAtIso)
-    );
+  private requirePersistedProjectRequest(
+    rows: readonly ProjectRequest[],
+    id: string
+  ): ProjectRequest {
     const persisted = rows[0];
     if (!persisted) {
       throw new ProjectOpsOperationError(
@@ -130,10 +173,5 @@ export class ProjectOpsRepository {
       );
     }
     return persisted;
-  }
-
-  public async getDashboard(): Promise<ProjectOpsDashboardView> {
-    const rows = await this.sql.query<ProjectOpsDashboardRow>(selectDashboardRowsSql());
-    return composeProjectOpsDashboard(rows);
   }
 }
