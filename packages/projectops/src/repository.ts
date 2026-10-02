@@ -3,6 +3,7 @@ import {
   acceptProjectDeliverable,
   approveProjectRequest,
   completeProjectMilestone,
+  createProjectActivity,
   createClient,
   createProjectDeliverable,
   createProjectInvoice,
@@ -13,11 +14,13 @@ import {
   transitionProjectRequest,
   type ApproveProjectRequestInput,
   type EstimateProjectRequestInput,
+  type NewProjectActivityInput,
   type NewProjectDeliverableInput,
   type NewProjectInvoiceInput,
   type NewProjectMilestoneInput,
   type NewClientInput,
   type NewProjectRequestInput,
+  type ProjectActivity,
   type ProjectDeliverable,
   type ProjectInvoice,
   type ProjectOpsClient,
@@ -31,6 +34,7 @@ import {
   completeProjectMilestoneSql,
   estimateProjectRequestSql,
   insertClientSql,
+  insertProjectActivitySql,
   insertProjectDeliverableSql,
   insertProjectInvoiceSql,
   insertProjectMilestoneSql,
@@ -39,6 +43,8 @@ import {
   selectClientByIdSql,
   selectClientsSql,
   selectDashboardRowsSql,
+  selectProjectActivitiesSql,
+  selectProjectActivityByIdSql,
   selectProjectDeliverableByIdSql,
   selectProjectDeliverablesSql,
   selectProjectInvoiceByIdSql,
@@ -301,6 +307,46 @@ export class ProjectOpsRepository {
     const paid = markProjectInvoicePaid(current, paidAtIso);
     const rows = await this.sql.query<ProjectInvoice>(markProjectInvoicePaidSql(paid));
     return this.requirePersistedProjectInvoice(rows, projectRequestId, invoiceId);
+  }
+
+  public async createProjectActivity(
+    projectRequestId: string,
+    input: NewProjectActivityInput
+  ): Promise<ProjectActivity> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const activity = createProjectActivity(request, input);
+    const existing = await this.getProjectActivity(projectRequestId, activity.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_ACTIVITY_ALREADY_EXISTS',
+        `ProjectOps project activity already exists: ${activity.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectActivity>(insertProjectActivitySql(activity));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project activity insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectActivities(
+    projectRequestId: string
+  ): Promise<readonly ProjectActivity[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectActivity>(selectProjectActivitiesSql(projectRequestId));
+  }
+
+  public async getProjectActivity(
+    projectRequestId: string,
+    activityId: string
+  ): Promise<ProjectActivity | undefined> {
+    const rows = await this.sql.query<ProjectActivity>(
+      selectProjectActivityByIdSql(projectRequestId, activityId)
+    );
+    return rows[0];
   }
 
   public async estimateProjectRequest(
