@@ -42,6 +42,9 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
       openIssueCount: 2,
       highOpenIssueCount: 1,
       resolvedIssueCount: 3,
+      openFeedbackCount: 2,
+      addressedFeedbackCount: 1,
+      negativeOpenFeedbackCount: 1,
       latestActivityAtIso: T1,
       latestActivitySummary: 'Client approved launch copy.',
       updatedAtIso: T1,
@@ -61,6 +64,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /Outstanding invoices/);
   assert.match(rendered.html, /Proposed changes/);
   assert.match(rendered.html, /Open issues/);
+  assert.match(rendered.html, /Open feedback/);
   assert.match(rendered.html, /Launch dashboard/);
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /In Progress/);
@@ -70,6 +74,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /2 paid \/ 1 open \(USD 1,250\.00\)/);
   assert.match(rendered.html, /1 proposed \/ 2 approved/);
   assert.match(rendered.html, /2 open \/ 1 high/);
+  assert.match(rendered.html, /2 open \/ 1 negative/);
   assert.match(rendered.html, /Client approved launch copy/);
   assert.match(rendered.html, /High/);
 });
@@ -155,6 +160,14 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
     owner: 'Client',
     openedAtIso: T1,
   });
+  await repo.createProjectFeedback('req-1', {
+    id: 'feedback-1',
+    projectRequestId: 'req-1',
+    author: 'Client',
+    sentiment: 'negative',
+    message: 'The estimate summary needs clearer acceptance notes.',
+    receivedAtIso: T1,
+  });
 
   const summary = await repo.getDashboard();
   const page = composeProjectOpsDashboardPageFromSummary(summary);
@@ -166,6 +179,7 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
   assert.match(rendered.html, /USD 1,750\.00/);
   assert.match(rendered.html, /1 proposed \/ 0 approved/);
   assert.match(rendered.html, /1 open \/ 1 high/);
+  assert.match(rendered.html, /1 open \/ 1 negative/);
   assert.match(rendered.html, /Estimate sent to client/);
   assert.match(rendered.html, /1 shown/);
 });
@@ -263,6 +277,15 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     owner: 'Client',
     openedAtIso: T1,
   });
+  await repo.createProjectFeedback('req-1', {
+    id: 'feedback-1',
+    projectRequestId: 'req-1',
+    deliverableId: 'deliverable-1',
+    author: 'Client',
+    sentiment: 'neutral',
+    message: 'Please add a short acceptance note to the handoff.',
+    receivedAtIso: T1,
+  });
 
   const server = await startHttpListener({
     port: 0,
@@ -287,6 +310,7 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     assert.match(html, /0 paid \/ 1 open \(USD 2,100\.00\)/);
     assert.match(html, /1 proposed \/ 0 approved/);
     assert.match(html, /1 open \/ 0 high/);
+    assert.match(html, /1 open \/ 0 negative/);
     assert.match(html, /Invoice issued after accepted handoff/);
     assert.match(html, /Zad Studio/);
   } finally {
