@@ -10,6 +10,7 @@ type ProjectOpsTable =
   | 'projectops_project_deliverables'
   | 'projectops_project_invoices'
   | 'projectops_project_change_requests'
+  | 'projectops_project_issues'
   | 'projectops_project_activities';
 
 export interface ProjectOpsQueryConnection {
@@ -43,6 +44,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private readonly projectDeliverables = new Map<string, ProjectOpsDeliverableRow>();
   private readonly projectInvoices = new Map<string, ProjectOpsInvoiceRow>();
   private readonly projectChangeRequests = new Map<string, ProjectOpsChangeRequestRow>();
+  private readonly projectIssues = new Map<string, ProjectOpsIssueRow>();
   private readonly projectActivities = new Map<string, ProjectOpsActivityRow>();
   private readonly migratedTables = new Set<ProjectOpsTable>();
 
@@ -77,6 +79,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_PROJECT_CHANGE_REQUESTS')) {
       this.migratedTables.add('projectops_project_change_requests');
+      return Object.freeze([]);
+    }
+
+    if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_PROJECT_ISSUES')) {
+      this.migratedTables.add('projectops_project_issues');
       return Object.freeze([]);
     }
 
@@ -119,6 +126,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_CHANGE_REQUESTS')) {
       const row = this.insertProjectChangeRequest(statement.params);
+      return Object.freeze([row as T]);
+    }
+
+    if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_ISSUES')) {
+      const row = this.insertProjectIssue(statement.params);
       return Object.freeze([row as T]);
     }
 
@@ -211,6 +223,22 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       return Object.freeze(row ? [row as T] : []);
     }
 
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_ISSUES WHERE PROJECT_REQUEST_ID = $1 AND ID = $2')) {
+      const key = issueKey(String(statement.params[0]), String(statement.params[1]));
+      const row = this.projectIssues.get(key);
+      return Object.freeze(row ? [toProjectIssue(row) as T] : []);
+    }
+
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_ISSUES WHERE PROJECT_REQUEST_ID = $1')) {
+      const projectRequestId = String(statement.params[0]);
+      return Object.freeze(this.selectProjectIssues(projectRequestId) as T[]);
+    }
+
+    if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_ISSUES')) {
+      const row = this.resolveProjectIssue(statement.params);
+      return Object.freeze(row ? [row as T] : []);
+    }
+
     if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_ACTIVITIES WHERE PROJECT_REQUEST_ID = $1 AND ID = $2')) {
       const key = activityKey(String(statement.params[0]), String(statement.params[1]));
       const row = this.projectActivities.get(key);
@@ -251,6 +279,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     projectDeliverables: readonly ProjectOpsDeliverableRow[];
     projectInvoices: readonly ProjectOpsInvoiceRow[];
     projectChangeRequests: readonly ProjectOpsChangeRequestRow[];
+    projectIssues: readonly ProjectOpsIssueRow[];
     projectActivities: readonly ProjectOpsActivityRow[];
   }> {
     return Object.freeze({
@@ -270,6 +299,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       projectChangeRequests: Object.freeze(
         [...this.projectChangeRequests.values()].map((row) => Object.freeze({ ...row }))
       ),
+      projectIssues: Object.freeze(
+        [...this.projectIssues.values()].map((row) => Object.freeze({ ...row }))
+      ),
       projectActivities: Object.freeze(
         [...this.projectActivities.values()].map((row) => Object.freeze({ ...row }))
       ),
@@ -284,6 +316,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       !this.migratedTables.has('projectops_project_deliverables') ||
       !this.migratedTables.has('projectops_project_invoices') ||
       !this.migratedTables.has('projectops_project_change_requests') ||
+      !this.migratedTables.has('projectops_project_issues') ||
       !this.migratedTables.has('projectops_project_activities')
     ) {
       throw new Error('ProjectOps schema has not been migrated.');
@@ -462,6 +495,34 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
+  private insertProjectIssue(params: readonly unknown[]): ProjectOpsIssueRow {
+    const projectRequestId = asString(params[1], 'projectIssue.projectRequestId');
+    if (!this.projectRequests.has(projectRequestId)) {
+      throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
+    }
+
+    const row = Object.freeze({
+      id: asString(params[0], 'projectIssue.id'),
+      projectRequestId,
+      title: asString(params[2], 'projectIssue.title'),
+      description: asString(params[3], 'projectIssue.description'),
+      severity: asString(params[4], 'projectIssue.severity'),
+      owner: asOptionalString(params[5]),
+      status: asString(params[6], 'projectIssue.status'),
+      openedAtIso: asString(params[7], 'projectIssue.openedAtIso'),
+      resolvedAtIso: asOptionalString(params[8]),
+      resolutionNote: asOptionalString(params[9]),
+      updatedAtIso: asString(params[10], 'projectIssue.updatedAtIso'),
+    } satisfies ProjectOpsIssueRow);
+
+    const key = issueKey(projectRequestId, row.id);
+    if (this.projectIssues.has(key)) {
+      throw new Error(`Duplicate ProjectOps project issue id: ${projectRequestId}/${row.id}`);
+    }
+    this.projectIssues.set(key, row);
+    return row;
+  }
+
   private insertProjectActivity(params: readonly unknown[]): ProjectOpsActivityRow {
     const projectRequestId = asString(params[1], 'projectActivity.projectRequestId');
     if (!this.projectRequests.has(projectRequestId)) {
@@ -599,6 +660,23 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return next;
   }
 
+  private resolveProjectIssue(params: readonly unknown[]): ProjectOpsIssueRow | undefined {
+    const projectRequestId = asString(params[0], 'projectIssue.projectRequestId');
+    const id = asString(params[1], 'projectIssue.id');
+    const current = this.projectIssues.get(issueKey(projectRequestId, id));
+    if (!current) return undefined;
+
+    const next = Object.freeze({
+      ...current,
+      status: asString(params[2], 'projectIssue.status'),
+      resolvedAtIso: asOptionalString(params[3]),
+      resolutionNote: asOptionalString(params[4]),
+      updatedAtIso: asString(params[5], 'projectIssue.updatedAtIso'),
+    });
+    this.projectIssues.set(issueKey(projectRequestId, id), next);
+    return next;
+  }
+
   private selectClients(): readonly ProjectOpsClientRow[] {
     return Object.freeze(
       [...this.clients.values()]
@@ -659,6 +737,15 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     );
   }
 
+  private selectProjectIssues(projectRequestId: string): readonly ProjectOpsIssueRow[] {
+    return Object.freeze(
+      [...this.projectIssues.values()]
+        .filter((issue) => issue.projectRequestId === projectRequestId)
+        .sort((a, b) => b.openedAtIso.localeCompare(a.openedAtIso) || a.id.localeCompare(b.id))
+        .map(toProjectIssue)
+    );
+  }
+
   private selectProjectActivities(projectRequestId: string): readonly ProjectOpsActivityRow[] {
     return Object.freeze(
       [...this.projectActivities.values()]
@@ -707,6 +794,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
             proposedChangeRequestCount: this.countChangeRequests(request.id, 'proposed'),
             approvedChangeRequestCount: this.countChangeRequests(request.id, 'approved'),
             rejectedChangeRequestCount: this.countChangeRequests(request.id, 'rejected'),
+            openIssueCount: this.countIssues(request.id, 'open'),
+            highOpenIssueCount: this.countHighOpenIssues(request.id),
+            resolvedIssueCount: this.countIssues(request.id, 'resolved'),
             latestActivityAtIso: this.latestActivity(request.id)?.happenedAtIso,
             latestActivitySummary: this.latestActivity(request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -745,6 +835,18 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     ).length;
   }
 
+  private countIssues(projectRequestId: string, status: string): number {
+    return [...this.projectIssues.values()].filter(
+      (issue) => issue.projectRequestId === projectRequestId && issue.status === status
+    ).length;
+  }
+
+  private countHighOpenIssues(projectRequestId: string): number {
+    return [...this.projectIssues.values()].filter(
+      (issue) => issue.projectRequestId === projectRequestId && issue.status === 'open' && issue.severity === 'high'
+    ).length;
+  }
+
   private latestActivity(projectRequestId: string): ProjectOpsActivityRow | undefined {
     return this.selectProjectActivities(projectRequestId)[0];
   }
@@ -774,6 +876,10 @@ function toProjectChangeRequest(row: ProjectOpsChangeRequestRow): ProjectOpsChan
   return Object.freeze({ ...row });
 }
 
+function toProjectIssue(row: ProjectOpsIssueRow): ProjectOpsIssueRow {
+  return Object.freeze({ ...row });
+}
+
 function toProjectActivity(row: ProjectOpsActivityRow): ProjectOpsActivityRow {
   return Object.freeze({ ...row });
 }
@@ -796,6 +902,10 @@ function invoiceKey(projectRequestId: string, invoiceId: string): string {
 
 function changeRequestKey(projectRequestId: string, changeRequestId: string): string {
   return `${projectRequestId}\0${changeRequestId}`;
+}
+
+function issueKey(projectRequestId: string, issueId: string): string {
+  return `${projectRequestId}\0${issueId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -862,6 +972,11 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
       : {}),
     ...(source.decided_by !== undefined ? { decidedBy: normalizeOptionalValue(source.decided_by) } : {}),
     ...(source.decision_note !== undefined ? { decisionNote: normalizeOptionalValue(source.decision_note) } : {}),
+    ...(source.opened_at !== undefined ? { openedAtIso: normalizeIsoValue(source.opened_at) } : {}),
+    ...(source.resolved_at !== undefined
+      ? { resolvedAtIso: normalizeOptionalIsoValue(source.resolved_at) }
+      : {}),
+    ...(source.resolution_note !== undefined ? { resolutionNote: normalizeOptionalValue(source.resolution_note) } : {}),
     ...(source.event_type !== undefined ? { eventType: source.event_type } : {}),
     ...(source.happened_at !== undefined ? { happenedAtIso: normalizeIsoValue(source.happened_at) } : {}),
     ...(source.open_milestone_count !== undefined
@@ -896,6 +1011,15 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
       : {}),
     ...(source.rejected_change_request_count !== undefined
       ? { rejectedChangeRequestCount: normalizeOptionalNumberValue(source.rejected_change_request_count) }
+      : {}),
+    ...(source.open_issue_count !== undefined
+      ? { openIssueCount: normalizeOptionalNumberValue(source.open_issue_count) }
+      : {}),
+    ...(source.high_open_issue_count !== undefined
+      ? { highOpenIssueCount: normalizeOptionalNumberValue(source.high_open_issue_count) }
+      : {}),
+    ...(source.resolved_issue_count !== undefined
+      ? { resolvedIssueCount: normalizeOptionalNumberValue(source.resolved_issue_count) }
       : {}),
     ...(source.latest_activity_at !== undefined
       ? { latestActivityAtIso: normalizeOptionalIsoValue(source.latest_activity_at) }
@@ -1034,6 +1158,20 @@ function mapProjectOpsStorageError(error: unknown, statement: SqlStatement): unk
       'Project request not found.'
     );
   }
+  if (code === '23505' && statement.sql.includes('projectops_project_issues')) {
+    return new ProjectOpsOperationError(
+      'conflict',
+      'PROJECTOPS_ISSUE_ALREADY_EXISTS',
+      'ProjectOps project issue already exists.'
+    );
+  }
+  if (code === '23503' && statement.sql.includes('projectops_project_issues')) {
+    return new ProjectOpsOperationError(
+      'not_found',
+      'PROJECTOPS_REQUEST_NOT_FOUND',
+      'Project request not found.'
+    );
+  }
   if (code === '23505' && statement.sql.includes('projectops_project_activities')) {
     return new ProjectOpsOperationError(
       'conflict',
@@ -1131,6 +1269,20 @@ interface ProjectOpsChangeRequestRow {
   readonly updatedAtIso: string;
 }
 
+interface ProjectOpsIssueRow {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly severity: string;
+  readonly owner?: string;
+  readonly status: string;
+  readonly openedAtIso: string;
+  readonly resolvedAtIso?: string;
+  readonly resolutionNote?: string;
+  readonly updatedAtIso: string;
+}
+
 interface ProjectOpsActivityRow {
   readonly id: string;
   readonly projectRequestId: string;
@@ -1165,6 +1317,9 @@ interface ProjectOpsDashboardStorageRow {
   readonly proposedChangeRequestCount?: number;
   readonly approvedChangeRequestCount?: number;
   readonly rejectedChangeRequestCount?: number;
+  readonly openIssueCount?: number;
+  readonly highOpenIssueCount?: number;
+  readonly resolvedIssueCount?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
