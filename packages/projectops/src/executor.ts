@@ -11,6 +11,7 @@ type ProjectOpsTable =
   | 'projectops_project_invoices'
   | 'projectops_project_change_requests'
   | 'projectops_project_issues'
+  | 'projectops_project_feedback'
   | 'projectops_project_activities';
 
 export interface ProjectOpsQueryConnection {
@@ -45,6 +46,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private readonly projectInvoices = new Map<string, ProjectOpsInvoiceRow>();
   private readonly projectChangeRequests = new Map<string, ProjectOpsChangeRequestRow>();
   private readonly projectIssues = new Map<string, ProjectOpsIssueRow>();
+  private readonly projectFeedback = new Map<string, ProjectOpsFeedbackRow>();
   private readonly projectActivities = new Map<string, ProjectOpsActivityRow>();
   private readonly migratedTables = new Set<ProjectOpsTable>();
 
@@ -84,6 +86,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_PROJECT_ISSUES')) {
       this.migratedTables.add('projectops_project_issues');
+      return Object.freeze([]);
+    }
+
+    if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_PROJECT_FEEDBACK')) {
+      this.migratedTables.add('projectops_project_feedback');
       return Object.freeze([]);
     }
 
@@ -131,6 +138,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_ISSUES')) {
       const row = this.insertProjectIssue(statement.params);
+      return Object.freeze([row as T]);
+    }
+
+    if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_FEEDBACK')) {
+      const row = this.insertProjectFeedback(statement.params);
       return Object.freeze([row as T]);
     }
 
@@ -239,6 +251,22 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       return Object.freeze(row ? [row as T] : []);
     }
 
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_FEEDBACK WHERE PROJECT_REQUEST_ID = $1 AND ID = $2')) {
+      const key = feedbackKey(String(statement.params[0]), String(statement.params[1]));
+      const row = this.projectFeedback.get(key);
+      return Object.freeze(row ? [toProjectFeedback(row) as T] : []);
+    }
+
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_FEEDBACK WHERE PROJECT_REQUEST_ID = $1')) {
+      const projectRequestId = String(statement.params[0]);
+      return Object.freeze(this.selectProjectFeedback(projectRequestId) as T[]);
+    }
+
+    if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_FEEDBACK')) {
+      const row = this.addressProjectFeedback(statement.params);
+      return Object.freeze(row ? [row as T] : []);
+    }
+
     if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_ACTIVITIES WHERE PROJECT_REQUEST_ID = $1 AND ID = $2')) {
       const key = activityKey(String(statement.params[0]), String(statement.params[1]));
       const row = this.projectActivities.get(key);
@@ -280,6 +308,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     projectInvoices: readonly ProjectOpsInvoiceRow[];
     projectChangeRequests: readonly ProjectOpsChangeRequestRow[];
     projectIssues: readonly ProjectOpsIssueRow[];
+    projectFeedback: readonly ProjectOpsFeedbackRow[];
     projectActivities: readonly ProjectOpsActivityRow[];
   }> {
     return Object.freeze({
@@ -302,6 +331,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       projectIssues: Object.freeze(
         [...this.projectIssues.values()].map((row) => Object.freeze({ ...row }))
       ),
+      projectFeedback: Object.freeze(
+        [...this.projectFeedback.values()].map((row) => Object.freeze({ ...row }))
+      ),
       projectActivities: Object.freeze(
         [...this.projectActivities.values()].map((row) => Object.freeze({ ...row }))
       ),
@@ -317,6 +349,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       !this.migratedTables.has('projectops_project_invoices') ||
       !this.migratedTables.has('projectops_project_change_requests') ||
       !this.migratedTables.has('projectops_project_issues') ||
+      !this.migratedTables.has('projectops_project_feedback') ||
       !this.migratedTables.has('projectops_project_activities')
     ) {
       throw new Error('ProjectOps schema has not been migrated.');
@@ -523,6 +556,40 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
+  private insertProjectFeedback(params: readonly unknown[]): ProjectOpsFeedbackRow {
+    const projectRequestId = asString(params[1], 'projectFeedback.projectRequestId');
+    if (!this.projectRequests.has(projectRequestId)) {
+      throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
+    }
+
+    const deliverableId = asOptionalString(params[2]);
+    if (deliverableId && !this.projectDeliverables.has(deliverableKey(projectRequestId, deliverableId))) {
+      throw new Error(`ProjectOps project deliverable not found: ${projectRequestId}/${deliverableId}`);
+    }
+
+    const row = Object.freeze({
+      id: asString(params[0], 'projectFeedback.id'),
+      projectRequestId,
+      deliverableId,
+      author: asString(params[3], 'projectFeedback.author'),
+      sentiment: asString(params[4], 'projectFeedback.sentiment'),
+      message: asString(params[5], 'projectFeedback.message'),
+      status: asString(params[6], 'projectFeedback.status'),
+      receivedAtIso: asString(params[7], 'projectFeedback.receivedAtIso'),
+      addressedAtIso: asOptionalString(params[8]),
+      addressedBy: asOptionalString(params[9]),
+      responseNote: asOptionalString(params[10]),
+      updatedAtIso: asString(params[11], 'projectFeedback.updatedAtIso'),
+    } satisfies ProjectOpsFeedbackRow);
+
+    const key = feedbackKey(projectRequestId, row.id);
+    if (this.projectFeedback.has(key)) {
+      throw new Error(`Duplicate ProjectOps project feedback id: ${projectRequestId}/${row.id}`);
+    }
+    this.projectFeedback.set(key, row);
+    return row;
+  }
+
   private insertProjectActivity(params: readonly unknown[]): ProjectOpsActivityRow {
     const projectRequestId = asString(params[1], 'projectActivity.projectRequestId');
     if (!this.projectRequests.has(projectRequestId)) {
@@ -677,6 +744,24 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return next;
   }
 
+  private addressProjectFeedback(params: readonly unknown[]): ProjectOpsFeedbackRow | undefined {
+    const projectRequestId = asString(params[0], 'projectFeedback.projectRequestId');
+    const id = asString(params[1], 'projectFeedback.id');
+    const current = this.projectFeedback.get(feedbackKey(projectRequestId, id));
+    if (!current) return undefined;
+
+    const next = Object.freeze({
+      ...current,
+      status: asString(params[2], 'projectFeedback.status'),
+      addressedAtIso: asOptionalString(params[3]),
+      addressedBy: asOptionalString(params[4]),
+      responseNote: asOptionalString(params[5]),
+      updatedAtIso: asString(params[6], 'projectFeedback.updatedAtIso'),
+    });
+    this.projectFeedback.set(feedbackKey(projectRequestId, id), next);
+    return next;
+  }
+
   private selectClients(): readonly ProjectOpsClientRow[] {
     return Object.freeze(
       [...this.clients.values()]
@@ -746,6 +831,15 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     );
   }
 
+  private selectProjectFeedback(projectRequestId: string): readonly ProjectOpsFeedbackRow[] {
+    return Object.freeze(
+      [...this.projectFeedback.values()]
+        .filter((feedback) => feedback.projectRequestId === projectRequestId)
+        .sort((a, b) => b.receivedAtIso.localeCompare(a.receivedAtIso) || a.id.localeCompare(b.id))
+        .map(toProjectFeedback)
+    );
+  }
+
   private selectProjectActivities(projectRequestId: string): readonly ProjectOpsActivityRow[] {
     return Object.freeze(
       [...this.projectActivities.values()]
@@ -797,6 +891,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
             openIssueCount: this.countIssues(request.id, 'open'),
             highOpenIssueCount: this.countHighOpenIssues(request.id),
             resolvedIssueCount: this.countIssues(request.id, 'resolved'),
+            openFeedbackCount: this.countFeedback(request.id, 'open'),
+            addressedFeedbackCount: this.countFeedback(request.id, 'addressed'),
+            negativeOpenFeedbackCount: this.countNegativeOpenFeedback(request.id),
             latestActivityAtIso: this.latestActivity(request.id)?.happenedAtIso,
             latestActivitySummary: this.latestActivity(request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -847,6 +944,22 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     ).length;
   }
 
+  private countFeedback(projectRequestId: string, status: string): number {
+    return [...this.projectFeedback.values()].filter(
+      (feedback) => feedback.projectRequestId === projectRequestId && feedback.status === status
+    ).length;
+  }
+
+  private countNegativeOpenFeedback(projectRequestId: string): number {
+    return [...this.projectFeedback.values()].filter(
+      (feedback) => (
+        feedback.projectRequestId === projectRequestId &&
+        feedback.status === 'open' &&
+        feedback.sentiment === 'negative'
+      )
+    ).length;
+  }
+
   private latestActivity(projectRequestId: string): ProjectOpsActivityRow | undefined {
     return this.selectProjectActivities(projectRequestId)[0];
   }
@@ -880,6 +993,10 @@ function toProjectIssue(row: ProjectOpsIssueRow): ProjectOpsIssueRow {
   return Object.freeze({ ...row });
 }
 
+function toProjectFeedback(row: ProjectOpsFeedbackRow): ProjectOpsFeedbackRow {
+  return Object.freeze({ ...row });
+}
+
 function toProjectActivity(row: ProjectOpsActivityRow): ProjectOpsActivityRow {
   return Object.freeze({ ...row });
 }
@@ -906,6 +1023,10 @@ function changeRequestKey(projectRequestId: string, changeRequestId: string): st
 
 function issueKey(projectRequestId: string, issueId: string): string {
   return `${projectRequestId}\0${issueId}`;
+}
+
+function feedbackKey(projectRequestId: string, feedbackId: string): string {
+  return `${projectRequestId}\0${feedbackId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -977,6 +1098,12 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
       ? { resolvedAtIso: normalizeOptionalIsoValue(source.resolved_at) }
       : {}),
     ...(source.resolution_note !== undefined ? { resolutionNote: normalizeOptionalValue(source.resolution_note) } : {}),
+    ...(source.received_at !== undefined ? { receivedAtIso: normalizeIsoValue(source.received_at) } : {}),
+    ...(source.addressed_at !== undefined
+      ? { addressedAtIso: normalizeOptionalIsoValue(source.addressed_at) }
+      : {}),
+    ...(source.addressed_by !== undefined ? { addressedBy: normalizeOptionalValue(source.addressed_by) } : {}),
+    ...(source.response_note !== undefined ? { responseNote: normalizeOptionalValue(source.response_note) } : {}),
     ...(source.event_type !== undefined ? { eventType: source.event_type } : {}),
     ...(source.happened_at !== undefined ? { happenedAtIso: normalizeIsoValue(source.happened_at) } : {}),
     ...(source.open_milestone_count !== undefined
@@ -1020,6 +1147,15 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
       : {}),
     ...(source.resolved_issue_count !== undefined
       ? { resolvedIssueCount: normalizeOptionalNumberValue(source.resolved_issue_count) }
+      : {}),
+    ...(source.open_feedback_count !== undefined
+      ? { openFeedbackCount: normalizeOptionalNumberValue(source.open_feedback_count) }
+      : {}),
+    ...(source.addressed_feedback_count !== undefined
+      ? { addressedFeedbackCount: normalizeOptionalNumberValue(source.addressed_feedback_count) }
+      : {}),
+    ...(source.negative_open_feedback_count !== undefined
+      ? { negativeOpenFeedbackCount: normalizeOptionalNumberValue(source.negative_open_feedback_count) }
       : {}),
     ...(source.latest_activity_at !== undefined
       ? { latestActivityAtIso: normalizeOptionalIsoValue(source.latest_activity_at) }
@@ -1172,6 +1308,20 @@ function mapProjectOpsStorageError(error: unknown, statement: SqlStatement): unk
       'Project request not found.'
     );
   }
+  if (code === '23505' && statement.sql.includes('projectops_project_feedback')) {
+    return new ProjectOpsOperationError(
+      'conflict',
+      'PROJECTOPS_FEEDBACK_ALREADY_EXISTS',
+      'ProjectOps project feedback already exists.'
+    );
+  }
+  if (code === '23503' && statement.sql.includes('projectops_project_feedback')) {
+    return new ProjectOpsOperationError(
+      'not_found',
+      'PROJECTOPS_FEEDBACK_RELATION_NOT_FOUND',
+      'Project feedback relationship not found.'
+    );
+  }
   if (code === '23505' && statement.sql.includes('projectops_project_activities')) {
     return new ProjectOpsOperationError(
       'conflict',
@@ -1283,6 +1433,21 @@ interface ProjectOpsIssueRow {
   readonly updatedAtIso: string;
 }
 
+interface ProjectOpsFeedbackRow {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly deliverableId?: string;
+  readonly author: string;
+  readonly sentiment: string;
+  readonly message: string;
+  readonly status: string;
+  readonly receivedAtIso: string;
+  readonly addressedAtIso?: string;
+  readonly addressedBy?: string;
+  readonly responseNote?: string;
+  readonly updatedAtIso: string;
+}
+
 interface ProjectOpsActivityRow {
   readonly id: string;
   readonly projectRequestId: string;
@@ -1320,6 +1485,9 @@ interface ProjectOpsDashboardStorageRow {
   readonly openIssueCount?: number;
   readonly highOpenIssueCount?: number;
   readonly resolvedIssueCount?: number;
+  readonly openFeedbackCount?: number;
+  readonly addressedFeedbackCount?: number;
+  readonly negativeOpenFeedbackCount?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
