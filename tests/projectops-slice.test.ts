@@ -3,12 +3,14 @@ import {
   ProjectOpsRepository,
   acceptProjectDeliverable,
   addressProjectFeedback,
+  archiveProjectDocument,
   approveProjectRequest,
   approveProjectChangeRequest,
   composeProjectOpsDashboard,
   createClient,
   createProjectChangeRequest,
   createProjectDeliverable,
+  createProjectDocument,
   createProjectFeedback,
   createProjectInvoice,
   createProjectIssue,
@@ -25,12 +27,14 @@ import {
   projectOpsSchemaSql,
   transitionProjectRequest,
   type AddressProjectFeedbackInput,
+  type ArchiveProjectDocumentInput,
   type ApproveProjectRequestInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
+  type NewProjectDocumentInput,
   type NewProjectFeedbackInput,
   type NewProjectInvoiceInput,
   type NewProjectIssueInput,
@@ -40,6 +44,7 @@ import {
   type ProjectDeliverable,
   type ProjectActivity,
   type ProjectChangeRequest,
+  type ProjectDocument,
   type ProjectFeedback,
   type ProjectInvoice,
   type ProjectIssue,
@@ -205,6 +210,26 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(addressedFeedback.status, 'addressed');
   assert.equal(addressedFeedback.responseNote, 'Hero copy revised in the handoff package.');
 
+  const document = createProjectDocument(approved, {
+    id: 'document-1',
+    projectRequestId: request.id,
+    deliverableId: deliverable.id,
+    title: 'Signed launch checklist',
+    documentType: 'handoff',
+    url: 'https://example.com/projectops/checklist.pdf',
+    uploadedBy: 'Boulos',
+    uploadedAtIso: T3,
+  });
+  assert.equal(document.status, 'active');
+  assert.equal(document.documentType, 'handoff');
+
+  const archivedDocument = archiveProjectDocument(document, {
+    archivedBy: 'Boulos',
+    archivedAtIso: T3,
+  });
+  assert.equal(archivedDocument.status, 'archived');
+  assert.equal(archivedDocument.archivedBy, 'Boulos');
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -237,6 +262,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_change_requests/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_issues/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_feedback/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_documents/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
@@ -583,6 +609,44 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(addressFeedbackRes.status, 200);
     assert.equal(addressedFeedback.status, 'addressed');
 
+    const documentRes = await fetch(`${server.origin}/projectops/project-requests/req-2/documents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'document-1',
+        deliverableId: 'deliverable-1',
+        title: 'Signed launch checklist',
+        documentType: 'handoff',
+        url: 'https://example.com/projectops/checklist.pdf',
+        uploadedBy: 'Boulos',
+        uploadedAtIso: T3,
+      }),
+    });
+    const document = await documentRes.json() as ProjectDocument;
+    assert.equal(documentRes.status, 200);
+    assert.equal(document.status, 'active');
+    assert.equal(document.documentType, 'handoff');
+
+    const documentsRes = await fetch(`${server.origin}/projectops/project-requests/req-2/documents`);
+    assert.equal(documentsRes.status, 200);
+    const documents = await documentsRes.json() as readonly ProjectDocument[];
+    assert.equal(documents.length, 1);
+
+    const archiveDocumentRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/documents/document-1/archive`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          archivedBy: 'Boulos',
+          archivedAtIso: T3,
+        }),
+      }
+    );
+    const archivedDocument = await archiveDocumentRes.json() as ProjectDocument;
+    assert.equal(archiveDocumentRes.status, 200);
+    assert.equal(archivedDocument.status, 'archived');
+
     const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -624,6 +688,8 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.openFeedback, 0);
     assert.equal(dashboard.addressedFeedback, 1);
     assert.equal(dashboard.negativeOpenFeedback, 0);
+    assert.equal(dashboard.activeDocuments, 0);
+    assert.equal(dashboard.archivedDocuments, 1);
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -665,6 +731,8 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       openFeedbackCount: 1,
       addressedFeedbackCount: 2,
       negativeOpenFeedbackCount: 1,
+      activeDocumentCount: 2,
+      archivedDocumentCount: 1,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -760,6 +828,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const changeRequests = new Map<string, ProjectChangeRequest>();
   const issues = new Map<string, ProjectIssue>();
   const feedback = new Map<string, ProjectFeedback>();
+  const documents = new Map<string, ProjectDocument>();
   const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
@@ -1005,6 +1074,42 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       feedback.set(key, next);
       return next;
     },
+    async createProjectDocument(
+      projectRequestId: string,
+      input: NewProjectDocumentInput
+    ): Promise<ProjectDocument> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      if (input.deliverableId && !deliverables.has(deliverableKey(projectRequestId, input.deliverableId))) {
+        throw new Error(`Project deliverable not found: ${projectRequestId}/${input.deliverableId}`);
+      }
+      const document = createProjectDocument(request, input);
+      documents.set(documentKey(projectRequestId, document.id), document);
+      return document;
+    },
+    async listProjectDocuments(projectRequestId: string): Promise<readonly ProjectDocument[]> {
+      return Object.freeze(
+        [...documents.values()]
+          .filter((document) => document.projectRequestId === projectRequestId)
+          .sort((a, b) => b.uploadedAtIso.localeCompare(a.uploadedAtIso) || a.id.localeCompare(b.id))
+      );
+    },
+    async archiveProjectDocument(
+      projectRequestId: string,
+      documentId: string,
+      input: ArchiveProjectDocumentInput
+    ): Promise<ProjectDocument> {
+      const key = documentKey(projectRequestId, documentId);
+      const current = documents.get(key);
+      if (!current) {
+        throw new Error(`Project document not found: ${projectRequestId}/${documentId}`);
+      }
+      const next = archiveProjectDocument(current, input);
+      documents.set(key, next);
+      return next;
+    },
     async createProjectActivity(
       projectRequestId: string,
       input: NewProjectActivityInput
@@ -1096,6 +1201,8 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             openFeedbackCount: countFeedback(feedback, request.id, 'open'),
             addressedFeedbackCount: countFeedback(feedback, request.id, 'addressed'),
             negativeOpenFeedbackCount: countNegativeOpenFeedback(feedback, request.id),
+            activeDocumentCount: countDocuments(documents, request.id, 'active'),
+            archivedDocumentCount: countDocuments(documents, request.id, 'archived'),
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -1128,6 +1235,10 @@ function issueKey(projectRequestId: string, issueId: string): string {
 
 function feedbackKey(projectRequestId: string, feedbackId: string): string {
   return `${projectRequestId}\0${feedbackId}`;
+}
+
+function documentKey(projectRequestId: string, documentId: string): string {
+  return `${projectRequestId}\0${documentId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -1223,6 +1334,16 @@ function countNegativeOpenFeedback(
       projectFeedback.status === 'open' &&
       projectFeedback.sentiment === 'negative'
     )
+  ).length;
+}
+
+function countDocuments(
+  documents: ReadonlyMap<string, ProjectDocument>,
+  projectRequestId: string,
+  status: ProjectDocument['status']
+): number {
+  return [...documents.values()].filter(
+    (document) => document.projectRequestId === projectRequestId && document.status === status
   ).length;
 }
 
