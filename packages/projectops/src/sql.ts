@@ -1,4 +1,5 @@
 import type {
+  ProjectActivity,
   ProjectDeliverable,
   ProjectInvoice,
   ProjectMilestone,
@@ -84,6 +85,30 @@ export const projectOpsSchemaSql = Object.freeze([
       REFERENCES projectops_project_deliverables(project_request_id, id)
       ON DELETE SET NULL (deliverable_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_activities (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL CHECK (
+      event_type IN (
+        'request_created',
+        'request_estimated',
+        'request_approved',
+        'status_changed',
+        'milestone_created',
+        'milestone_completed',
+        'deliverable_submitted',
+        'deliverable_accepted',
+        'invoice_issued',
+        'invoice_paid',
+        'note_added'
+      )
+    ),
+    summary TEXT NOT NULL,
+    actor TEXT,
+    happened_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id)
+  )`,
   `CREATE INDEX IF NOT EXISTS projectops_project_requests_client_status_idx
     ON projectops_project_requests (client_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_requests_status_updated_idx
@@ -94,6 +119,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_deliverables (project_request_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_invoices_request_status_idx
     ON projectops_project_invoices (project_request_id, status)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
+    ON projectops_project_activities (project_request_id, happened_at DESC)`,
 ] as const);
 
 export function insertClientSql(client: ProjectOpsClient): SqlStatement {
@@ -395,6 +422,52 @@ export function markProjectInvoicePaidSql(invoice: ProjectInvoice): SqlStatement
   });
 }
 
+export function insertProjectActivitySql(activity: ProjectActivity): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_activities (
+      id,
+      project_request_id,
+      event_type,
+      summary,
+      actor,
+      happened_at,
+      created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    RETURNING *`,
+    params: Object.freeze([
+      activity.id,
+      activity.projectRequestId,
+      activity.eventType,
+      activity.summary,
+      activity.actor ?? null,
+      activity.happenedAtIso,
+      activity.createdAtIso,
+    ]),
+  });
+}
+
+export function selectProjectActivitiesSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_activities
+      WHERE project_request_id = $1
+      ORDER BY happened_at DESC, created_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectActivityByIdSql(
+  projectRequestId: string,
+  activityId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_activities
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, activityId]),
+  });
+}
+
 export function selectClientsSql(): SqlStatement {
   return Object.freeze({
     sql: `SELECT *
@@ -468,6 +541,8 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(inv.paid_invoices, 0) AS paid_invoice_count,
       COALESCE(inv.outstanding_amount_cents, 0) AS outstanding_invoice_amount_cents,
       COALESCE(inv.paid_amount_cents, 0) AS paid_invoice_amount_cents,
+      act.latest_activity_at,
+      act.latest_activity_summary,
       pr.updated_at
     FROM projectops_project_requests pr
     JOIN projectops_clients c ON c.id = pr.client_id
@@ -497,6 +572,14 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_invoices
       GROUP BY project_request_id
     ) inv ON inv.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT DISTINCT ON (project_request_id)
+        project_request_id,
+        happened_at AS latest_activity_at,
+        summary AS latest_activity_summary
+      FROM projectops_project_activities
+      ORDER BY project_request_id, happened_at DESC, created_at DESC, id ASC
+    ) act ON act.project_request_id = pr.id
     WHERE pr.status != 'archived'
     ORDER BY pr.updated_at DESC, pr.created_at DESC`,
     params: Object.freeze([]),
