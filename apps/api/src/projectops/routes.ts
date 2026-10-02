@@ -1,7 +1,10 @@
 import type { RouteDefinition } from '../http/path-matching.ts';
 import type { KernelRouteHandler } from '../bootstrap/http-listener.ts';
 import { HttpError } from '../http/errors/classify.ts';
-import { ProjectOpsValidationError } from '../../../../packages/projectops/src/index.ts';
+import {
+  ProjectOpsOperationError,
+  ProjectOpsValidationError,
+} from '../../../../packages/projectops/src/index.ts';
 import type {
   NewClientInput,
   NewProjectRequestInput,
@@ -101,6 +104,9 @@ async function runProjectOpsRequest<T>(operation: () => Promise<T>): Promise<T> 
     if (isProjectOpsValidationError(error)) {
       throw new HttpError(400, error.code, error.message);
     }
+    if (isProjectOpsOperationError(error)) {
+      throw new HttpError(statusForProjectOpsOperation(error), error.code, error.message);
+    }
     throw error;
   }
 }
@@ -118,6 +124,28 @@ function isProjectOpsValidationError(
       typeof (error as { message?: unknown }).message === 'string'
     )
   );
+}
+
+function isProjectOpsOperationError(
+  error: unknown
+): error is ProjectOpsOperationError {
+  return (
+    error instanceof ProjectOpsOperationError ||
+    (
+      Boolean(error) &&
+      typeof error === 'object' &&
+      (error as { name?: unknown }).name === 'ProjectOpsOperationError' &&
+      typeof (error as { kind?: unknown }).kind === 'string' &&
+      typeof (error as { code?: unknown }).code === 'string' &&
+      typeof (error as { message?: unknown }).message === 'string'
+    )
+  );
+}
+
+function statusForProjectOpsOperation(error: ProjectOpsOperationError): number {
+  if (error.kind === 'conflict') return 409;
+  if (error.kind === 'not_found') return 404;
+  return 400;
 }
 
 function readClientInput(body: unknown, clock: () => string): NewClientInput {
