@@ -1,9 +1,11 @@
 import { unitTest, assert } from '../packages/testing-kit/src/unit/index.ts';
 import {
   ProjectOpsRepository,
+  acceptProjectDeliverable,
   approveProjectRequest,
   composeProjectOpsDashboard,
   createClient,
+  createProjectDeliverable,
   createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
@@ -14,9 +16,11 @@ import {
   transitionProjectRequest,
   type ApproveProjectRequestInput,
   type EstimateProjectRequestInput,
+  type NewProjectDeliverableInput,
   type NewClientInput,
   type NewProjectMilestoneInput,
   type NewProjectRequestInput,
+  type ProjectDeliverable,
   type ProjectOpsClient,
   type ProjectOpsDashboardView,
   type ProjectMilestone,
@@ -87,6 +91,21 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(completedMilestone.status, 'completed');
   assert.equal(completedMilestone.completedAtIso, T3);
 
+  const deliverable = createProjectDeliverable(approved, {
+    id: 'deliverable-1',
+    projectRequestId: request.id,
+    milestoneId: milestone.id,
+    title: 'First draft package',
+    artifactUrl: 'https://example.com/projectops/first-draft',
+    submittedAtIso: T3,
+  });
+  assert.equal(deliverable.status, 'submitted');
+  assert.equal(deliverable.milestoneId, milestone.id);
+
+  const acceptedDeliverable = acceptProjectDeliverable(deliverable, T3);
+  assert.equal(acceptedDeliverable.status, 'accepted');
+  assert.equal(acceptedDeliverable.acceptedAtIso, T3);
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -114,6 +133,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
 
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_clients/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_requests/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_deliverables/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
   assert.equal(clientInsert.sql.includes('Zad Studio'), false);
@@ -281,6 +301,38 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(completeMilestoneRes.status, 200);
     assert.equal(completedMilestone.status, 'completed');
 
+    const deliverableRes = await fetch(`${server.origin}/projectops/project-requests/req-2/deliverables`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'deliverable-1',
+        milestoneId: 'milestone-1',
+        title: 'Handoff package',
+        artifactUrl: 'https://example.com/projectops/handoff',
+        submittedAtIso: T3,
+      }),
+    });
+    const deliverable = await deliverableRes.json() as ProjectDeliverable;
+    assert.equal(deliverableRes.status, 200);
+    assert.equal(deliverable.status, 'submitted');
+
+    const deliverablesRes = await fetch(`${server.origin}/projectops/project-requests/req-2/deliverables`);
+    assert.equal(deliverablesRes.status, 200);
+    const deliverables = await deliverablesRes.json() as readonly ProjectDeliverable[];
+    assert.equal(deliverables.length, 1);
+
+    const acceptDeliverableRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/deliverables/deliverable-1/accept`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ acceptedAtIso: T3 }),
+      }
+    );
+    const acceptedDeliverable = await acceptDeliverableRes.json() as ProjectDeliverable;
+    assert.equal(acceptDeliverableRes.status, 200);
+    assert.equal(acceptedDeliverable.status, 'accepted');
+
     const dashboardRes = await fetch(`${server.origin}/projectops/dashboard`);
     assert.equal(dashboardRes.status, 200);
     const dashboard = await dashboardRes.json() as ProjectOpsDashboardView;
@@ -289,6 +341,8 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.byStatus.approved, 1);
     assert.equal(dashboard.openMilestones, 0);
     assert.equal(dashboard.completedMilestones, 1);
+    assert.equal(dashboard.submittedDeliverables, 0);
+    assert.equal(dashboard.acceptedDeliverables, 1);
   } finally {
     await server.close();
   }
@@ -311,6 +365,8 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       approvedBy: 'Boulos',
       openMilestoneCount: 1,
       completedMilestoneCount: 2,
+      submittedDeliverableCount: 1,
+      acceptedDeliverableCount: 3,
       updatedAtIso: T1,
     },
   ]);
@@ -399,6 +455,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const clients = new Map<string, ProjectOpsClient>();
   const requests = new Map<string, ProjectRequest>();
   const milestones = new Map<string, ProjectMilestone>();
+  const deliverables = new Map<string, ProjectDeliverable>();
 
   return Object.freeze({
     async createClient(input: NewClientInput): Promise<ProjectOpsClient> {
@@ -455,6 +512,40 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       }
       const next = completeProjectMilestone(current, completedAtIso);
       milestones.set(key, next);
+      return next;
+    },
+    async createProjectDeliverable(
+      projectRequestId: string,
+      input: NewProjectDeliverableInput
+    ): Promise<ProjectDeliverable> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      if (input.milestoneId && !milestones.has(milestoneKey(projectRequestId, input.milestoneId))) {
+        throw new Error(`Project milestone not found: ${projectRequestId}/${input.milestoneId}`);
+      }
+      const deliverable = createProjectDeliverable(request, input);
+      deliverables.set(deliverableKey(projectRequestId, deliverable.id), deliverable);
+      return deliverable;
+    },
+    async listProjectDeliverables(projectRequestId: string): Promise<readonly ProjectDeliverable[]> {
+      return Object.freeze(
+        [...deliverables.values()].filter((deliverable) => deliverable.projectRequestId === projectRequestId)
+      );
+    },
+    async acceptProjectDeliverable(
+      projectRequestId: string,
+      deliverableId: string,
+      acceptedAtIso: string
+    ): Promise<ProjectDeliverable> {
+      const key = deliverableKey(projectRequestId, deliverableId);
+      const current = deliverables.get(key);
+      if (!current) {
+        throw new Error(`Project deliverable not found: ${projectRequestId}/${deliverableId}`);
+      }
+      const next = acceptProjectDeliverable(current, acceptedAtIso);
+      deliverables.set(key, next);
       return next;
     },
     async estimateProjectRequest(
@@ -514,6 +605,8 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             approvedBy: request.approvedBy,
             openMilestoneCount: countMilestones(milestones, request.id, 'open'),
             completedMilestoneCount: countMilestones(milestones, request.id, 'completed'),
+            submittedDeliverableCount: countDeliverables(deliverables, request.id, 'submitted'),
+            acceptedDeliverableCount: countDeliverables(deliverables, request.id, 'accepted'),
             updatedAtIso: request.updatedAtIso,
           };
         })
@@ -526,6 +619,10 @@ function milestoneKey(projectRequestId: string, milestoneId: string): string {
   return `${projectRequestId}\0${milestoneId}`;
 }
 
+function deliverableKey(projectRequestId: string, deliverableId: string): string {
+  return `${projectRequestId}\0${deliverableId}`;
+}
+
 function countMilestones(
   milestones: ReadonlyMap<string, ProjectMilestone>,
   projectRequestId: string,
@@ -533,5 +630,15 @@ function countMilestones(
 ): number {
   return [...milestones.values()].filter(
     (milestone) => milestone.projectRequestId === projectRequestId && milestone.status === status
+  ).length;
+}
+
+function countDeliverables(
+  deliverables: ReadonlyMap<string, ProjectDeliverable>,
+  projectRequestId: string,
+  status: ProjectDeliverable['status']
+): number {
+  return [...deliverables.values()].filter(
+    (deliverable) => deliverable.projectRequestId === projectRequestId && deliverable.status === status
   ).length;
 }
