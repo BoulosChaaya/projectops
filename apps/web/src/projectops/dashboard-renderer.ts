@@ -56,6 +56,7 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('Open feedback', String(summary.openFeedback))}
       ${renderMetric('Active documents', String(summary.activeDocuments))}
       ${renderMetric('Active notes', String(summary.activeNotes))}
+      ${renderMetric('Open tasks', String(summary.openTasks))}
       ${renderMetric('In progress', String(summary.byStatus.in_progress))}
       ${renderMetric('Delivered', String(summary.byStatus.delivered))}
     </section>
@@ -108,6 +109,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Feedback</th>
           <th scope="col">Documents</th>
           <th scope="col">Notes</th>
+          <th scope="col">Tasks</th>
           <th scope="col">Latest Activity</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
@@ -137,6 +139,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatFeedback(row))}</td>
     <td>${escapeHtml(formatDocuments(row))}</td>
     <td>${escapeHtml(formatNotes(row))}</td>
+    <td>${escapeHtml(formatTasks(row))}</td>
     <td>${escapeHtml(formatLatestActivity(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
@@ -210,6 +213,10 @@ function formatDocuments(row: ProjectOpsDashboardRow): string {
 
 function formatNotes(row: ProjectOpsDashboardRow): string {
   return `${row.activeNoteCount ?? 0} active / ${row.clientVisibleNoteCount ?? 0} client`;
+}
+
+function formatTasks(row: ProjectOpsDashboardRow): string {
+  return `${row.openTaskCount ?? 0} open / ${row.highOpenTaskCount ?? 0} high`;
 }
 
 function formatLatestActivity(row: ProjectOpsDashboardRow): string {
@@ -301,7 +308,7 @@ function dashboardCss(): string {
     }
 
     .metrics {
-      grid-template-columns: repeat(12, minmax(0, 1fr));
+      grid-template-columns: repeat(13, minmax(0, 1fr));
     }
 
     .workflow {
