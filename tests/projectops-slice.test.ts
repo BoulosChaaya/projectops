@@ -4,8 +4,10 @@ import {
   approveProjectRequest,
   composeProjectOpsDashboard,
   createClient,
+  createProjectMilestone,
   createProjectRequest,
   estimateProjectRequest,
+  completeProjectMilestone,
   insertClientSql,
   insertProjectRequestSql,
   projectOpsSchemaSql,
@@ -13,9 +15,11 @@ import {
   type ApproveProjectRequestInput,
   type EstimateProjectRequestInput,
   type NewClientInput,
+  type NewProjectMilestoneInput,
   type NewProjectRequestInput,
   type ProjectOpsClient,
   type ProjectOpsDashboardView,
+  type ProjectMilestone,
   type ProjectRequest,
   type ProjectRequestStatus,
   type SqlStatement,
@@ -27,6 +31,7 @@ import { composeProjectOpsDashboardPage } from '../apps/web/src/projectops/dashb
 const T0 = '2026-09-29T08:00:00.000Z';
 const T1 = '2026-09-29T09:00:00.000Z';
 const T2 = '2026-09-29T10:00:00.000Z';
+const T3 = '2026-09-29T11:00:00.000Z';
 
 unitTest('PROJECTOPS-001: client to project request workflow enforces legal vertical slice states', () => {
   const client = createClient({
@@ -67,6 +72,20 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   });
   assert.equal(approved.status, 'approved');
   assert.equal(approved.approvedBy, 'Boulos');
+
+  const milestone = createProjectMilestone(approved, {
+    id: 'milestone-1',
+    projectRequestId: request.id,
+    title: 'Deliver first draft',
+    dueAtIso: T3,
+    createdAtIso: T2,
+  });
+  assert.equal(milestone.status, 'open');
+  assert.equal(milestone.projectRequestId, request.id);
+
+  const completedMilestone = completeProjectMilestone(milestone, T3);
+  assert.equal(completedMilestone.status, 'completed');
+  assert.equal(completedMilestone.completedAtIso, T3);
 
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
@@ -231,12 +250,45 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(approved2.status, 'approved');
     assert.equal(approved2.approvedBy, 'Boulos');
 
+    const milestoneRes = await fetch(`${server.origin}/projectops/project-requests/req-2/milestones`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'milestone-1',
+        title: 'Prepare handoff',
+        dueAtIso: T3,
+        createdAtIso: T2,
+      }),
+    });
+    const milestone = await milestoneRes.json() as ProjectMilestone;
+    assert.equal(milestoneRes.status, 200);
+    assert.equal(milestone.status, 'open');
+
+    const milestonesRes = await fetch(`${server.origin}/projectops/project-requests/req-2/milestones`);
+    assert.equal(milestonesRes.status, 200);
+    const milestones = await milestonesRes.json() as readonly ProjectMilestone[];
+    assert.equal(milestones.length, 1);
+
+    const completeMilestoneRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/milestones/milestone-1/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ completedAtIso: T3 }),
+      }
+    );
+    const completedMilestone = await completeMilestoneRes.json() as ProjectMilestone;
+    assert.equal(completeMilestoneRes.status, 200);
+    assert.equal(completedMilestone.status, 'completed');
+
     const dashboardRes = await fetch(`${server.origin}/projectops/dashboard`);
     assert.equal(dashboardRes.status, 200);
     const dashboard = await dashboardRes.json() as ProjectOpsDashboardView;
     assert.equal(dashboard.totalActiveRequests, 2);
     assert.equal(dashboard.byStatus.estimated, 1);
     assert.equal(dashboard.byStatus.approved, 1);
+    assert.equal(dashboard.openMilestones, 0);
+    assert.equal(dashboard.completedMilestones, 1);
   } finally {
     await server.close();
   }
@@ -257,6 +309,8 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       estimatedAtIso: T1,
       approvedAtIso: T2,
       approvedBy: 'Boulos',
+      openMilestoneCount: 1,
+      completedMilestoneCount: 2,
       updatedAtIso: T1,
     },
   ]);
@@ -344,6 +398,7 @@ unitTest('PROJECTOPS-007: API maps product validation failures to client errors'
 function createMemoryProjectOpsService(): ProjectOpsApiService {
   const clients = new Map<string, ProjectOpsClient>();
   const requests = new Map<string, ProjectRequest>();
+  const milestones = new Map<string, ProjectMilestone>();
 
   return Object.freeze({
     async createClient(input: NewClientInput): Promise<ProjectOpsClient> {
@@ -370,6 +425,37 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
     },
     async getProjectRequest(id: string): Promise<ProjectRequest | undefined> {
       return requests.get(id);
+    },
+    async createProjectMilestone(
+      projectRequestId: string,
+      input: NewProjectMilestoneInput
+    ): Promise<ProjectMilestone> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      const milestone = createProjectMilestone(request, input);
+      milestones.set(milestoneKey(projectRequestId, milestone.id), milestone);
+      return milestone;
+    },
+    async listProjectMilestones(projectRequestId: string): Promise<readonly ProjectMilestone[]> {
+      return Object.freeze(
+        [...milestones.values()].filter((milestone) => milestone.projectRequestId === projectRequestId)
+      );
+    },
+    async completeProjectMilestone(
+      projectRequestId: string,
+      milestoneId: string,
+      completedAtIso: string
+    ): Promise<ProjectMilestone> {
+      const key = milestoneKey(projectRequestId, milestoneId);
+      const current = milestones.get(key);
+      if (!current) {
+        throw new Error(`Project milestone not found: ${projectRequestId}/${milestoneId}`);
+      }
+      const next = completeProjectMilestone(current, completedAtIso);
+      milestones.set(key, next);
+      return next;
     },
     async estimateProjectRequest(
       id: string,
@@ -426,10 +512,26 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             estimatedAtIso: request.estimatedAtIso,
             approvedAtIso: request.approvedAtIso,
             approvedBy: request.approvedBy,
+            openMilestoneCount: countMilestones(milestones, request.id, 'open'),
+            completedMilestoneCount: countMilestones(milestones, request.id, 'completed'),
             updatedAtIso: request.updatedAtIso,
           };
         })
       );
     },
   });
+}
+
+function milestoneKey(projectRequestId: string, milestoneId: string): string {
+  return `${projectRequestId}\0${milestoneId}`;
+}
+
+function countMilestones(
+  milestones: ReadonlyMap<string, ProjectMilestone>,
+  projectRequestId: string,
+  status: ProjectMilestone['status']
+): number {
+  return [...milestones.values()].filter(
+    (milestone) => milestone.projectRequestId === projectRequestId && milestone.status === status
+  ).length;
 }
