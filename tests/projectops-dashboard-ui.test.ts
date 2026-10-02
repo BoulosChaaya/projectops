@@ -36,6 +36,9 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
       paidInvoiceCount: 2,
       outstandingInvoiceAmountCents: 125000,
       paidInvoiceAmountCents: 250000,
+      proposedChangeRequestCount: 1,
+      approvedChangeRequestCount: 2,
+      rejectedChangeRequestCount: 0,
       latestActivityAtIso: T1,
       latestActivitySummary: 'Client approved launch copy.',
       updatedAtIso: T1,
@@ -53,6 +56,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /Open milestones/);
   assert.match(rendered.html, /Submitted deliverables/);
   assert.match(rendered.html, /Outstanding invoices/);
+  assert.match(rendered.html, /Proposed changes/);
   assert.match(rendered.html, /Launch dashboard/);
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /In Progress/);
@@ -60,6 +64,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /1 done \/ 2 open/);
   assert.match(rendered.html, /2 accepted \/ 1 submitted/);
   assert.match(rendered.html, /2 paid \/ 1 open \(USD 1,250\.00\)/);
+  assert.match(rendered.html, /1 proposed \/ 2 approved/);
   assert.match(rendered.html, /Client approved launch copy/);
   assert.match(rendered.html, /High/);
 });
@@ -116,6 +121,10 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
     currency: 'USD',
     estimatedAtIso: T1,
   });
+  await repo.approveProjectRequest('req-1', {
+    approvedBy: 'Boulos',
+    approvedAtIso: T1,
+  });
   await repo.createProjectActivity('req-1', {
     id: 'activity-1',
     projectRequestId: 'req-1',
@@ -124,6 +133,14 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
     actor: 'Boulos',
     happenedAtIso: T1,
   });
+  await repo.createProjectChangeRequest('req-1', {
+    id: 'change-1',
+    projectRequestId: 'req-1',
+    title: 'Add analytics event tracking',
+    description: 'Track contact form conversions after launch.',
+    requestedBy: 'Boulos',
+    requestedAtIso: T1,
+  });
 
   const summary = await repo.getDashboard();
   const page = composeProjectOpsDashboardPageFromSummary(summary);
@@ -131,8 +148,9 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
 
   assert.match(rendered.html, /Repository UI/);
   assert.match(rendered.html, /Zad Studio/);
-  assert.match(rendered.html, /Estimated/);
+  assert.match(rendered.html, /Approved/);
   assert.match(rendered.html, /USD 1,750\.00/);
+  assert.match(rendered.html, /1 proposed \/ 0 approved/);
   assert.match(rendered.html, /Estimate sent to client/);
   assert.match(rendered.html, /1 shown/);
 });
@@ -213,6 +231,14 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     actor: 'Boulos',
     happenedAtIso: T1,
   });
+  await repo.createProjectChangeRequest('req-1', {
+    id: 'change-1',
+    projectRequestId: 'req-1',
+    title: 'Add final QA pass',
+    description: 'Run one additional handoff QA pass before launch.',
+    requestedBy: 'Boulos',
+    requestedAtIso: T1,
+  });
 
   const server = await startHttpListener({
     port: 0,
@@ -235,6 +261,7 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     assert.match(html, /0 done \/ 1 open/);
     assert.match(html, /1 accepted \/ 0 submitted/);
     assert.match(html, /0 paid \/ 1 open \(USD 2,100\.00\)/);
+    assert.match(html, /1 proposed \/ 0 approved/);
     assert.match(html, /Invoice issued after accepted handoff/);
     assert.match(html, /Zad Studio/);
   } finally {
