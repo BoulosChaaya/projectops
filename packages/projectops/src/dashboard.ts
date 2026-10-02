@@ -21,6 +21,8 @@ export interface ProjectOpsDashboardRow {
   readonly paidInvoiceCount?: number;
   readonly outstandingInvoiceAmountCents?: number;
   readonly paidInvoiceAmountCents?: number;
+  readonly latestActivityAtIso?: string;
+  readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
 }
 
