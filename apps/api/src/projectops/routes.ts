@@ -9,9 +9,11 @@ import type {
   ApproveProjectRequestInput,
   EstimateProjectRequestInput,
   NewClientInput,
+  NewProjectMilestoneInput,
   NewProjectRequestInput,
   ProjectOpsClient,
   ProjectOpsDashboardView,
+  ProjectMilestone,
   ProjectRequest,
   ProjectRequestStatus,
 } from '../../../../packages/projectops/src/index.ts';
@@ -23,6 +25,16 @@ export interface ProjectOpsApiService {
   getClient(id: string): Promise<ProjectOpsClient | undefined>;
   listProjectRequests(): Promise<readonly ProjectRequest[]>;
   getProjectRequest(id: string): Promise<ProjectRequest | undefined>;
+  createProjectMilestone(
+    projectRequestId: string,
+    input: NewProjectMilestoneInput
+  ): Promise<ProjectMilestone>;
+  listProjectMilestones(projectRequestId: string): Promise<readonly ProjectMilestone[]>;
+  completeProjectMilestone(
+    projectRequestId: string,
+    milestoneId: string,
+    completedAtIso: string
+  ): Promise<ProjectMilestone>;
   estimateProjectRequest(
     id: string,
     input: EstimateProjectRequestInput
@@ -73,6 +85,32 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests',
       handler: async () => await service.listProjectRequests(),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/milestones',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectMilestones(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/milestones',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectMilestone(params.id, readMilestoneInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/milestones/:milestoneId/complete',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.completeProjectMilestone(
+            params.id,
+            params.milestoneId,
+            readCompletedAtIso(request.body, clock)
+          )
+        ),
     },
     {
       method: 'GET',
@@ -214,6 +252,26 @@ function readApprovalInput(body: unknown, clock: () => string): ApproveProjectRe
     approvedBy: readString(value.approvedBy, 'approvedBy'),
     approvedAtIso: readOptionalString(value.approvedAtIso, 'approvedAtIso') ?? clock(),
   });
+}
+
+function readMilestoneInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectMilestoneInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    title: readString(value.title, 'title'),
+    dueAtIso: readOptionalString(value.dueAtIso, 'dueAtIso'),
+    createdAtIso: readOptionalString(value.createdAtIso, 'createdAtIso') ?? clock(),
+  });
+}
+
+function readCompletedAtIso(body: unknown, clock: () => string): string {
+  const value = readRecord(body);
+  return readOptionalString(value.completedAtIso, 'completedAtIso') ?? clock();
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
