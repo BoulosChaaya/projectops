@@ -7,6 +7,7 @@ import type {
   ProjectInvoice,
   ProjectIssue,
   ProjectMilestone,
+  ProjectNote,
   ProjectOpsClient,
   ProjectRequest,
   ProjectRequestStatus,
@@ -159,6 +160,19 @@ export const projectOpsSchemaSql = Object.freeze([
       REFERENCES projectops_project_deliverables(project_request_id, id)
       ON DELETE SET NULL (deliverable_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_notes (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    author TEXT NOT NULL,
+    visibility TEXT NOT NULL CHECK (visibility IN ('internal', 'client')),
+    body TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+    created_at TIMESTAMPTZ NOT NULL,
+    archived_at TIMESTAMPTZ,
+    archived_by TEXT,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id)
+  )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_activities (
     id TEXT NOT NULL,
     project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -201,6 +215,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_feedback (project_request_id, status, sentiment)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_documents_request_status_idx
     ON projectops_project_documents (project_request_id, status, document_type)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_notes_request_status_idx
+    ON projectops_project_notes (project_request_id, status, visibility)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
     ON projectops_project_activities (project_request_id, happened_at DESC)`,
 ] as const);
@@ -802,6 +818,75 @@ export function archiveProjectDocumentSql(document: ProjectDocument): SqlStateme
   });
 }
 
+export function insertProjectNoteSql(note: ProjectNote): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_notes (
+      id,
+      project_request_id,
+      author,
+      visibility,
+      body,
+      status,
+      created_at,
+      archived_at,
+      archived_by,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    RETURNING *`,
+    params: Object.freeze([
+      note.id,
+      note.projectRequestId,
+      note.author,
+      note.visibility,
+      note.body,
+      note.status,
+      note.createdAtIso,
+      note.archivedAtIso ?? null,
+      note.archivedBy ?? null,
+      note.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectNotesSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_notes
+      WHERE project_request_id = $1
+      ORDER BY created_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectNoteByIdSql(
+  projectRequestId: string,
+  noteId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_notes
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, noteId]),
+  });
+}
+
+export function archiveProjectNoteSql(note: ProjectNote): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_notes
+      SET status = $3, archived_at = $4, archived_by = $5, updated_at = $6
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      note.projectRequestId,
+      note.id,
+      note.status,
+      note.archivedAtIso ?? null,
+      note.archivedBy ?? null,
+      note.updatedAtIso,
+    ]),
+  });
+}
+
 export function insertProjectActivitySql(activity: ProjectActivity): SqlStatement {
   return Object.freeze({
     sql: `INSERT INTO projectops_project_activities (
@@ -932,6 +1017,9 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(fb.negative_open_feedback, 0) AS negative_open_feedback_count,
       COALESCE(doc.active_documents, 0) AS active_document_count,
       COALESCE(doc.archived_documents, 0) AS archived_document_count,
+      COALESCE(nt.active_notes, 0) AS active_note_count,
+      COALESCE(nt.archived_notes, 0) AS archived_note_count,
+      COALESCE(nt.client_visible_notes, 0) AS client_visible_note_count,
       act.latest_activity_at,
       act.latest_activity_summary,
       pr.updated_at
@@ -998,6 +1086,15 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_documents
       GROUP BY project_request_id
     ) doc ON doc.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'active') AS active_notes,
+        COUNT(*) FILTER (WHERE status = 'archived') AS archived_notes,
+        COUNT(*) FILTER (WHERE status = 'active' AND visibility = 'client') AS client_visible_notes
+      FROM projectops_project_notes
+      GROUP BY project_request_id
+    ) nt ON nt.project_request_id = pr.id
     LEFT JOIN (
       SELECT DISTINCT ON (project_request_id)
         project_request_id,
