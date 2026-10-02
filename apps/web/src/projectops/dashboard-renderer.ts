@@ -52,6 +52,7 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('Submitted deliverables', String(summary.submittedDeliverables))}
       ${renderMetric('Outstanding invoices', formatMoney(summary.outstandingInvoiceAmountCents, 'USD'))}
       ${renderMetric('Proposed changes', String(summary.proposedChangeRequests))}
+      ${renderMetric('Open issues', String(summary.openIssues))}
       ${renderMetric('In progress', String(summary.byStatus.in_progress))}
       ${renderMetric('Delivered', String(summary.byStatus.delivered))}
     </section>
@@ -100,6 +101,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Deliverables</th>
           <th scope="col">Invoices</th>
           <th scope="col">Changes</th>
+          <th scope="col">Issues</th>
           <th scope="col">Latest Activity</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
@@ -125,6 +127,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatDeliverables(row))}</td>
     <td>${escapeHtml(formatInvoices(row))}</td>
     <td>${escapeHtml(formatChangeRequests(row))}</td>
+    <td>${escapeHtml(formatIssues(row))}</td>
     <td>${escapeHtml(formatLatestActivity(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
@@ -182,6 +185,10 @@ function formatInvoices(row: ProjectOpsDashboardRow): string {
 
 function formatChangeRequests(row: ProjectOpsDashboardRow): string {
   return `${row.proposedChangeRequestCount ?? 0} proposed / ${row.approvedChangeRequestCount ?? 0} approved`;
+}
+
+function formatIssues(row: ProjectOpsDashboardRow): string {
+  return `${row.openIssueCount ?? 0} open / ${row.highOpenIssueCount ?? 0} high`;
 }
 
 function formatLatestActivity(row: ProjectOpsDashboardRow): string {
@@ -273,7 +280,7 @@ function dashboardCss(): string {
     }
 
     .metrics {
-      grid-template-columns: repeat(8, minmax(0, 1fr));
+      grid-template-columns: repeat(9, minmax(0, 1fr));
     }
 
     .workflow {
