@@ -20,6 +20,7 @@ import {
   createProjectNote,
   createProjectRequest,
   createProjectTask,
+  createProjectWorkLog,
   estimateProjectRequest,
   markProjectInvoicePaid,
   rejectProjectChangeRequest,
@@ -44,6 +45,7 @@ import {
   type NewClientInput,
   type NewProjectRequestInput,
   type NewProjectTaskInput,
+  type NewProjectWorkLogInput,
   type ProjectActivity,
   type ProjectChangeRequest,
   type ProjectDeliverable,
@@ -57,6 +59,7 @@ import {
   type ProjectRequest,
   type ProjectRequestStatus,
   type ProjectTask,
+  type ProjectWorkLog,
   type ResolveProjectIssueInput,
 } from './domain.ts';
 import {
@@ -80,6 +83,7 @@ import {
   insertProjectNoteSql,
   insertProjectRequestSql,
   insertProjectTaskSql,
+  insertProjectWorkLogSql,
   markProjectInvoicePaidSql,
   selectClientByIdSql,
   selectClientsSql,
@@ -106,6 +110,8 @@ import {
   selectProjectRequestsSql,
   selectProjectTaskByIdSql,
   selectProjectTasksSql,
+  selectProjectWorkLogByIdSql,
+  selectProjectWorkLogsSql,
   resolveProjectIssueSql,
   updateProjectChangeRequestDecisionSql,
   updateProjectRequestStatusSql,
@@ -694,6 +700,48 @@ export class ProjectOpsRepository {
     const completed = completeProjectTask(current, input);
     const rows = await this.sql.query<ProjectTask>(completeProjectTaskSql(completed));
     return this.requirePersistedProjectTask(rows, projectRequestId, taskId);
+  }
+
+  public async createProjectWorkLog(
+    projectRequestId: string,
+    input: NewProjectWorkLogInput
+  ): Promise<ProjectWorkLog> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    if (input.taskId) {
+      await this.requireProjectTask(projectRequestId, input.taskId);
+    }
+
+    const workLog = createProjectWorkLog(request, input);
+    const existing = await this.getProjectWorkLog(projectRequestId, workLog.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_WORK_LOG_ALREADY_EXISTS',
+        `ProjectOps project work log already exists: ${workLog.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectWorkLog>(insertProjectWorkLogSql(workLog));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project work log insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectWorkLogs(projectRequestId: string): Promise<readonly ProjectWorkLog[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectWorkLog>(selectProjectWorkLogsSql(projectRequestId));
+  }
+
+  public async getProjectWorkLog(
+    projectRequestId: string,
+    workLogId: string
+  ): Promise<ProjectWorkLog | undefined> {
+    const rows = await this.sql.query<ProjectWorkLog>(
+      selectProjectWorkLogByIdSql(projectRequestId, workLogId)
+    );
+    return rows[0];
   }
 
   public async createProjectActivity(
