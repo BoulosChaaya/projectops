@@ -72,6 +72,24 @@ export function insertProjectRequestSql(request: ProjectRequest): SqlStatement {
   });
 }
 
+export function selectClientsSql(): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_clients
+      ORDER BY created_at DESC, id ASC`,
+    params: Object.freeze([]),
+  });
+}
+
+export function selectClientByIdSql(id: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_clients
+      WHERE id = $1`,
+    params: Object.freeze([id]),
+  });
+}
+
 export function updateProjectRequestStatusSql(
   id: string,
   status: ProjectRequestStatus,
@@ -83,6 +101,15 @@ export function updateProjectRequestStatusSql(
       WHERE id = $1
       RETURNING *`,
     params: Object.freeze([id, status, updatedAtIso]),
+  });
+}
+
+export function selectProjectRequestsSql(): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_requests
+      ORDER BY updated_at DESC, created_at DESC, id ASC`,
+    params: Object.freeze([]),
   });
 }
 
