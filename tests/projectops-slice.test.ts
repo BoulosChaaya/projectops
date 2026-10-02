@@ -7,6 +7,7 @@ import {
   archiveProjectNote,
   approveProjectRequest,
   approveProjectChangeRequest,
+  completeProjectTask,
   composeProjectOpsDashboard,
   createClient,
   createProjectChangeRequest,
@@ -18,6 +19,7 @@ import {
   createProjectMilestone,
   createProjectNote,
   createProjectRequest,
+  createProjectTask,
   estimateProjectRequest,
   markProjectInvoicePaid,
   rejectProjectChangeRequest,
@@ -32,6 +34,7 @@ import {
   type ArchiveProjectDocumentInput,
   type ArchiveProjectNoteInput,
   type ApproveProjectRequestInput,
+  type CompleteProjectTaskInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
@@ -45,6 +48,7 @@ import {
   type NewProjectMilestoneInput,
   type NewProjectNoteInput,
   type NewProjectRequestInput,
+  type NewProjectTaskInput,
   type ProjectDeliverable,
   type ProjectActivity,
   type ProjectChangeRequest,
@@ -58,6 +62,7 @@ import {
   type ProjectNote,
   type ProjectRequest,
   type ProjectRequestStatus,
+  type ProjectTask,
   type ResolveProjectIssueInput,
   type SqlStatement,
 } from '../packages/projectops/src/index.ts';
@@ -253,6 +258,26 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(archivedNote.status, 'archived');
   assert.equal(archivedNote.archivedBy, 'Boulos');
 
+  const task = createProjectTask(approved, {
+    id: 'task-1',
+    projectRequestId: request.id,
+    title: 'Launch QA checklist',
+    description: 'Run the launch checklist before client handoff.',
+    assignee: 'Boulos',
+    priority: 'high',
+    dueAtIso: T3,
+    createdAtIso: T2,
+  });
+  assert.equal(task.status, 'open');
+  assert.equal(task.priority, 'high');
+
+  const completedTask = completeProjectTask(task, {
+    completedBy: 'Boulos',
+    completedAtIso: T3,
+  });
+  assert.equal(completedTask.status, 'completed');
+  assert.equal(completedTask.completedBy, 'Boulos');
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -287,6 +312,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_feedback/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_documents/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_notes/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_tasks/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
@@ -707,6 +733,45 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(archiveNoteRes.status, 200);
     assert.equal(archivedNote.status, 'archived');
 
+    const taskRes = await fetch(`${server.origin}/projectops/project-requests/req-2/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'task-1',
+        title: 'Launch QA checklist',
+        description: 'Run the launch checklist before client handoff.',
+        assignee: 'Boulos',
+        priority: 'high',
+        dueAtIso: T3,
+        createdAtIso: T2,
+      }),
+    });
+    const task = await taskRes.json() as ProjectTask;
+    assert.equal(taskRes.status, 200);
+    assert.equal(task.status, 'open');
+    assert.equal(task.priority, 'high');
+
+    const tasksRes = await fetch(`${server.origin}/projectops/project-requests/req-2/tasks`);
+    assert.equal(tasksRes.status, 200);
+    const tasks = await tasksRes.json() as readonly ProjectTask[];
+    assert.equal(tasks.length, 1);
+
+    const completeTaskRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/tasks/task-1/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          completedBy: 'Boulos',
+          completedAtIso: T3,
+        }),
+      }
+    );
+    const completedTask = await completeTaskRes.json() as ProjectTask;
+    assert.equal(completeTaskRes.status, 200);
+    assert.equal(completedTask.status, 'completed');
+    assert.equal(completedTask.completedBy, 'Boulos');
+
     const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -753,6 +818,9 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.activeNotes, 0);
     assert.equal(dashboard.archivedNotes, 1);
     assert.equal(dashboard.clientVisibleNotes, 0);
+    assert.equal(dashboard.openTasks, 0);
+    assert.equal(dashboard.highOpenTasks, 0);
+    assert.equal(dashboard.completedTasks, 1);
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -799,6 +867,10 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       activeNoteCount: 2,
       archivedNoteCount: 1,
       clientVisibleNoteCount: 1,
+      openTaskCount: 2,
+      highOpenTaskCount: 1,
+      completedTaskCount: 1,
+      nextTaskDueAtIso: T3,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -896,6 +968,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const feedback = new Map<string, ProjectFeedback>();
   const documents = new Map<string, ProjectDocument>();
   const notes = new Map<string, ProjectNote>();
+  const tasks = new Map<string, ProjectTask>();
   const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
@@ -1210,6 +1283,43 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       notes.set(key, next);
       return next;
     },
+    async createProjectTask(
+      projectRequestId: string,
+      input: NewProjectTaskInput
+    ): Promise<ProjectTask> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      const task = createProjectTask(request, input);
+      tasks.set(taskKey(projectRequestId, task.id), task);
+      return task;
+    },
+    async listProjectTasks(projectRequestId: string): Promise<readonly ProjectTask[]> {
+      return Object.freeze(
+        [...tasks.values()]
+          .filter((task) => task.projectRequestId === projectRequestId)
+          .sort((a, b) => (
+            compareOptionalIso(a.dueAtIso, b.dueAtIso) ||
+            b.createdAtIso.localeCompare(a.createdAtIso) ||
+            a.id.localeCompare(b.id)
+          ))
+      );
+    },
+    async completeProjectTask(
+      projectRequestId: string,
+      taskId: string,
+      input: CompleteProjectTaskInput
+    ): Promise<ProjectTask> {
+      const key = taskKey(projectRequestId, taskId);
+      const current = tasks.get(key);
+      if (!current) {
+        throw new Error(`Project task not found: ${projectRequestId}/${taskId}`);
+      }
+      const next = completeProjectTask(current, input);
+      tasks.set(key, next);
+      return next;
+    },
     async createProjectActivity(
       projectRequestId: string,
       input: NewProjectActivityInput
@@ -1306,6 +1416,10 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             activeNoteCount: countNotes(notes, request.id, 'active'),
             archivedNoteCount: countNotes(notes, request.id, 'archived'),
             clientVisibleNoteCount: countClientVisibleNotes(notes, request.id),
+            openTaskCount: countTasks(tasks, request.id, 'open'),
+            highOpenTaskCount: countHighOpenTasks(tasks, request.id),
+            completedTaskCount: countTasks(tasks, request.id, 'completed'),
+            nextTaskDueAtIso: nextOpenTaskDueAt(tasks, request.id),
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -1346,6 +1460,10 @@ function documentKey(projectRequestId: string, documentId: string): string {
 
 function noteKey(projectRequestId: string, noteId: string): string {
   return `${projectRequestId}\0${noteId}`;
+}
+
+function taskKey(projectRequestId: string, taskId: string): string {
+  return `${projectRequestId}\0${taskId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -1473,6 +1591,38 @@ function countClientVisibleNotes(
   ).length;
 }
 
+function countTasks(
+  tasks: ReadonlyMap<string, ProjectTask>,
+  projectRequestId: string,
+  status: ProjectTask['status']
+): number {
+  return [...tasks.values()].filter(
+    (task) => task.projectRequestId === projectRequestId && task.status === status
+  ).length;
+}
+
+function countHighOpenTasks(
+  tasks: ReadonlyMap<string, ProjectTask>,
+  projectRequestId: string
+): number {
+  return [...tasks.values()].filter(
+    (task) => task.projectRequestId === projectRequestId && task.status === 'open' && task.priority === 'high'
+  ).length;
+}
+
+function nextOpenTaskDueAt(
+  tasks: ReadonlyMap<string, ProjectTask>,
+  projectRequestId: string
+): string | undefined {
+  return [...tasks.values()]
+    .filter((task) => task.projectRequestId === projectRequestId && task.status === 'open' && task.dueAtIso)
+    .sort((a, b) => (
+      compareOptionalIso(a.dueAtIso, b.dueAtIso) ||
+      b.createdAtIso.localeCompare(a.createdAtIso) ||
+      a.id.localeCompare(b.id)
+    ))[0]?.dueAtIso;
+}
+
 function latestActivity(
   activities: ReadonlyMap<string, ProjectActivity>,
   projectRequestId: string
@@ -1480,4 +1630,11 @@ function latestActivity(
   return [...activities.values()]
     .filter((activity) => activity.projectRequestId === projectRequestId)
     .sort((a, b) => b.happenedAtIso.localeCompare(a.happenedAtIso) || a.id.localeCompare(b.id))[0];
+}
+
+function compareOptionalIso(a: string | undefined, b: string | undefined): number {
+  if (a && b) return a.localeCompare(b);
+  if (a) return -1;
+  if (b) return 1;
+  return 0;
 }
