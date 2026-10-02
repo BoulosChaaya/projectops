@@ -1,5 +1,6 @@
 export type ClientStatus = 'active' | 'archived';
 export type ProjectPriority = 'low' | 'medium' | 'high';
+export type ProjectMilestoneStatus = 'open' | 'completed';
 export type ProjectRequestStatus =
   | 'new'
   | 'estimated'
@@ -35,6 +36,17 @@ export interface ProjectRequest {
   readonly updatedAtIso: string;
 }
 
+export interface ProjectMilestone {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly dueAtIso?: string;
+  readonly status: ProjectMilestoneStatus;
+  readonly createdAtIso: string;
+  readonly completedAtIso?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface NewClientInput {
   readonly id: string;
   readonly name: string;
@@ -63,6 +75,14 @@ export interface EstimateProjectRequestInput {
 export interface ApproveProjectRequestInput {
   readonly approvedBy: string;
   readonly approvedAtIso: string;
+}
+
+export interface NewProjectMilestoneInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly dueAtIso?: string;
+  readonly createdAtIso: string;
 }
 
 export class ProjectOpsValidationError extends Error {
@@ -103,6 +123,11 @@ export const projectPriorities = Object.freeze([
   'medium',
   'high',
 ] satisfies readonly ProjectPriority[]);
+
+export const projectMilestoneStatuses = Object.freeze([
+  'open',
+  'completed',
+] satisfies readonly ProjectMilestoneStatus[]);
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -222,6 +247,69 @@ export function approveProjectRequest(
     ...approved,
     approvedAtIso: assertIsoTimestamp('projectRequest.approvedAtIso', input.approvedAtIso),
     approvedBy: requireText('projectRequest.approvedBy', input.approvedBy, 120),
+  });
+}
+
+export function createProjectMilestone(
+  request: ProjectRequest,
+  input: NewProjectMilestoneInput
+): ProjectMilestone {
+  if (request.status !== 'approved' && request.status !== 'in_progress') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_MILESTONES',
+      'Project request must be approved or in progress before adding milestones.'
+    );
+  }
+
+  const id = requireIdentifier('projectMilestone.id', input.id);
+  const projectRequestId = requireIdentifier('projectMilestone.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_MILESTONE_REQUEST_MISMATCH',
+      'Project milestone must belong to the selected project request.'
+    );
+  }
+
+  const createdAtIso = assertIsoTimestamp('projectMilestone.createdAtIso', input.createdAtIso);
+  const dueAtIso = optionalIsoTimestamp('projectMilestone.dueAtIso', input.dueAtIso);
+  if (dueAtIso && Date.parse(dueAtIso) < Date.parse(createdAtIso)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECT_MILESTONE_DUE_DATE',
+      'projectMilestone.dueAtIso must not be earlier than projectMilestone.createdAtIso.'
+    );
+  }
+
+  return Object.freeze({
+    id,
+    projectRequestId,
+    title: requireText('projectMilestone.title', input.title, 160),
+    dueAtIso,
+    status: 'open',
+    createdAtIso,
+    updatedAtIso: createdAtIso,
+  });
+}
+
+export function completeProjectMilestone(
+  milestone: ProjectMilestone,
+  completedAtIso: string
+): ProjectMilestone {
+  if (milestone.status === 'completed') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_MILESTONE_ALREADY_COMPLETED',
+      'Project milestone is already completed.'
+    );
+  }
+
+  const completedAt = assertIsoTimestamp('projectMilestone.completedAtIso', completedAtIso);
+  return Object.freeze({
+    ...milestone,
+    status: 'completed',
+    completedAtIso: completedAt,
+    updatedAtIso: completedAt,
   });
 }
 
