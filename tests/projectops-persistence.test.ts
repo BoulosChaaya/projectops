@@ -14,6 +14,7 @@ import {
   type ProjectMilestone,
   type ProjectNote,
   type ProjectRequest,
+  type ProjectTask,
 } from '../packages/projectops/src/index.ts';
 import { createProjectOpsRoutes } from '../apps/api/src/projectops/routes.ts';
 import { createProjectOpsRepositoryService } from '../apps/api/src/projectops/service.ts';
@@ -189,6 +190,21 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
     archivedAtIso: T3,
   });
   const notes = await repo.listProjectNotes('req-1');
+  const task = await repo.createProjectTask('req-1', {
+    id: 'task-1',
+    projectRequestId: 'req-1',
+    title: 'Launch QA checklist',
+    description: 'Run the launch checklist before client handoff.',
+    assignee: 'Boulos',
+    priority: 'high',
+    dueAtIso: T3,
+    createdAtIso: T2,
+  });
+  const completedTask = await repo.completeProjectTask('req-1', 'task-1', {
+    completedBy: 'Boulos',
+    completedAtIso: T3,
+  });
+  const tasks = await repo.listProjectTasks('req-1');
   const activity = await repo.createProjectActivity('req-1', {
     id: 'activity-1',
     projectRequestId: 'req-1',
@@ -240,6 +256,11 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(archivedNote.status, 'archived');
   assert.equal(notes.length, 1);
   assert.equal(notes[0]?.archivedBy, 'Boulos');
+  assert.equal(task.status, 'open');
+  assert.equal(completedTask.status, 'completed');
+  assert.equal(completedTask.completedBy, 'Boulos');
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0]?.completedAtIso, T3);
   assert.equal(activity.eventType, 'note_added');
   assert.equal(activities.length, 1);
   assert.equal(activities[0]?.summary, 'Client approved paid invoice and handoff.');
@@ -261,6 +282,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(snapshot.projectFeedback[0]?.status, 'addressed');
   assert.equal(snapshot.projectDocuments[0]?.status, 'archived');
   assert.equal(snapshot.projectNotes[0]?.status, 'archived');
+  assert.equal(snapshot.projectTasks[0]?.status, 'completed');
   assert.equal(snapshot.projectActivities[0]?.summary, 'Client approved paid invoice and handoff.');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.approved, 1);
@@ -283,6 +305,9 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.activeNotes, 0);
   assert.equal(dashboard.archivedNotes, 1);
   assert.equal(dashboard.clientVisibleNotes, 0);
+  assert.equal(dashboard.openTasks, 0);
+  assert.equal(dashboard.highOpenTasks, 0);
+  assert.equal(dashboard.completedTasks, 1);
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
   assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
@@ -293,6 +318,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.rows[0]?.addressedFeedbackCount, 1);
   assert.equal(dashboard.rows[0]?.archivedDocumentCount, 1);
   assert.equal(dashboard.rows[0]?.archivedNoteCount, 1);
+  assert.equal(dashboard.rows[0]?.completedTaskCount, 1);
   assert.equal(dashboard.rows[0]?.latestActivitySummary, 'Client approved paid invoice and handoff.');
 });
 
@@ -630,6 +656,32 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     );
     assert.equal(archivedNote.status, 'archived');
 
+    const task = await expectOkJson<ProjectTask>(
+      `${server.origin}/projectops/project-requests/req-1/tasks`,
+      {
+        id: 'task-1',
+        title: 'Launch QA checklist',
+        description: 'Run the launch checklist before client handoff.',
+        assignee: 'Boulos',
+        priority: 'high',
+        dueAtIso: T3,
+        createdAtIso: T2,
+      }
+    );
+    assert.equal(task.status, 'open');
+    assert.equal(task.priority, 'high');
+
+    const tasksRes = await fetch(`${server.origin}/projectops/project-requests/req-1/tasks`);
+    assert.equal(tasksRes.status, 200);
+    const tasks = await tasksRes.json() as readonly ProjectTask[];
+    assert.equal(tasks.length, 1);
+
+    const completedTask = await expectOkJson<ProjectTask>(
+      `${server.origin}/projectops/project-requests/req-1/tasks/task-1/complete`,
+      { completedBy: 'Boulos', completedAtIso: T3 }
+    );
+    assert.equal(completedTask.status, 'completed');
+
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
     const clients = await clientsRes.json() as readonly { id: string }[];
@@ -667,6 +719,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.addressedFeedback, 1);
     assert.equal(dashboard.archivedDocuments, 1);
     assert.equal(dashboard.archivedNotes, 1);
+    assert.equal(dashboard.completedTasks, 1);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
     assert.equal(sql.snapshot().projectMilestones[0]?.status, 'completed');
     assert.equal(sql.snapshot().projectDeliverables[0]?.status, 'accepted');
@@ -674,6 +727,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(sql.snapshot().projectFeedback[0]?.status, 'addressed');
     assert.equal(sql.snapshot().projectDocuments[0]?.status, 'archived');
     assert.equal(sql.snapshot().projectNotes[0]?.status, 'archived');
+    assert.equal(sql.snapshot().projectTasks[0]?.status, 'completed');
   } finally {
     await server.close();
   }
