@@ -1,6 +1,7 @@
 import type { RouteDefinition } from '../http/path-matching.ts';
 import type { KernelRouteHandler } from '../bootstrap/http-listener.ts';
 import { HttpError } from '../http/errors/classify.ts';
+import { ProjectOpsValidationError } from '../../../../packages/projectops/src/index.ts';
 import type {
   NewClientInput,
   NewProjectRequestInput,
@@ -29,13 +30,16 @@ export function createProjectOpsRoutes(
     {
       method: 'POST',
       path: '/projectops/clients',
-      handler: async (request) => await service.createClient(readClientInput(request.body, clock)),
+      handler: async (request) =>
+        await runProjectOpsRequest(() => service.createClient(readClientInput(request.body, clock))),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests',
       handler: async (request) =>
-        await service.createProjectRequest(readProjectRequestInput(request.body, clock)),
+        await runProjectOpsRequest(() =>
+          service.createProjectRequest(readProjectRequestInput(request.body, clock))
+        ),
     },
     {
       method: 'POST',
@@ -43,7 +47,9 @@ export function createProjectOpsRoutes(
       handler: async (request, _context, params) => {
         const body = readRecord(request.body);
         const nextStatus = readStatus(body.status);
-        return await service.transitionProjectRequest(params.id, nextStatus, clock());
+        return await runProjectOpsRequest(() =>
+          service.transitionProjectRequest(params.id, nextStatus, clock())
+        );
       },
     },
     {
@@ -52,6 +58,32 @@ export function createProjectOpsRoutes(
       handler: async () => await service.getDashboard(),
     },
   ]);
+}
+
+async function runProjectOpsRequest<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (isProjectOpsValidationError(error)) {
+      throw new HttpError(400, error.code, error.message);
+    }
+    throw error;
+  }
+}
+
+function isProjectOpsValidationError(
+  error: unknown
+): error is ProjectOpsValidationError {
+  return (
+    error instanceof ProjectOpsValidationError ||
+    (
+      Boolean(error) &&
+      typeof error === 'object' &&
+      (error as { name?: unknown }).name === 'ProjectOpsValidationError' &&
+      typeof (error as { code?: unknown }).code === 'string' &&
+      typeof (error as { message?: unknown }).message === 'string'
+    )
+  );
 }
 
 function readClientInput(body: unknown, clock: () => string): NewClientInput {
