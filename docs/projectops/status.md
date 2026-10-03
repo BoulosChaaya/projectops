@@ -35,7 +35,7 @@ See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the prev
 20. Expenses and decisions.
 21. Risks and mitigation.
 
-Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. Access control is not connected to these routes.
+Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. The PostgreSQL runtime now protects these routes; contract tests may still inject an unprotected memory harness.
 
 ## Remaining approved work
 Roadmap slices 1 and 2 are complete. Slices 3-14 remain open. Existing functionality is reused to complete them.
@@ -55,3 +55,11 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - Acceptance proves fresh migrations, API/dashboard data across application restart, concurrent migration startup, upgrades, drift rejection and schema/ledger rollback.
 - All CI entry points now install pinned dependencies from the frozen lockfile before testing.
 - Limitation: local container blocks changing to the non-root PostgreSQL server user; real database evidence comes from CI. No production deployment or operator access claim.
+
+## Slice 3 implementation: operator access and settings
+- Database-backed operator, hashed sessions, expiry, login limits and settings in additive migration 0002.
+- Login/settings browser pages; logout, current-password credential changes and revocation.
+- Protected product routes with Origin, JSON and CSRF checks for writes; fixed HTTPS public origin for external binding.
+- Saved priority/currency defaults applied to new requests/estimates when omitted; timezone retained for later display.
+- Operator provisioning is a local stdin command; one operator, no public signup or team model.
+- Validation pending real PostgreSQL and Chromium CI acceptance. Do not mark complete until those pass.

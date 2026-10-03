@@ -8,6 +8,7 @@ import type { RouteDefinition } from '../http/path-matching.ts';
 import type { HealthService } from '../health/health.service.ts';
 import { createProjectOpsRoutes } from './routes.ts';
 import { createProjectOpsRepositoryService } from './service.ts';
+import type { ProjectOpsAccess } from './access.ts';
 
 export interface ProjectOpsAppConfig {
   readonly sql: ProjectOpsSqlExecutor;
@@ -16,6 +17,7 @@ export interface ProjectOpsAppConfig {
   readonly clock?: () => string;
   readonly migrate?: (sql: ProjectOpsSqlExecutor) => Promise<void>;
   readonly healthService?: HealthService;
+  readonly access?: ProjectOpsAccess;
 }
 
 export interface ProjectOpsApp {
@@ -28,16 +30,20 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
   await (config.migrate ?? applyProjectOpsMigrations)(config.sql);
 
   const service = createProjectOpsRepositoryService(config.sql);
-  const routes = Object.freeze([
+  const productRoutes = [
     ...createProjectOpsRoutes(service, config.clock),
     createProjectOpsDashboardWebRoute(service),
-  ]);
+  ];
+  const routes = Object.freeze(config.access ? [
+    ...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(),
+  ] : productRoutes);
   const server = await startHttpListener({
     host: config.host,
     port: config.port,
     routes,
     healthService: config.healthService,
   });
+  config.access?.configureOrigin(server.origin);
 
   return Object.freeze({
     server,

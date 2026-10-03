@@ -12,6 +12,11 @@ export async function loadProjectOpsPostgresMigrations(): Promise<readonly Migra
     name: 'projectops_foundation',
     upSql: await readFile(new URL('../migrations/0001_projectops_foundation.sql', import.meta.url), 'utf8'),
     reversible: false,
+  }, {
+    version: '0002',
+    name: 'operator_access',
+    upSql: await readFile(new URL('../migrations/0002_operator_access.sql', import.meta.url), 'utf8'),
+    reversible: false,
   }];
 }
 

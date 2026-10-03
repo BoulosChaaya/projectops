@@ -43,3 +43,7 @@ jobs:
       - run: pnpm test:postgres
         env:
           PROJECTOPS_TEST_DATABASE_URL: postgres://projectops:acceptance-only@localhost:5432/projectops_test
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:browser
+        env:
+          PROJECTOPS_TEST_DATABASE_URL: postgres://projectops:acceptance-only@localhost:5432/projectops_test

@@ -12,9 +12,14 @@
     "verify": "node scripts/verify-integrity.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "start": "node --experimental-strip-types apps/api/src/projectops/main.ts",
-    "test:postgres": "node --experimental-strip-types --test tests/integration/projectops-postgres.test.ts"
+    "operator:create": "node --experimental-strip-types apps/api/src/projectops/provision-operator.ts",
+    "test:postgres": "node --experimental-strip-types --test tests/integration/*-postgres.test.ts",
+    "test:browser": "node --experimental-strip-types --test tests/integration/operator-browser.test.ts"
   },
   "dependencies": {
     "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
   }
 }
