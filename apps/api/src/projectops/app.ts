@@ -5,6 +5,7 @@ import {
 import { createProjectOpsDashboardWebRoute } from '../../../web/src/projectops/dashboard-route.ts';
 import { startHttpListener, type HttpServer } from '../bootstrap/http-listener.ts';
 import type { RouteDefinition } from '../http/path-matching.ts';
+import type { HealthService } from '../health/health.service.ts';
 import { createProjectOpsRoutes } from './routes.ts';
 import { createProjectOpsRepositoryService } from './service.ts';
 
@@ -13,6 +14,8 @@ export interface ProjectOpsAppConfig {
   readonly host?: string;
   readonly port?: number;
   readonly clock?: () => string;
+  readonly migrate?: (sql: ProjectOpsSqlExecutor) => Promise<void>;
+  readonly healthService?: HealthService;
 }
 
 export interface ProjectOpsApp {
@@ -22,7 +25,7 @@ export interface ProjectOpsApp {
 }
 
 export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<ProjectOpsApp> {
-  await applyProjectOpsMigrations(config.sql);
+  await (config.migrate ?? applyProjectOpsMigrations)(config.sql);
 
   const service = createProjectOpsRepositoryService(config.sql);
   const routes = Object.freeze([
@@ -33,6 +36,7 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
     host: config.host,
     port: config.port,
     routes,
+    healthService: config.healthService,
   });
 
   return Object.freeze({

@@ -45,3 +45,6 @@ Slice 2: durable application runtime. Establish a PostgreSQL adapter, versioned 
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.
+
+## Durable runtime implementation in progress
+Added a pg transport adapter, configured entry point, database readiness check, transactional advisory-locked migrations with a persistent checksum ledger, and PostgreSQL acceptance tests. Local pnpm verify passes 50/50 on Node 24.19.0. The local container cannot switch from root to a PostgreSQL server user; real PostgreSQL 16 acceptance is therefore assigned to GitHub Actions before completion. Operator access remains the next slice. No deployment performed.
