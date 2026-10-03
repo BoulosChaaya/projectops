@@ -6,6 +6,7 @@ import {
   archiveProjectDocument,
   archiveProjectNote,
   approveProjectRequest,
+  approveProjectExpense,
   approveProjectChangeRequest,
   completeProjectTask,
   composeProjectOpsDashboard,
@@ -13,6 +14,7 @@ import {
   createProjectChangeRequest,
   createProjectDeliverable,
   createProjectDocument,
+  createProjectExpense,
   createProjectFeedback,
   createProjectInvoice,
   createProjectIssue,
@@ -24,6 +26,7 @@ import {
   estimateProjectRequest,
   markProjectInvoicePaid,
   rejectProjectChangeRequest,
+  rejectProjectExpense,
   resolveProjectIssue,
   completeProjectMilestone,
   createProjectActivity,
@@ -36,12 +39,14 @@ import {
   type ArchiveProjectNoteInput,
   type ApproveProjectRequestInput,
   type CompleteProjectTaskInput,
+  type DecideProjectExpenseInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
   type NewProjectDocumentInput,
+  type NewProjectExpenseInput,
   type NewProjectFeedbackInput,
   type NewProjectInvoiceInput,
   type NewProjectIssueInput,
@@ -55,6 +60,7 @@ import {
   type ProjectActivity,
   type ProjectChangeRequest,
   type ProjectDocument,
+  type ProjectExpense,
   type ProjectFeedback,
   type ProjectInvoice,
   type ProjectIssue,
@@ -295,6 +301,38 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(workLog.billable, true);
   assert.equal(workLog.taskId, task.id);
 
+  const expense = createProjectExpense(approved, {
+    id: 'expense-1',
+    projectRequestId: request.id,
+    category: 'software',
+    description: 'Analytics license',
+    vendor: 'MetricsCo',
+    amountCents: 4500,
+    currency: 'usd',
+    reimbursable: true,
+    receiptUrl: 'https://example.com/projectops/receipt.pdf',
+    incurredAtIso: T3,
+  });
+  assert.equal(expense.status, 'submitted');
+  assert.equal(expense.currency, 'USD');
+
+  const approvedExpense = approveProjectExpense(expense, {
+    decidedBy: 'Boulos',
+    decidedAtIso: T3,
+    decisionNote: 'Approved for launch reporting.',
+  });
+  assert.equal(approvedExpense.status, 'approved');
+
+  const rejectedExpense = rejectProjectExpense({
+    ...expense,
+    id: 'expense-2',
+  }, {
+    decidedBy: 'Boulos',
+    decidedAtIso: T3,
+    decisionNote: 'Duplicate receipt.',
+  });
+  assert.equal(rejectedExpense.status, 'rejected');
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -331,6 +369,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_notes/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_tasks/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_work_logs/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_expenses/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_activities/);
   assert.match(clientInsert.sql, /\$1/);
   assert.match(requestInsert.sql, /\$15/);
@@ -813,6 +852,46 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     const workLogs = await workLogsRes.json() as readonly ProjectWorkLog[];
     assert.equal(workLogs.length, 1);
 
+    const expenseRes = await fetch(`${server.origin}/projectops/project-requests/req-2/expenses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'expense-1',
+        category: 'software',
+        description: 'Analytics license',
+        vendor: 'MetricsCo',
+        amountCents: 4500,
+        currency: 'USD',
+        reimbursable: true,
+        receiptUrl: 'https://example.com/projectops/receipt.pdf',
+        incurredAtIso: T3,
+      }),
+    });
+    const expense = await expenseRes.json() as ProjectExpense;
+    assert.equal(expenseRes.status, 200);
+    assert.equal(expense.status, 'submitted');
+
+    const expensesRes = await fetch(`${server.origin}/projectops/project-requests/req-2/expenses`);
+    assert.equal(expensesRes.status, 200);
+    const expenses = await expensesRes.json() as readonly ProjectExpense[];
+    assert.equal(expenses.length, 1);
+
+    const approveExpenseRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/expenses/expense-1/approve`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          decidedBy: 'Boulos',
+          decidedAtIso: T3,
+          decisionNote: 'Approved for launch reporting.',
+        }),
+      }
+    );
+    const approvedExpense = await approveExpenseRes.json() as ProjectExpense;
+    assert.equal(approveExpenseRes.status, 200);
+    assert.equal(approvedExpense.status, 'approved');
+
     const activityRes = await fetch(`${server.origin}/projectops/project-requests/req-2/activities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -865,6 +944,9 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.workLogs, 1);
     assert.equal(dashboard.billableWorkMinutes, 120);
     assert.equal(dashboard.nonBillableWorkMinutes, 0);
+    assert.equal(dashboard.submittedExpenses, 0);
+    assert.equal(dashboard.approvedExpenses, 1);
+    assert.equal(dashboard.approvedExpenseAmountCents, 4500);
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -919,6 +1001,11 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       billableWorkMinutes: 180,
       nonBillableWorkMinutes: 30,
       latestWorkLoggedAtIso: T3,
+      submittedExpenseCount: 1,
+      approvedExpenseCount: 2,
+      rejectedExpenseCount: 0,
+      submittedExpenseAmountCents: 4500,
+      approvedExpenseAmountCents: 9000,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -1018,6 +1105,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const notes = new Map<string, ProjectNote>();
   const tasks = new Map<string, ProjectTask>();
   const workLogs = new Map<string, ProjectWorkLog>();
+  const expenses = new Map<string, ProjectExpense>();
   const activities = new Map<string, ProjectActivity>();
 
   return Object.freeze({
@@ -1395,6 +1483,57 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
           ))
       );
     },
+    async createProjectExpense(
+      projectRequestId: string,
+      input: NewProjectExpenseInput
+    ): Promise<ProjectExpense> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      const expense = createProjectExpense(request, input);
+      expenses.set(expenseKey(projectRequestId, expense.id), expense);
+      return expense;
+    },
+    async listProjectExpenses(projectRequestId: string): Promise<readonly ProjectExpense[]> {
+      return Object.freeze(
+        [...expenses.values()]
+          .filter((expense) => expense.projectRequestId === projectRequestId)
+          .sort((a, b) => (
+            b.incurredAtIso.localeCompare(a.incurredAtIso) ||
+            b.updatedAtIso.localeCompare(a.updatedAtIso) ||
+            a.id.localeCompare(b.id)
+          ))
+      );
+    },
+    async approveProjectExpense(
+      projectRequestId: string,
+      expenseId: string,
+      input: DecideProjectExpenseInput
+    ): Promise<ProjectExpense> {
+      const key = expenseKey(projectRequestId, expenseId);
+      const current = expenses.get(key);
+      if (!current) {
+        throw new Error(`Project expense not found: ${projectRequestId}/${expenseId}`);
+      }
+      const next = approveProjectExpense(current, input);
+      expenses.set(key, next);
+      return next;
+    },
+    async rejectProjectExpense(
+      projectRequestId: string,
+      expenseId: string,
+      input: DecideProjectExpenseInput
+    ): Promise<ProjectExpense> {
+      const key = expenseKey(projectRequestId, expenseId);
+      const current = expenses.get(key);
+      if (!current) {
+        throw new Error(`Project expense not found: ${projectRequestId}/${expenseId}`);
+      }
+      const next = rejectProjectExpense(current, input);
+      expenses.set(key, next);
+      return next;
+    },
     async createProjectActivity(
       projectRequestId: string,
       input: NewProjectActivityInput
@@ -1499,6 +1638,11 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             billableWorkMinutes: sumWorkMinutes(workLogs, request.id, true),
             nonBillableWorkMinutes: sumWorkMinutes(workLogs, request.id, false),
             latestWorkLoggedAtIso: latestWorkLog(workLogs, request.id)?.loggedAtIso,
+            submittedExpenseCount: countExpenses(expenses, request.id, 'submitted'),
+            approvedExpenseCount: countExpenses(expenses, request.id, 'approved'),
+            rejectedExpenseCount: countExpenses(expenses, request.id, 'rejected'),
+            submittedExpenseAmountCents: sumExpenses(expenses, request.id, 'submitted'),
+            approvedExpenseAmountCents: sumExpenses(expenses, request.id, 'approved'),
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -1547,6 +1691,10 @@ function taskKey(projectRequestId: string, taskId: string): string {
 
 function workLogKey(projectRequestId: string, workLogId: string): string {
   return `${projectRequestId}\0${workLogId}`;
+}
+
+function expenseKey(projectRequestId: string, expenseId: string): string {
+  return `${projectRequestId}\0${expenseId}`;
 }
 
 function activityKey(projectRequestId: string, activityId: string): string {
@@ -1736,6 +1884,26 @@ function latestWorkLog(
       b.createdAtIso.localeCompare(a.createdAtIso) ||
       a.id.localeCompare(b.id)
     ))[0];
+}
+
+function countExpenses(
+  expenses: ReadonlyMap<string, ProjectExpense>,
+  projectRequestId: string,
+  status: ProjectExpense['status']
+): number {
+  return [...expenses.values()].filter(
+    (expense) => expense.projectRequestId === projectRequestId && expense.status === status
+  ).length;
+}
+
+function sumExpenses(
+  expenses: ReadonlyMap<string, ProjectExpense>,
+  projectRequestId: string,
+  status: ProjectExpense['status']
+): number {
+  return [...expenses.values()]
+    .filter((expense) => expense.projectRequestId === projectRequestId && expense.status === status)
+    .reduce((total, expense) => total + expense.amountCents, 0);
 }
 
 function latestActivity(
