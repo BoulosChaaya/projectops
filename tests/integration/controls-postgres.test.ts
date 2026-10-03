@@ -47,3 +47,36 @@ test('Controls upgrade and atomic estimate/approval/cancellation decisions persi
     } finally { await app.close(); }
   });
 });
+
+test('Real SQL guards reject a competing decision after both commands read the same snapshot', async () => {
+  await operatorFixture(async (_databaseUrl, pool) => {
+    const client = await pool.connect();
+    try { await migrateProjectOpsPostgres(client, await loadProjectOpsPostgresMigrations()); } finally { client.release(); }
+    const { ProjectOpsConnectionSqlExecutor, ProjectOpsRepository } = await import('../../packages/projectops/src/index.ts');
+    const time = '2026-10-03T12:00:00.000Z';
+    let waiting = 0; let enabled = false; let release!: () => void;
+    const barrier = new Promise<void>(resolve => release = resolve);
+    const sql = new ProjectOpsConnectionSqlExecutor({ async query(text, params = []) {
+      const result = await pool.query(text, [...params]);
+      if (enabled && /^SELECT \*/.test(text) && text.includes('FROM projectops_project_requests') && params[0] === 'r') {
+        waiting++; if (waiting === 2) release(); await barrier;
+      }
+      return { rows: result.rows, rowCount: result.rowCount ?? 0, command: result.command };
+    } });
+    const repo = new ProjectOpsRepository(sql);
+    await repo.createClient({ id: 'c', name: 'Client', createdAtIso: time });
+    await repo.createProjectRequest({ id: 'r', clientId: 'c', title: 'Race', brief: 'Brief', createdAtIso: time });
+    await repo.estimateProjectRequest('r', { amountCents: 100, currency: 'EUR', estimatedAtIso: time }); enabled = true;
+    const results = await Promise.allSettled([
+      repo.estimateProjectRequest('r', { amountCents: 200, currency: 'EUR', estimatedAtIso: time, expectedRevision: 2 }),
+      repo.approveProjectRequest('r', { approvedBy: 'Operator', approvedAtIso: time, expectedRevision: 2 }),
+    ]);
+    enabled = false; assert.equal(waiting, 2);
+    assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+    const failed = results.find(r => r.status === 'rejected') as PromiseRejectedResult;
+    assert.equal(failed.reason.code, 'PROJECTOPS_PROJECT_CHANGED');
+    const saved = await repo.getProjectRequest('r'); assert.equal(saved?.revision, 3);
+    if (saved?.status === 'approved') { assert.equal(saved.estimateAmountCents, 100); assert.equal(saved.approvedBy, 'Operator'); }
+    else { assert.equal(saved?.status, 'estimated'); assert.equal(saved.estimateAmountCents, 200); assert.equal(saved.approvedBy, undefined); }
+  });
+});

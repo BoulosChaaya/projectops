@@ -41,3 +41,15 @@ test('HTTP control actions reject bypass, invalid actions, stale decisions and t
     assert.equal((await send(root + '/control', { action: 'archive', expectedRevision: current.revision })).status, 200);
   } finally { await app.close(); }
 });
+
+test('Starting requires recorded approval and cancelled projects leave the active dashboard', async () => {
+  const { createProjectRequest, transitionProjectRequest } = await import('../packages/projectops/src/domain.ts');
+  const legacy = { ...createProjectRequest({ id: 'r', clientId: 'c', title: 'Legacy', brief: 'Brief', createdAtIso: time }), status: 'approved' as const };
+  assert.throws(() => transitionProjectRequest(legacy, 'in_progress', time), /recorded estimate and approval/);
+  const sql = new ProjectOpsMemorySqlExecutor(); await applyProjectOpsMigrations(sql); const repo = new ProjectOpsRepository(sql);
+  await repo.createClient({ id: 'c', name: 'Client', createdAtIso: time });
+  await repo.createProjectRequest({ id: 'r', clientId: 'c', title: 'Cancelled', brief: 'Brief', createdAtIso: time });
+  await repo.transitionProjectRequest('r', 'cancelled', time, 1);
+  assert.equal((await repo.getDashboard()).totalActiveRequests, 0);
+  assert.equal((await repo.getProjectRequest('r'))?.status, 'cancelled');
+});
