@@ -15,6 +15,8 @@ export type ProjectNoteVisibility = 'internal' | 'client';
 export type ProjectTaskStatus = 'open' | 'completed';
 export type ProjectTaskPriority = 'low' | 'medium' | 'high';
 export type ProjectWorkLogBillable = boolean;
+export type ProjectExpenseStatus = 'submitted' | 'approved' | 'rejected';
+export type ProjectExpenseCategory = 'software' | 'asset' | 'service' | 'travel' | 'other';
 export type ProjectActivityEventType =
   | 'request_created'
   | 'request_estimated'
@@ -199,6 +201,24 @@ export interface ProjectWorkLog {
   readonly createdAtIso: string;
 }
 
+export interface ProjectExpense {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly category: ProjectExpenseCategory;
+  readonly description: string;
+  readonly vendor?: string;
+  readonly amountCents: number;
+  readonly currency: string;
+  readonly reimbursable: boolean;
+  readonly receiptUrl?: string;
+  readonly status: ProjectExpenseStatus;
+  readonly incurredAtIso: string;
+  readonly decidedAtIso?: string;
+  readonly decidedBy?: string;
+  readonly decisionNote?: string;
+  readonly updatedAtIso: string;
+}
+
 export interface ProjectActivity {
   readonly id: string;
   readonly projectRequestId: string;
@@ -372,6 +392,25 @@ export interface NewProjectWorkLogInput {
   readonly loggedAtIso: string;
 }
 
+export interface NewProjectExpenseInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly category?: ProjectExpenseCategory;
+  readonly description: string;
+  readonly vendor?: string;
+  readonly amountCents: number;
+  readonly currency: string;
+  readonly reimbursable?: boolean;
+  readonly receiptUrl?: string;
+  readonly incurredAtIso: string;
+}
+
+export interface DecideProjectExpenseInput {
+  readonly decidedBy: string;
+  readonly decidedAtIso: string;
+  readonly decisionNote?: string;
+}
+
 export interface NewProjectActivityInput {
   readonly id: string;
   readonly projectRequestId: string;
@@ -496,6 +535,20 @@ export const projectTaskPriorities = Object.freeze([
   'medium',
   'high',
 ] satisfies readonly ProjectTaskPriority[]);
+
+export const projectExpenseStatuses = Object.freeze([
+  'submitted',
+  'approved',
+  'rejected',
+] satisfies readonly ProjectExpenseStatus[]);
+
+export const projectExpenseCategories = Object.freeze([
+  'software',
+  'asset',
+  'service',
+  'travel',
+  'other',
+] satisfies readonly ProjectExpenseCategory[]);
 
 export const projectActivityEventTypes = Object.freeze([
   'request_created',
@@ -1271,6 +1324,67 @@ export function createProjectWorkLog(
   });
 }
 
+export function createProjectExpense(
+  request: ProjectRequest,
+  input: NewProjectExpenseInput
+): ProjectExpense {
+  if (request.status === 'new' || request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_EXPENSES',
+      'Project request must be estimated, approved, in progress, or delivered before adding expenses.'
+    );
+  }
+
+  const id = requireIdentifier('projectExpense.id', input.id);
+  const projectRequestId = requireIdentifier('projectExpense.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_EXPENSE_REQUEST_MISMATCH',
+      'Project expense must belong to the selected project request.'
+    );
+  }
+
+  const category = input.category ?? 'other';
+  if (!projectExpenseCategories.includes(category)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_EXPENSE_CATEGORY',
+      `Unsupported project expense category: ${category}`
+    );
+  }
+
+  const incurredAtIso = assertIsoTimestamp('projectExpense.incurredAtIso', input.incurredAtIso);
+  return Object.freeze({
+    id,
+    projectRequestId,
+    category,
+    description: requireText('projectExpense.description', input.description, 500),
+    vendor: optionalText('projectExpense.vendor', input.vendor, 120),
+    amountCents: requireMoneyCents('projectExpense.amountCents', input.amountCents),
+    currency: requireCurrency('projectExpense.currency', input.currency),
+    reimbursable: input.reimbursable ?? true,
+    receiptUrl: optionalHttpUrl('projectExpense.receiptUrl', input.receiptUrl),
+    status: 'submitted',
+    incurredAtIso,
+    updatedAtIso: incurredAtIso,
+  });
+}
+
+export function approveProjectExpense(
+  expense: ProjectExpense,
+  input: DecideProjectExpenseInput
+): ProjectExpense {
+  return decideProjectExpense(expense, 'approved', input);
+}
+
+export function rejectProjectExpense(
+  expense: ProjectExpense,
+  input: DecideProjectExpenseInput
+): ProjectExpense {
+  return decideProjectExpense(expense, 'rejected', input);
+}
+
 export function createProjectActivity(
   request: ProjectRequest,
   input: NewProjectActivityInput
@@ -1375,6 +1489,30 @@ function decideProjectChangeRequest(
   });
 }
 
+function decideProjectExpense(
+  expense: ProjectExpense,
+  status: Extract<ProjectExpenseStatus, 'approved' | 'rejected'>,
+  input: DecideProjectExpenseInput
+): ProjectExpense {
+  if (expense.status !== 'submitted') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_EXPENSE_ALREADY_DECIDED',
+      'Project expense has already been decided.'
+    );
+  }
+
+  const decidedAtIso = assertIsoTimestamp('projectExpense.decidedAtIso', input.decidedAtIso);
+  return Object.freeze({
+    ...expense,
+    status,
+    decidedAtIso,
+    decidedBy: requireText('projectExpense.decidedBy', input.decidedBy, 120),
+    decisionNote: optionalText('projectExpense.decisionNote', input.decisionNote, 500),
+    updatedAtIso: decidedAtIso,
+  });
+}
+
 function requireIdentifier(name: string, value: string): string {
   const trimmed = requireText(name, value, 80);
   if (!identifierPattern.test(trimmed)) {
@@ -1409,6 +1547,11 @@ function requireHttpUrl(name: string, value: string): string {
     );
   }
   return url;
+}
+
+function optionalHttpUrl(name: string, value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return requireHttpUrl(name, value);
 }
 
 function requireText(name: string, value: string, maxLength: number): string {
