@@ -30,7 +30,7 @@ The current boundary has one operator identity, matching the operator access sli
 
 For external access, set PUBLIC_ORIGIN to the exact HTTPS origin (for example https://projectops.example.com), terminate TLS at your trusted proxy, and configure HOST appropriately. Forwarded headers never select the origin. Non-loopback binding without HTTPS PUBLIC_ORIGIN is rejected. HTTP cookies are allowed only for loopback development; external sessions use a Secure, HttpOnly, SameSite=Strict host cookie. Every write requires the configured Origin, application/json, and the session's x-csrf-token header. Login requires Origin and JSON as well. Obtain the CSRF token from GET /projectops/access/session after login; never store the session token in browser local storage.
 
-Settings persist currency, priority and an IANA timezone. New project requests use the saved priority when omitted; estimates use the saved currency when omitted. Explicit values still win and are validated. Timezone is retained for later workspace display; existing stored timestamps remain ISO UTC. Currency settings do not fix mixed-currency dashboard totals, which belong to the finances slice.
+Settings persist currency, priority and an IANA timezone. New project requests use the saved priority when omitted; estimates use the saved currency when omitted. Explicit values still win and are validated. Timezone is retained for later workspace display; existing stored timestamps remain ISO UTC. Finance totals use actual record currencies independently of settings or project estimate currency; see the completed finances workflow below.
 
 Browser acceptance runs a real Chromium journey against PostgreSQL:
 
@@ -132,7 +132,7 @@ Each child create locks/checks the parent within its insert. Acceptance/addressi
 
 Delivery and archival use a small transaction-scoped executor capability: the PostgreSQL pool leases one client for BEGIN, every query, COMMIT/ROLLBACK and release. The transaction explicitly uses READ COMMITTED, locks the project, validates its state and expected project revision, then reads deliverables and feedback in subsequent statements. These reads see a child commit that preceded acquisition of the parent lock, avoiding a stale statement snapshot. The same parent lock excludes relevant child changes until the project transition commits. The existing conditional project revision/state update remains intact. Memory execution mirrors business rules and serializes transaction callbacks with rollback; controlled PostgreSQL tests establish the actual row-lock behavior.
 
-Slice 9 implementation checkpoint `f0052156c5b0fc5c805538023656a8e60b8357c7` is on `slice-9-delivery-acceptance`, based on `7c006c38f45820d9246c03e68e9865837538115a`. Its completion gate passed locally:
+Slice 9 implementation checkpoint `f0052156c5b0fc5c805538023656a8e60b8357c7`, with documentation commit `e74a4b2ef54c90e354a36b8d767cc21e5e70bd3f`, was independently reviewed and merged in PR #6 at `4f17a71f2f844e72a6c3cf87bd5c82e87a2442b8`. Its completion gate passed locally:
 
 | Command | Result |
 | --- | --- |
@@ -144,4 +144,72 @@ The cloud runs used Node 24.19.0, pnpm 11.19.0, PostgreSQL 16.15 and Playwright 
 
 PostgreSQL acceptance proves create/list/actions and terminal metadata across application restart, defaults/optional relationships, every parent-state restriction, missing/duplicate/constraint classification, unchanged rows after failures, project revision behavior and both delivery/archive readiness rules. Controlled barriers prove exactly one acceptance/addressing winner; cancellation/archival winning against all four commands; hold/delivery winning against submission; child submission/open feedback first blocking delivery; acceptance/addressing first enabling delivery; delivery first permitting later feedback; archival versus post-delivery feedback in both orders; and delivery versus cancellation retaining one project revision winner. Chromium covers the full workflow, all sentiments/source attribution, authenticated addressing, reload persistence, safe text/links, validation and missing relationship feedback, stale terminal actions, zero/submitted/open-feedback delivery blockers, delivered archival rechecking readiness, cancelled archival bypass, all relevant state controls, retained read-only records, independent retries and zero page errors.
 
-Slice 9 awaits independent PR review and has not been merged. Slice 10 is next and has not begun. No deliverable or feedback editing, replacement, versions, rejection, reopening, deletion, uploads, client portal or automatic history is provided. The runtime remains loopback by default and no deployment/final-production-acceptance claim is made.
+Slice 9 is merged. Slice 10 completion and review status are recorded below. No deliverable or feedback editing, replacement, versions, rejection, reopening, deletion, uploads, client portal or automatic history is provided. The runtime remains loopback by default and no deployment/final-production-acceptance claim is made.
+
+
+## Finances (Slice 10)
+
+The protected project workspace provides invoice issue/payment and expense submission/approval/rejection in the isolated project-finances.ts component. Invoices/expenses now use dedicated forms and actions; changes and activities remain on their existing rendering path. No new routes, tables, fields, migrations or child revisions were introduced. Invoice numbers remain unique within a project, amounts remain integer cents from 1 to 1,000,000,000, and currency is trimmed/uppercased to exactly three letters. An optional invoice deliverable must belong to the project and already be accepted; invoice currency can differ from the estimate currency. Existing expense defaults (other, reimbursable true), categories, text/URL validation and monetary inclusion rules remain intact.
+
+| Command | Allowed project states | Child state |
+| --- | --- | --- |
+| Issue invoice | approved, in_progress, delivered | new → issued |
+| Pay invoice | new, estimated, approved, in_progress, on_hold, delivered | issued → paid |
+| Submit expense | estimated, approved, in_progress, on_hold, delivered | new → submitted |
+| Approve expense | new, estimated, approved, in_progress, on_hold, delivered | submitted → approved |
+| Reject expense | new, estimated, approved, in_progress, on_hold, delivered | submitted → rejected |
+
+All omitted states reject the command with 409. Cancelled/archived projects retain readable finance records and workspace totals with no write controls. Repeated payment/expense decisions conflict. Browser controls follow the same state matrix and retain terminal records/metadata. Collection retries are independent; failed invoices make invoice totals unavailable, failed expenses make expense totals unavailable. Success restores only the affected totals. Validation and 404/409 feedback appear in the relevant section; a stale conflict offers deliberate reload. Text-only rendering protects stored user content; receipt links are HTTP(S), without credentials, with noopener/noreferrer.
+
+Protected finance APIs ignore overrides to issuedAtIso, paidAtIso, decidedAtIso and decidedBy. Those timestamps use the server clock, and expense decisions use the authenticated operator. IncurredAtIso is a user business timestamp validated by existing ISO/UTC rules, or server now when omitted. DueAtIso remains user-entered and cannot precede the server issuance timestamp. Browser optional date/time inputs explicitly use UTC; persisted metadata displays in the operator timezone. No other temporal ordering rule is added. The injected unprotected contract-test harness preserves its explicit timestamp/operator inputs, as in Slice 9; the PostgreSQL runtime always enables protected access.
+
+```text
+GET/POST /projectops/project-requests/:id/invoices
+POST     /projectops/project-requests/:id/invoices/:invoiceId/pay
+GET/POST /projectops/project-requests/:id/expenses
+POST     /projectops/project-requests/:id/expenses/:expenseId/approve
+POST     /projectops/project-requests/:id/expenses/:expenseId/reject
+```
+
+All five writes participate in parent-row serialization. Invoice issuance uses Slice 9's transaction-scoped connection: obtain the parent lock, validate the parent, then read an optional same-project accepted deliverable in a new READ COMMITTED statement before a guarded insert. This observes acceptance committed by the preceding parent-lock owner. Expense insertion guards/locks its allowed parent in the insert. Payment/decisions use guarded SQL updates requiring the permitted locked parent, child identity and issued/submitted status. Constraints determine duplicate identity and per-project invoice-number conflicts. A cancelled/archive-first winner prevents insertion/transition; child-first writes may commit before lifecycle changes. No finance write increments the project revision. Memory execution mirrors the rules; controlled PostgreSQL establishes row-lock serialization.
+
+Invalid fields/business dates/domain validation return 400. Genuinely missing parent, invoice, expense or same-project optional deliverable return 404. Disallowed parent/child state, an existing unaccepted deliverable, duplicate, repeated/stale action or lifecycle race returns 409. A guarded zero-row write is followed by only missing-resource classification; those reads never authorize a write.
+
+### Currency aggregation contract
+
+Dashboard rows and summary expose `financeTotalsByCurrency` instead of the old mixed-currency scalar totals. Each actual record currency maps to four **decimal-cent strings**:
+
+```json
+{
+  "EUR": {
+    "outstandingInvoiceAmountCents": "3000000000",
+    "paidInvoiceAmountCents": "0",
+    "submittedExpenseAmountCents": "0",
+    "approvedExpenseAmountCents": "200"
+  }
+}
+```
+
+SQL groups a UNION ALL of invoice/expense amounts by project and currency, then builds JSON with aggregate cents cast to text before joining to projects. It does not multiply invoice/expense rows by joining the two collections. PostgreSQL SUM(integer)'s supported bigint result range is preserved exactly; global native composition and formatting use BigInt, never an unsafe Number conversion or floating-point money arithmetic. Amount fields on individual stored records remain bounded integer numbers. Decimal strings are JSON-compatible; no arbitrary-precision dependency was added. Workspace totals use the loaded record currency and integer arithmetic. Outstanding invoices means issued, paid means paid, and expenses are separated as submitted/approved. Rejected expenses do not contribute; reimbursability does not filter these amounts. No USD assumption, estimate-currency substitution, FX or mixed-currency grand total. The existing dashboard scope excludes cancelled/archived projects, while their workspace records/totals remain visible.
+
+Finances do not participate in Slice 9 readiness: delivery and delivered archival still require only at least one deliverable, all accepted, and no open feedback. Unpaid invoices and submitted expenses do not block either route (/status or /control); cancelled archival continues to bypass readiness. The Slice 9 transaction remains unchanged.
+
+### Slice 10 verification and review checkpoint
+
+Implementation: `9d93bb1ebdf061304434068caff62314569b7c01` on `slice-10-finances`, from authoritative merged main `4f17a71f2f844e72a6c3cf87bd5c82e87a2442b8`. Documentation is committed next on this branch. Completion gate passed; the branch awaits independent PR review and is not merged.
+
+| Command | Pass | Fail | Skip | Hygiene |
+| --- | --- | --- | --- | --- |
+| `pnpm verify` | 78/78 native | 0 | 0 | 580 files |
+| `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:postgres` | 25/25 real PostgreSQL | 0 | 0 | — |
+| `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:browser` | 9/9 Chromium | 0 | 0 | — |
+
+The established cloud setup used Node 24.19.0, pnpm 11.19.0, PostgreSQL 16.15 and Playwright Chromium 153.0.8010.12. Commands used `CI=true XDG_DATA_HOME=/tmp/projectops-xdg PNPM_HOME=/tmp/projectops-pnpm`, and browser execution additionally used `PLAYWRIGHT_BROWSERS_PATH=/tmp/projectops-playwright`. Supply the configured test database URL through the environment. Dependencies, lockfile and migrations are unchanged. Every database/browser fixture uses an isolated schema removed after testing. No final failed/skipped tests or database/browser blockers remain; initial Chromium datetime-driver normalization and accessible-category-label failures were corrected before rerunning the affected journey and full suites.
+
+Dedicated acceptance files are tests/project-finances.test.ts and integration/finances-postgres.test.ts / finances-browser.test.ts. They cover validation/defaults, all five commands across all eight states, optional accepted relationships and missing/cross-project/unaccepted errors, duplicate IDs/number scope, protected timestamps/operator, terminal actions and stale/repeated rejection, unchanged rows/revisions, access/Origin/JSON/CSRF/no-store and memory parity. Real PostgreSQL covers restart persistence, retained cancelled/archived reads, currency totals above 32-bit range without join multiplication, and aggregate/string normalization above Number.MAX_SAFE_INTEGER. Native aggregation proves exact global sums/formatting above that limit.
+
+Controlled database races hold parent locks or synchronize child preflight reads. Pay/pay, approve/approve, reject/reject and approve/reject each have one successful transition. Cancellation and cancelled-project archival winning against all five commands leave absent/unchanged children; hold blocks invoice issuance but permits the other four commands. Duplicate invoice ID/number and expense ID races insert once. A parent-lock waiter observes preceding deliverable acceptance. Finance-first writes allow ready delivery/archival, and delivery-first transactions permit the approved finance commands in delivered state. Totals count committed winning transitions. The preserved Slice 9 suite continues to prove its delivery/archival predicate and lifecycle revision races.
+
+Chromium proves invoice creation with/without accepted deliverables, missing/unaccepted relationship errors, payment, expense defaults/fields/business date/receipt/decisions, metadata, persistence/reload, validation and stale-tab conflicts, multiple actual currencies differing from the project estimate in both workspace and dashboard, no fake combined total, all eight state controls, retained read-only records, safe text/link rendering, independent retry/unavailable totals and zero page errors. Delivery/archival succeeds with unpaid invoices and submitted expenses when Slice 9 readiness passes.
+
+Slice 11 is next after Slice 10 review/merge approval and has not begun. No invoice/expense editing, deletion, reversal, reopening, partial payments, payment ledger/providers, tax/discounts/refunds, FX, new reimbursement workflow, receipt uploads, generated invoices, finance completion prerequisites or automatic history/notifications were added. No deployment/production-readiness claim is made.
