@@ -14,7 +14,7 @@
     "start": "node --experimental-strip-types apps/api/src/projectops/main.ts",
     "operator:create": "node --experimental-strip-types apps/api/src/projectops/provision-operator.ts",
     "test:postgres": "node --experimental-strip-types --test tests/integration/*-postgres.test.ts",
-    "test:browser": "node --experimental-strip-types --test tests/integration/operator-browser.test.ts"
+    "test:browser": "node --experimental-strip-types --test tests/integration/*-browser.test.ts"
   },
   "dependencies": {
     "pg": "8.23.1"

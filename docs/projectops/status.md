@@ -38,10 +38,10 @@ See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the prev
 Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. The PostgreSQL runtime now protects these routes; contract tests may still inject an unprotected memory harness.
 
 ## Remaining approved work
-Roadmap slices 1-3 are complete. Slices 4-14 remain open. Existing functionality is reused to complete them.
+Roadmap slices 1-4 are complete. Slices 5-14 remain open. Existing functionality is reused to complete them.
 
 ## Next slice
-Slice 4: client management. Complete browser create/view/edit/archive/search, with projects listed per client. The runnable application defaults to loopback and is not deployed.
+Slice 5: project workspace and editing. Connect project sections in a detail page and support updating briefs, budgets, priorities and deadlines. The runnable application defaults to loopback and is not deployed.
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.
@@ -68,3 +68,15 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - Browser acceptance verifies invalid credentials, sign-in, saved defaults after reload, credential change, re-login, logout and protected-page redirects.
 - Final follow-up preserves the configured loopback hostname for browser Origin matching and checks localhost in the native access test.
 - Limitations: no deployment; timezone display, mixed-currency totals and remaining product browser workflows are assigned to later slices.
+
+## Completed slice 4: client management
+- Browser directory and client detail page: create, search/status filters, view, edit and confirm archive, with projects per client.
+- Empty, missing-client, validation and stale-revision states; deliberate reload preserves concurrency decisions.
+- Additive migration 0003 initializes client revisions; conditional writes reject stale edits/archives.
+- Archived clients retain history and are read-only; new project creation checks and locks the client row.
+- Implementation checkpoint: e930ae8d9078b6be8a55211681c65fcca73bb6cb; PR https://github.com/BoulosChaaya/projectops/pull/3.
+- Local pnpm verify: 55/55 PASS.
+- Real PostgreSQL acceptance: 8/8 PASS; Chromium journeys: 2/2 PASS; zero skips in https://github.com/BoulosChaaya/projectops/actions/runs/37118540541.
+- Database acceptance verifies upgrading the prior schema, concurrent edits, literal search, clearing contact fields, restart persistence, archive/history retention, and an insert blocked by a concurrent archive.
+- Browser acceptance verifies protected client pages, creation, safe text rendering, project history, edits, stale-tab conflict/reload, archive confirmation/cancel, filters/search, empty and missing-client states.
+- Limitations: project workspace links/editing are slice 5; client restore/delete are not introduced. No deployment claim.

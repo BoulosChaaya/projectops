@@ -16,6 +16,8 @@ import type {
   EstimateProjectRequestInput,
   MitigateProjectRiskInput,
   NewClientInput,
+  EditClientInput,
+  ClientFilter,
   NewProjectActivityInput,
   NewProjectChangeRequestInput,
   NewProjectDeliverableInput,
@@ -53,8 +55,11 @@ import type {
 export interface ProjectOpsApiService {
   createClient(input: NewClientInput): Promise<ProjectOpsClient>;
   createProjectRequest(input: NewProjectRequestInput): Promise<ProjectRequest>;
-  listClients(): Promise<readonly ProjectOpsClient[]>;
+  listClients(filter?: ClientFilter): Promise<readonly ProjectOpsClient[]>;
   getClient(id: string): Promise<ProjectOpsClient | undefined>;
+  editClient(id: string, input: EditClientInput): Promise<ProjectOpsClient>;
+  archiveClient(id: string, expectedRevision: number): Promise<ProjectOpsClient>;
+  listClientProjects(id: string): Promise<readonly ProjectRequest[]>;
   listProjectRequests(): Promise<readonly ProjectRequest[]>;
   getProjectRequest(id: string): Promise<ProjectRequest | undefined>;
   createProjectMilestone(
@@ -217,13 +222,30 @@ export function createProjectOpsRoutes(
     {
       method: 'GET',
       path: '/projectops/clients',
-      handler: async () => await service.listClients(),
+      handler: async request => await runProjectOpsRequest(() => service.listClients({ q: request.query.q, status: request.query.status as ClientFilter['status'] })),
     },
     {
       method: 'GET',
       path: '/projectops/clients/:id',
       handler: async (_request, _context, params) =>
         await requireFound(service.getClient(params.id), 'PROJECTOPS_CLIENT_NOT_FOUND'),
+    },
+    {
+      method: 'PUT', path: '/projectops/clients/:id',
+      handler: async (request, _context, params) => await runProjectOpsRequest(() => {
+        const body = readRecord(request.body);
+        return service.editClient(params.id, { name: readString(body.name, 'name'),
+          contactName: readOptionalString(body.contactName, 'contactName'), email: readOptionalString(body.email, 'email'),
+          expectedRevision: readClientRevision(body.expectedRevision) });
+      }),
+    },
+    {
+      method: 'POST', path: '/projectops/clients/:id/archive',
+      handler: async (request, _context, params) => await runProjectOpsRequest(() => service.archiveClient(params.id, readClientRevision(readRecord(request.body).expectedRevision))),
+    },
+    {
+      method: 'GET', path: '/projectops/clients/:id/projects',
+      handler: async (_request, _context, params) => await runProjectOpsRequest(() => service.listClientProjects(params.id)),
     },
     {
       method: 'POST',
@@ -688,6 +710,11 @@ function readClientInput(body: unknown, clock: () => string): NewClientInput {
     email: readOptionalString(value.email, 'email'),
     createdAtIso: readOptionalString(value.createdAtIso, 'createdAtIso') ?? clock(),
   });
+}
+
+function readClientRevision(value: unknown): number {
+  if (typeof value !== 'number') throw new HttpError(400, 'INVALID_CLIENT_REVISION', 'A valid client revision is required.');
+  return value;
 }
 
 function readProjectRequestInput(body: unknown, clock: () => string): NewProjectRequestInput {
