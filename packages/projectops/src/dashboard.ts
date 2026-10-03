@@ -43,6 +43,11 @@ export interface ProjectOpsDashboardRow {
   readonly billableWorkMinutes?: number;
   readonly nonBillableWorkMinutes?: number;
   readonly latestWorkLoggedAtIso?: string;
+  readonly submittedExpenseCount?: number;
+  readonly approvedExpenseCount?: number;
+  readonly rejectedExpenseCount?: number;
+  readonly submittedExpenseAmountCents?: number;
+  readonly approvedExpenseAmountCents?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
   readonly updatedAtIso: string;
@@ -80,6 +85,11 @@ export interface ProjectOpsDashboardView {
   readonly workLogs: number;
   readonly billableWorkMinutes: number;
   readonly nonBillableWorkMinutes: number;
+  readonly submittedExpenses: number;
+  readonly approvedExpenses: number;
+  readonly rejectedExpenses: number;
+  readonly submittedExpenseAmountCents: number;
+  readonly approvedExpenseAmountCents: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
@@ -125,6 +135,11 @@ export function composeProjectOpsDashboard(
   let workLogs = 0;
   let billableWorkMinutes = 0;
   let nonBillableWorkMinutes = 0;
+  let submittedExpenses = 0;
+  let approvedExpenses = 0;
+  let rejectedExpenses = 0;
+  let submittedExpenseAmountCents = 0;
+  let approvedExpenseAmountCents = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -160,6 +175,11 @@ export function composeProjectOpsDashboard(
     workLogs += row.workLogCount ?? 0;
     billableWorkMinutes += row.billableWorkMinutes ?? 0;
     nonBillableWorkMinutes += row.nonBillableWorkMinutes ?? 0;
+    submittedExpenses += row.submittedExpenseCount ?? 0;
+    approvedExpenses += row.approvedExpenseCount ?? 0;
+    rejectedExpenses += row.rejectedExpenseCount ?? 0;
+    submittedExpenseAmountCents += row.submittedExpenseAmountCents ?? 0;
+    approvedExpenseAmountCents += row.approvedExpenseAmountCents ?? 0;
     if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
@@ -197,6 +217,11 @@ export function composeProjectOpsDashboard(
     workLogs,
     billableWorkMinutes,
     nonBillableWorkMinutes,
+    submittedExpenses,
+    approvedExpenses,
+    rejectedExpenses,
+    submittedExpenseAmountCents,
+    approvedExpenseAmountCents,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });
