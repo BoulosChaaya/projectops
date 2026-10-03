@@ -42,6 +42,9 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
       openIssueCount: 2,
       highOpenIssueCount: 1,
       resolvedIssueCount: 3,
+      openRiskCount: 2,
+      highOpenRiskCount: 1,
+      mitigatedRiskCount: 0,
       openFeedbackCount: 2,
       addressedFeedbackCount: 1,
       negativeOpenFeedbackCount: 1,
@@ -82,6 +85,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /Outstanding invoices/);
   assert.match(rendered.html, /Proposed changes/);
   assert.match(rendered.html, /Open issues/);
+  assert.match(rendered.html, /Open risks/);
   assert.match(rendered.html, /Open feedback/);
   assert.match(rendered.html, /Active documents/);
   assert.match(rendered.html, /Active notes/);
@@ -96,6 +100,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /2 accepted \/ 1 submitted/);
   assert.match(rendered.html, /2 paid \/ 1 open \(USD 1,250\.00\)/);
   assert.match(rendered.html, /1 proposed \/ 2 approved/);
+  assert.match(rendered.html, /2 open \/ 1 high/);
   assert.match(rendered.html, /2 open \/ 1 high/);
   assert.match(rendered.html, /2 open \/ 1 negative/);
   assert.match(rendered.html, /2 active \/ 1 archived/);
@@ -188,6 +193,17 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
     owner: 'Client',
     openedAtIso: T1,
   });
+  await repo.createProjectRisk('req-1', {
+    id: 'risk-1',
+    projectRequestId: 'req-1',
+    title: 'Late content delivery',
+    description: 'Client content may arrive after implementation starts.',
+    probability: 'high',
+    impact: 'medium',
+    mitigationPlan: 'Prepare placeholder copy and confirm deadline.',
+    owner: 'Boulos',
+    identifiedAtIso: T1,
+  });
   await repo.createProjectFeedback('req-1', {
     id: 'feedback-1',
     projectRequestId: 'req-1',
@@ -254,6 +270,7 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
   assert.match(rendered.html, /Approved/);
   assert.match(rendered.html, /USD 1,750\.00/);
   assert.match(rendered.html, /1 proposed \/ 0 approved/);
+  assert.match(rendered.html, /1 open \/ 1 high/);
   assert.match(rendered.html, /1 open \/ 1 high/);
   assert.match(rendered.html, /1 open \/ 1 negative/);
   assert.match(rendered.html, /1 active \/ 0 archived/);
@@ -357,6 +374,17 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     severity: 'medium',
     owner: 'Client',
     openedAtIso: T1,
+  });
+  await repo.createProjectRisk('req-1', {
+    id: 'risk-1',
+    projectRequestId: 'req-1',
+    title: 'Scope may expand',
+    description: 'Final QA may uncover requested polish outside the estimate.',
+    probability: 'medium',
+    impact: 'high',
+    mitigationPlan: 'Keep final polish behind change request approval.',
+    owner: 'Boulos',
+    identifiedAtIso: T1,
   });
   await repo.createProjectFeedback('req-1', {
     id: 'feedback-1',
