@@ -205,7 +205,8 @@ export interface ProjectOpsApiService {
   transitionProjectRequest(
     id: string,
     nextStatus: ProjectRequestStatus,
-    nowIso: string
+    nowIso: string,
+    expectedRevision?: number
   ): Promise<ProjectRequest>;
   getDashboard(): Promise<ProjectOpsDashboardView>;
 }
@@ -214,7 +215,7 @@ export function createProjectOpsRoutes(
   service: ProjectOpsApiService,
   clock: () => string = () => new Date().toISOString()
 ): readonly RouteDefinition<KernelRouteHandler>[] {
-  return Object.freeze([
+  const routes: RouteDefinition<KernelRouteHandler>[] = [
     {
       method: 'POST',
       path: '/projectops/clients',
@@ -641,16 +642,40 @@ export function createProjectOpsRoutes(
         const body = readRecord(request.body);
         const nextStatus = readStatus(body.status);
         return await runProjectOpsRequest(() =>
-          service.transitionProjectRequest(params.id, nextStatus, clock())
+          service.transitionProjectRequest(params.id, nextStatus, clock(), readOptionalRevision(body.expectedRevision))
         );
       },
+    },
+    {
+      method: 'POST', path: '/projectops/project-requests/:id/control',
+      handler: async (request, _context, params) => await runProjectOpsRequest(() => {
+        const body = readRecord(request.body); const action = readString(body.action, 'action');
+        const actions = { start: { to: 'in_progress', from: ['approved'] }, hold: { to: 'on_hold', from: ['in_progress'] }, resume: { to: 'in_progress', from: ['on_hold'] }, cancel: { to: 'cancelled', from: ['new','estimated','approved','in_progress','on_hold'] }, deliver: { to: 'delivered', from: ['in_progress'] }, archive: { to: 'archived', from: ['delivered','cancelled'] } };
+        if (!Object.hasOwn(actions, action)) throw new HttpError(400, 'INVALID_PROJECT_CONTROL', 'Unsupported project action.');
+        const control = actions[action as keyof typeof actions];
+        const revision = readPositiveInteger(body.expectedRevision, 'expectedRevision');
+        return service.getProjectRequest(params.id).then(current => {
+          if (!current) throw new HttpError(404, 'PROJECTOPS_REQUEST_NOT_FOUND', 'Project not found.');
+          if (revision !== (current.revision ?? 1)) throw new HttpError(409, 'PROJECTOPS_PROJECT_CHANGED', 'Project changed. Reload before trying again.');
+          if (!control.from.includes(current.status)) throw new HttpError(400, 'INVALID_PROJECT_CONTROL', 'This action is not available in the current project state.');
+          return service.transitionProjectRequest(params.id, control.to as ProjectRequestStatus, clock(), revision);
+        });
+      }),
     },
     {
       method: 'GET',
       path: '/projectops/dashboard',
       handler: async () => await service.getDashboard(),
     },
-  ]);
+  ];
+  return Object.freeze(routes.map(route => {
+    if (route.method === 'GET' || !route.path.startsWith('/projectops/project-requests/:id') || ['/status','/control'].some(suffix => route.path.endsWith(suffix))) return route;
+    return { ...route, handler: async (request, context, params) => {
+      const project = await requireFound(service.getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND');
+      if (['archived','cancelled'].includes(project.status)) throw new HttpError(409, 'PROJECTOPS_PROJECT_READ_ONLY', 'Cancelled and archived projects are read-only.');
+      return await route.handler(request, context, params);
+    } };
+  }));
 }
 
 async function requireFound<T>(value: Promise<T | undefined>, code: string): Promise<T> {
@@ -723,6 +748,10 @@ function readClientInput(body: unknown, clock: () => string): NewClientInput {
   });
 }
 
+function readOptionalRevision(value: unknown): number | undefined {
+  return value === undefined ? undefined : readPositiveInteger(value, 'expectedRevision');
+}
+
 function readClientRevision(value: unknown): number {
   if (typeof value !== 'number') throw new HttpError(400, 'INVALID_CLIENT_REVISION', 'A valid client revision is required.');
   return value;
@@ -751,6 +780,7 @@ function readEstimateInput(body: unknown, clock: () => string): EstimateProjectR
     amountCents: readPositiveInteger(value.amountCents, 'amountCents'),
     currency: readString(value.currency, 'currency'),
     estimatedAtIso: readOptionalString(value.estimatedAtIso, 'estimatedAtIso') ?? clock(),
+    expectedRevision: readOptionalRevision(value.expectedRevision),
   });
 }
 
@@ -759,6 +789,7 @@ function readApprovalInput(body: unknown, clock: () => string): ApproveProjectRe
   return Object.freeze({
     approvedBy: readString(value.approvedBy, 'approvedBy'),
     approvedAtIso: readOptionalString(value.approvedAtIso, 'approvedAtIso') ?? clock(),
+    expectedRevision: readOptionalRevision(value.expectedRevision),
   });
 }
 
@@ -1145,6 +1176,8 @@ function readStatus(value: unknown): ProjectRequestStatus {
     value === 'estimated' ||
     value === 'approved' ||
     value === 'in_progress' ||
+    value === 'on_hold' ||
+    value === 'cancelled' ||
     value === 'delivered' ||
     value === 'archived'
   ) {

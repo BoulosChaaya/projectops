@@ -38,8 +38,8 @@ unitTest('PROJECTOPS-APP-001: composed app migrates storage and serves API plus 
     assert.equal(created.status, 'new');
 
     const estimated = await postOk<ProjectRequest>(
-      `${app.server.origin}/projectops/project-requests/req-1/status`,
-      { status: 'estimated' }
+      `${app.server.origin}/projectops/project-requests/req-1/estimate`,
+      { amountCents: 10000, currency: 'USD' }
     );
     assert.equal(estimated.status, 'estimated');
 

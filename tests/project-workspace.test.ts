@@ -23,7 +23,8 @@ test('Project edits validate details, clear optional fields, preserve workflow m
   await assert.rejects(() => repo.editProject('r', { ...input, expectedRevision: 2 }, later), /Reload/);
   const cleared = await repo.editProject('r', { title: 'Final', brief: 'Keep metadata', priority: 'medium', expectedRevision: 3 }, later);
   assert.equal(cleared.budgetRange, undefined); assert.equal(cleared.deadlineIso, undefined); assert.equal(cleared.estimateCurrency, 'EUR'); assert.equal(cleared.status, 'estimated');
-  for (const status of ['approved', 'in_progress', 'delivered', 'archived'] as const) await repo.transitionProjectRequest('r', status, later);
+  await repo.approveProjectRequest('r', { approvedBy: 'Operator', approvedAtIso: later });
+  for (const status of ['in_progress', 'delivered', 'archived'] as const) await repo.transitionProjectRequest('r', status, later);
   await assert.rejects(() => repo.editProject('r', { ...input, expectedRevision: 8 }, later), /archived/);
   await assert.rejects(() => repo.editProject('missing', input, later), /not found/);
 });

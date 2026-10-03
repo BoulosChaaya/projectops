@@ -3,7 +3,7 @@
 ## Approved plan
 See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the previous conversation was deleted.
 
-## Verified engineering checkpoint
+## Recovery baseline checkpoint
 - Repository: BoulosChaaya/projectops; branch: main.
 - Product checkpoint: 34707b2a21dd527e8234aaddd003968fb1450b98.
 - Latest completed capability at the recovery checkpoint: risk workflow.
@@ -38,10 +38,10 @@ See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the prev
 Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. The PostgreSQL runtime now protects these routes; contract tests may still inject an unprotected memory harness.
 
 ## Remaining approved work
-Roadmap slices 1-5 are complete. Slices 6-14 remain open. Existing functionality is reused to complete them.
+Roadmap slices 1-6 are complete. Slices 7-14 remain open. Existing functionality is reused to complete them.
 
 ## Next slice
-Slice 6: estimates and project controls. Implement browser estimate/approve/start/hold/resume/cancel/deliver/archive controls through enforced transitions; close generic status metadata bypass and begin concurrency fixes. The runnable application defaults to loopback and is not deployed.
+Slice 7: planning. Implement browser create/edit/reschedule/complete/reopen tasks and milestones, with persistence, validation and atomic child-command state/concurrency checks. The runnable application defaults to loopback and is not deployed.
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.
@@ -93,3 +93,16 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - Database acceptance verifies migration from the prior schema, budget/deadline transport, concurrent edit rejection, stale edits after estimate/approval changes, metadata preservation, clearing fields and restart persistence.
 - Chromium verifies project creation with saved defaults, navigation from client/dashboard, all collection views, safe stored text and links, independent retry, timezone display, detail edits, stale-tab reload, optional-field clearing, archived read-only views and missing-project feedback.
 - Limitations: controls and workflow/concurrency defects are slice 6; collection editing and automatic history remain their later slices. No deployment claim.
+
+## Completed slice 6: estimates and project controls
+- Browser save/revise estimate, approve, start, hold, resume, cancel, deliver and archive controls, with confirmation/dismissal and stale-tab reload feedback.
+- Integer-cent decimal input, saved currency default, signed-in operator approval, and estimate revisions only until approval.
+- Explicit estimate/approval commands record required metadata; generic status writes cannot bypass them. Starting, holding, resuming and delivering require estimate/approval metadata.
+- Parent edits/estimate/approval/lifecycle writes use conditional revision/state checks; competing decisions cannot overwrite each other.
+- Additive migration 0005 supports held/cancelled states. Hold survives restart and blocks delivery/new work logs. Cancelled projects leave the active dashboard, retain client/history views and become read-only; archive retains records.
+- Implementation checkpoint: 3f934cad2361302aa7069596bcfde73772f8b7e8; PR https://github.com/BoulosChaaya/projectops/pull/5.
+- Local pnpm verify: 60/60 PASS.
+- PostgreSQL acceptance: 11/11 PASS; Chromium journeys: 4/4 PASS; zero skips in https://github.com/BoulosChaaya/projectops/actions/runs/37121482284.
+- Database acceptance verifies migration from the prior schema, stale revisions, estimate/approval and cancellation/delivery races, hold across restart, terminal write rejection and record retention. A shared-snapshot barrier ensures both competing commands read the same state before writing, proving the SQL guard itself rejects one decision.
+- Chromium verifies currency defaults and exact decimal conversion, estimate revision, stale-tab approval rejection/reload, confirmation dismissal, estimate-to-archive lifecycle, hold/resume, cancellation, dashboard removal and retained client history.
+- Limitations: atomic child-command guards (including writes racing cancellation) remain in slices 7-10; delivery acceptance/completion gates remain slice 9, currency-separated totals slice 10, and automatic history slice 11. No deployment claim.

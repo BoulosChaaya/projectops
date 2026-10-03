@@ -109,7 +109,8 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   assert.equal(client.status, 'active');
   assert.equal(request.status, 'new');
 
-  const estimated = transitionProjectRequest(request, 'estimated', T1);
+  assert.throws(() => transitionProjectRequest(request, 'estimated', T1), /Use the estimate/);
+  const estimated = estimateProjectRequest(request, { amountCents: 10000, currency: 'USD', estimatedAtIso: T1 });
   assert.equal(estimated.status, 'estimated');
   assert.equal(estimated.updatedAtIso, T1);
 
@@ -446,7 +447,7 @@ unitTest('PROJECTOPS-003: repository composes raw SQL executor calls into a dash
     },
   });
 
-  const transitioned = await repo.transitionProjectRequest('req-1', 'estimated', T1);
+  const transitioned = await repo.estimateProjectRequest('req-1', { amountCents: 10000, currency: 'USD', estimatedAtIso: T1 });
   const dashboard = await repo.getDashboard();
 
   assert.equal(transitioned.status, 'estimated');
@@ -454,7 +455,7 @@ unitTest('PROJECTOPS-003: repository composes raw SQL executor calls into a dash
   assert.equal(dashboard.highPriorityOpen, 1);
   assert.equal(executed.length, 3);
   assert.deepEqual(executed[0].params, ['req-1']);
-  assert.deepEqual(executed[1].params, ['req-1', 'estimated', T1]);
+  assert.deepEqual(executed[1].params, ['req-1', 10000, 'USD', T1, 'estimated', T1, 1, 'new']);
 });
 
 unitTest('PROJECTOPS-004: API route slice creates client, creates request, transitions status, and reads dashboard', async () => {
@@ -492,15 +493,15 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ status: 'estimated' }),
     });
-    assert.equal(transitionRes.status, 200);
-    assert.equal((await transitionRes.json() as ProjectRequest).status, 'estimated');
+    assert.equal(transitionRes.status, 400);
+    assert.equal((await transitionRes.json()).code, 'PROJECTOPS_EXPLICIT_COMMAND_REQUIRED');
 
     const estimateRes = await fetch(`${server.origin}/projectops/project-requests/req-1/estimate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ amountCents: 180000, currency: 'USD', estimatedAtIso: T1 }),
     });
-    assert.equal(estimateRes.status, 400);
+    assert.equal(estimateRes.status, 200);
 
     const request2Res = await fetch(`${server.origin}/projectops/project-requests`, {
       method: 'POST',

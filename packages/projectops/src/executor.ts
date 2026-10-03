@@ -466,7 +466,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_REQUESTS SET TITLE = $2')) {
       const id = String(statement.params[0]); const current = this.projectRequests.get(id);
       const revision = Number(statement.params[7]);
-      if (!current || current.status === 'archived' || (current.revision ?? 1) !== revision) return Object.freeze([]);
+      if (!current || ['archived', 'cancelled'].includes(current.status) || (current.revision ?? 1) !== revision) return Object.freeze([]);
       const next = Object.freeze({ ...current, title: String(statement.params[1]), brief: String(statement.params[2]),
         budgetRange: asOptionalString(statement.params[3]), deadlineIso: asOptionalString(statement.params[4]),
         priority: String(statement.params[5]), updatedAtIso: String(statement.params[6]), revision: revision + 1 });
@@ -1029,7 +1029,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private estimateProjectRequest(params: readonly unknown[]): ProjectOpsRequestRow | undefined {
     const id = asString(params[0], 'projectRequest.id');
     const current = this.projectRequests.get(id);
-    if (!current) return undefined;
+    if (!current || (current.revision ?? 1) !== Number(params[6]) || current.status !== params[7]) return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1047,7 +1047,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private approveProjectRequest(params: readonly unknown[]): ProjectOpsRequestRow | undefined {
     const id = asString(params[0], 'projectRequest.id');
     const current = this.projectRequests.get(id);
-    if (!current) return undefined;
+    if (!current || current.status !== 'estimated' || (current.revision ?? 1) !== Number(params[5])) return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1064,7 +1064,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private updateProjectRequestStatus(params: readonly unknown[]): ProjectOpsRequestRow | undefined {
     const id = asString(params[0], 'projectRequest.id');
     const current = this.projectRequests.get(id);
-    if (!current) return undefined;
+    if (!current || (current.revision ?? 1) !== Number(params[3]) || current.status !== params[4]) return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1427,7 +1427,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private selectDashboardRows(): readonly ProjectOpsDashboardStorageRow[] {
     return Object.freeze(
       [...this.projectRequests.values()]
-        .filter((request) => request.status !== 'archived')
+        .filter((request) => !['archived', 'cancelled'].includes(request.status))
         .sort((a, b) => b.updatedAtIso.localeCompare(a.updatedAtIso) || b.createdAtIso.localeCompare(a.createdAtIso))
         .map((request) => {
           const client = this.clients.get(request.clientId);
