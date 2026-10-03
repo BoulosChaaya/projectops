@@ -6,6 +6,8 @@ export type ProjectInvoiceStatus = 'issued' | 'paid';
 export type ProjectChangeRequestStatus = 'proposed' | 'approved' | 'rejected';
 export type ProjectIssueStatus = 'open' | 'resolved';
 export type ProjectIssueSeverity = 'low' | 'medium' | 'high';
+export type ProjectRiskStatus = 'open' | 'mitigated';
+export type ProjectRiskLevel = 'low' | 'medium' | 'high';
 export type ProjectFeedbackStatus = 'open' | 'addressed';
 export type ProjectFeedbackSentiment = 'positive' | 'neutral' | 'negative';
 export type ProjectDocumentStatus = 'active' | 'archived';
@@ -128,6 +130,22 @@ export interface ProjectIssue {
   readonly openedAtIso: string;
   readonly resolvedAtIso?: string;
   readonly resolutionNote?: string;
+  readonly updatedAtIso: string;
+}
+
+export interface ProjectRisk {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly probability: ProjectRiskLevel;
+  readonly impact: ProjectRiskLevel;
+  readonly mitigationPlan?: string;
+  readonly owner?: string;
+  readonly status: ProjectRiskStatus;
+  readonly identifiedAtIso: string;
+  readonly mitigatedAtIso?: string;
+  readonly mitigationNote?: string;
   readonly updatedAtIso: string;
 }
 
@@ -319,6 +337,23 @@ export interface ResolveProjectIssueInput {
   readonly resolutionNote?: string;
 }
 
+export interface NewProjectRiskInput {
+  readonly id: string;
+  readonly projectRequestId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly probability?: ProjectRiskLevel;
+  readonly impact?: ProjectRiskLevel;
+  readonly mitigationPlan?: string;
+  readonly owner?: string;
+  readonly identifiedAtIso: string;
+}
+
+export interface MitigateProjectRiskInput {
+  readonly mitigatedAtIso: string;
+  readonly mitigationNote?: string;
+}
+
 export interface NewProjectFeedbackInput {
   readonly id: string;
   readonly projectRequestId: string;
@@ -490,6 +525,17 @@ export const projectIssueSeverities = Object.freeze([
   'medium',
   'high',
 ] satisfies readonly ProjectIssueSeverity[]);
+
+export const projectRiskStatuses = Object.freeze([
+  'open',
+  'mitigated',
+] satisfies readonly ProjectRiskStatus[]);
+
+export const projectRiskLevels = Object.freeze([
+  'low',
+  'medium',
+  'high',
+] satisfies readonly ProjectRiskLevel[]);
 
 export const projectFeedbackStatuses = Object.freeze([
   'open',
@@ -1009,6 +1055,82 @@ export function resolveProjectIssue(
     resolvedAtIso,
     resolutionNote: optionalText('projectIssue.resolutionNote', input.resolutionNote, 500),
     updatedAtIso: resolvedAtIso,
+  });
+}
+
+export function createProjectRisk(
+  request: ProjectRequest,
+  input: NewProjectRiskInput
+): ProjectRisk {
+  if (request.status === 'new' || request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_RISKS',
+      'Project request must be estimated, approved, in progress, or delivered before adding risks.'
+    );
+  }
+
+  const id = requireIdentifier('projectRisk.id', input.id);
+  const projectRequestId = requireIdentifier('projectRisk.projectRequestId', input.projectRequestId);
+  if (projectRequestId !== request.id) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_RISK_REQUEST_MISMATCH',
+      'Project risk must belong to the selected project request.'
+    );
+  }
+
+  const probability = input.probability ?? 'medium';
+  if (!projectRiskLevels.includes(probability)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_RISK_PROBABILITY',
+      `Unsupported project risk probability: ${probability}`
+    );
+  }
+
+  const impact = input.impact ?? 'medium';
+  if (!projectRiskLevels.includes(impact)) {
+    throw new ProjectOpsValidationError(
+      'INVALID_PROJECTOPS_RISK_IMPACT',
+      `Unsupported project risk impact: ${impact}`
+    );
+  }
+
+  const identifiedAtIso = assertIsoTimestamp('projectRisk.identifiedAtIso', input.identifiedAtIso);
+  return Object.freeze({
+    id,
+    projectRequestId,
+    title: requireText('projectRisk.title', input.title, 160),
+    description: requireText('projectRisk.description', input.description, 2000),
+    probability,
+    impact,
+    mitigationPlan: optionalText('projectRisk.mitigationPlan', input.mitigationPlan, 1000),
+    owner: optionalText('projectRisk.owner', input.owner, 120),
+    status: 'open',
+    identifiedAtIso,
+    updatedAtIso: identifiedAtIso,
+  });
+}
+
+export function mitigateProjectRisk(
+  risk: ProjectRisk,
+  input: MitigateProjectRiskInput
+): ProjectRisk {
+  if (risk.status === 'mitigated') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_RISK_ALREADY_MITIGATED',
+      'Project risk is already mitigated.'
+    );
+  }
+
+  const mitigatedAtIso = assertIsoTimestamp('projectRisk.mitigatedAtIso', input.mitigatedAtIso);
+  return Object.freeze({
+    ...risk,
+    status: 'mitigated',
+    mitigatedAtIso,
+    mitigationNote: optionalText('projectRisk.mitigationNote', input.mitigationNote, 500),
+    updatedAtIso: mitigatedAtIso,
   });
 }
 
