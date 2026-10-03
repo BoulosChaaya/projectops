@@ -11,6 +11,7 @@ import type {
   ArchiveProjectNoteInput,
   ApproveProjectRequestInput,
   CompleteProjectTaskInput,
+  DecideProjectExpenseInput,
   DecideProjectChangeRequestInput,
   EstimateProjectRequestInput,
   NewClientInput,
@@ -18,6 +19,7 @@ import type {
   NewProjectChangeRequestInput,
   NewProjectDeliverableInput,
   NewProjectDocumentInput,
+  NewProjectExpenseInput,
   NewProjectFeedbackInput,
   NewProjectInvoiceInput,
   NewProjectIssueInput,
@@ -31,6 +33,7 @@ import type {
   ProjectChangeRequest,
   ProjectFeedback,
   ProjectDocument,
+  ProjectExpense,
   ProjectInvoice,
   ProjectIssue,
   ProjectOpsClient,
@@ -151,6 +154,21 @@ export interface ProjectOpsApiService {
     input: NewProjectWorkLogInput
   ): Promise<ProjectWorkLog>;
   listProjectWorkLogs(projectRequestId: string): Promise<readonly ProjectWorkLog[]>;
+  createProjectExpense(
+    projectRequestId: string,
+    input: NewProjectExpenseInput
+  ): Promise<ProjectExpense>;
+  listProjectExpenses(projectRequestId: string): Promise<readonly ProjectExpense[]>;
+  approveProjectExpense(
+    projectRequestId: string,
+    expenseId: string,
+    input: DecideProjectExpenseInput
+  ): Promise<ProjectExpense>;
+  rejectProjectExpense(
+    projectRequestId: string,
+    expenseId: string,
+    input: DecideProjectExpenseInput
+  ): Promise<ProjectExpense>;
   createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -468,6 +486,44 @@ export function createProjectOpsRoutes(
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
           service.createProjectWorkLog(params.id, readWorkLogInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/expenses',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectExpenses(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/expenses',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectExpense(params.id, readExpenseInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/expenses/:expenseId/approve',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.approveProjectExpense(
+            params.id,
+            params.expenseId,
+            readExpenseDecisionInput(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/expenses/:expenseId/reject',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.rejectProjectExpense(
+            params.id,
+            params.expenseId,
+            readExpenseDecisionInput(request.body, clock)
+          )
         ),
     },
     {
@@ -877,6 +933,38 @@ function readWorkLogInput(
   });
 }
 
+function readExpenseInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectExpenseInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    category: readOptionalExpenseCategory(value.category),
+    description: readString(value.description, 'description'),
+    vendor: readOptionalString(value.vendor, 'vendor'),
+    amountCents: readPositiveInteger(value.amountCents, 'amountCents'),
+    currency: readString(value.currency, 'currency'),
+    reimbursable: readOptionalBoolean(value.reimbursable, 'reimbursable'),
+    receiptUrl: readOptionalString(value.receiptUrl, 'receiptUrl'),
+    incurredAtIso: readOptionalString(value.incurredAtIso, 'incurredAtIso') ?? clock(),
+  });
+}
+
+function readExpenseDecisionInput(
+  body: unknown,
+  clock: () => string
+): DecideProjectExpenseInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    decidedBy: readString(value.decidedBy, 'decidedBy'),
+    decidedAtIso: readOptionalString(value.decidedAtIso, 'decidedAtIso') ?? clock(),
+    decisionNote: readOptionalString(value.decisionNote, 'decisionNote'),
+  });
+}
+
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
@@ -991,6 +1079,20 @@ function readOptionalTaskPriority(value: unknown): NewProjectTaskInput['priority
   if (value === undefined || value === null) return undefined;
   if (value === 'low' || value === 'medium' || value === 'high') return value;
   throw new HttpError(400, 'INVALID_PROJECTOPS_TASK_PRIORITY', 'Unsupported project task priority.');
+}
+
+function readOptionalExpenseCategory(value: unknown): NewProjectExpenseInput['category'] {
+  if (value === undefined || value === null) return undefined;
+  if (
+    value === 'software' ||
+    value === 'asset' ||
+    value === 'service' ||
+    value === 'travel' ||
+    value === 'other'
+  ) {
+    return value;
+  }
+  throw new HttpError(400, 'INVALID_PROJECTOPS_EXPENSE_CATEGORY', 'Unsupported project expense category.');
 }
 
 function readActivityEventType(value: unknown): NewProjectActivityInput['eventType'] {
