@@ -25,7 +25,7 @@ test('Planning migration upgrades existing children and API workflows persist ac
       await migrationClient.query("INSERT INTO projectops_project_requests(id,client_id,title,brief,priority,status,created_at,updated_at,revision) VALUES('legacy-r','legacy-c','Legacy','Brief','medium','approved',$1,$1,1)", [T0]);
       await migrationClient.query("INSERT INTO projectops_project_milestones(id,project_request_id,title,status,created_at,updated_at) VALUES('legacy-m','legacy-r','Legacy milestone','open',$1,$1)", [T0]);
       await migrationClient.query("INSERT INTO projectops_project_tasks(id,project_request_id,title,priority,status,created_at,updated_at) VALUES('legacy-t','legacy-r','Legacy task','medium','open',$1,$1)", [T0]);
-      assert.deepEqual(await migrateProjectOpsPostgres(migrationClient, migrations), ['0006']);
+      assert.deepEqual(await migrateProjectOpsPostgres(migrationClient, migrations), ['0006', '0007']);
       assert.equal((await migrationClient.query("SELECT revision FROM projectops_project_milestones WHERE id='legacy-m'")).rows[0].revision, 1);
       assert.equal((await migrationClient.query("SELECT revision FROM projectops_project_tasks WHERE id='legacy-t'")).rows[0].revision, 1);
     } finally { migrationClient.release(); }
@@ -86,7 +86,7 @@ test('Planning migration upgrades existing children and API workflows persist ac
       const savedTask = (await json(await read('project-requests/r/tasks'))).find((value: { id: string }) => value.id === 't');
       assert.equal(savedMilestone.title, 'Milestone cleared'); assert.equal(savedMilestone.status, 'completed'); assert.equal(savedMilestone.revision, 6);
       assert.equal(savedTask.title, 'Allowed on hold'); assert.equal(savedTask.status, 'open'); assert.equal(savedTask.revision, 8);
-      assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 6);
+      assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 7);
     } finally { await app.close(); }
   });
 });

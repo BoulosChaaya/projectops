@@ -59,14 +59,18 @@ export function projectOpsPoolConnection(pool: {
 
 export class ProjectOpsConnectionSqlExecutor implements ProjectOpsSqlExecutor {
   private readonly connection: ProjectOpsQueryConnection;
+  private readonly inTransaction: boolean;
 
-  constructor(connection: ProjectOpsQueryConnection) {
+  constructor(connection: ProjectOpsQueryConnection, inTransaction = false) {
     this.connection = connection;
+    this.inTransaction = inTransaction;
   }
 
   public async transaction<T>(run: (sql: ProjectOpsSqlExecutor) => Promise<T>): Promise<T> {
+    // Composition joins the leased connection; an error propagates to its outer rollback.
+    if (this.inTransaction) return await run(this);
     if (!this.connection.transaction) throw new Error('ProjectOps connection must support transaction affinity.');
-    return await this.connection.transaction(connection => run(new ProjectOpsConnectionSqlExecutor(connection)));
+    return await this.connection.transaction(connection => run(new ProjectOpsConnectionSqlExecutor(connection, true)));
   }
 
   public async query<T>(statement: SqlStatement): Promise<readonly T[]> {
@@ -106,7 +110,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return await this.serialized(async () => {
       const maps = Object.values(this).filter(value => value instanceof Map) as Map<string, unknown>[];
       const snapshots = maps.map(map => new Map(map));
-      try { return await run({ query: <TRow>(statement: SqlStatement) => this.execute<TRow>(statement) }); }
+      const scoped: ProjectOpsSqlExecutor = {
+        query: <TRow>(statement: SqlStatement) => this.execute<TRow>(statement),
+        transaction: async <TResult>(nested: (sql: ProjectOpsSqlExecutor) => Promise<TResult>) => await nested(scoped),
+      };
+      try { return await run(scoped); }
       catch (error) {
         maps.forEach((map, index) => { map.clear(); for (const [key, value] of snapshots[index]!) map.set(key, value); });
         throw error;
@@ -1092,7 +1100,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     const key = activityKey(projectRequestId, row.id);
     if (this.projectActivities.has(key)) {
-      throw new Error(`Duplicate ProjectOps project activity id: ${projectRequestId}/${row.id}`);
+      throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_ACTIVITY_ALREADY_EXISTS', `Duplicate ProjectOps project activity id: ${projectRequestId}/${row.id}`);
     }
     this.projectActivities.set(key, row);
     return row;

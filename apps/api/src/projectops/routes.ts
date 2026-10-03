@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import type { RequestContext } from '../http/request-context/context.ts';
+import type { ProjectHistoryContext } from '../../../../packages/projectops/src/history.ts';
 import type { RouteDefinition } from '../http/path-matching.ts';
 import type { KernelRouteHandler } from '../bootstrap/http-listener.ts';
 import { HttpError } from '../http/errors/classify.ts';
@@ -59,6 +62,7 @@ import type {
 } from '../../../../packages/projectops/src/index.ts';
 
 export interface ProjectOpsApiService {
+  withHistory?(context: ProjectHistoryContext): ProjectOpsApiService;
   createClient(input: NewClientInput): Promise<ProjectOpsClient>;
   createProjectRequest(input: NewProjectRequestInput): Promise<ProjectRequest>;
   listClients(filter?: ClientFilter): Promise<readonly ProjectOpsClient[]>;
@@ -224,59 +228,65 @@ export function createProjectOpsRoutes(
   service: ProjectOpsApiService,
   clock: () => string = () => new Date().toISOString()
 ): readonly RouteDefinition<KernelRouteHandler>[] {
+  const requestService = (context: RequestContext): ProjectOpsApiService => {
+    const operator = context.get<{ login: string }>('projectops.operator');
+    if (!operator) return service; // Unprotected injected contract harness; never the durable runtime.
+    if (!service.withHistory) throw new Error('Protected ProjectOps workflows require transactional history support.');
+    return service.withHistory({ actor: operator.login, clock });
+  };
   const routes: RouteDefinition<KernelRouteHandler>[] = [
     {
       method: 'POST',
       path: '/projectops/clients',
-      handler: async (request) =>
-        await runProjectOpsRequest(() => service.createClient(readClientInput(request.body, clock))),
+      handler: async (request, _context) =>
+        await runProjectOpsRequest(() => requestService(_context).createClient(readClientInput(request.body, clock))),
     },
     {
       method: 'GET',
       path: '/projectops/clients',
-      handler: async request => await runProjectOpsRequest(() => service.listClients({ q: request.query.q, status: request.query.status as ClientFilter['status'] })),
+      handler: async (request, _context) => await runProjectOpsRequest(() => requestService(_context).listClients({ q: request.query.q, status: request.query.status as ClientFilter['status'] })),
     },
     {
       method: 'GET',
       path: '/projectops/clients/:id',
       handler: async (_request, _context, params) =>
-        await requireFound(service.getClient(params.id), 'PROJECTOPS_CLIENT_NOT_FOUND'),
+        await requireFound(requestService(_context).getClient(params.id), 'PROJECTOPS_CLIENT_NOT_FOUND'),
     },
     {
       method: 'PUT', path: '/projectops/clients/:id',
       handler: async (request, _context, params) => await runProjectOpsRequest(() => {
         const body = readRecord(request.body);
-        return service.editClient(params.id, { name: readString(body.name, 'name'),
+        return requestService(_context).editClient(params.id, { name: readString(body.name, 'name'),
           contactName: readOptionalString(body.contactName, 'contactName'), email: readOptionalString(body.email, 'email'),
           expectedRevision: readClientRevision(body.expectedRevision) });
       }),
     },
     {
       method: 'POST', path: '/projectops/clients/:id/archive',
-      handler: async (request, _context, params) => await runProjectOpsRequest(() => service.archiveClient(params.id, readClientRevision(readRecord(request.body).expectedRevision))),
+      handler: async (request, _context, params) => await runProjectOpsRequest(() => requestService(_context).archiveClient(params.id, readClientRevision(readRecord(request.body).expectedRevision))),
     },
     {
       method: 'GET', path: '/projectops/clients/:id/projects',
-      handler: async (_request, _context, params) => await runProjectOpsRequest(() => service.listClientProjects(params.id)),
+      handler: async (_request, _context, params) => await runProjectOpsRequest(() => requestService(_context).listClientProjects(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests',
-      handler: async (request) =>
+      handler: async (request, _context) =>
         await runProjectOpsRequest(() =>
-          service.createProjectRequest(readProjectRequestInput(request.body, clock))
+          requestService(_context).createProjectRequest(readProjectRequestInput(request.body, clock))
         ),
     },
     {
       method: 'GET',
       path: '/projectops/project-requests',
-      handler: async () => await service.listProjectRequests(),
+      handler: async (_request, _context) => await requestService(_context).listProjectRequests(),
     },
     {
       method: 'PUT', path: '/projectops/project-requests/:id',
       handler: async (request, _context, params) => await runProjectOpsRequest(() => {
         const value = readRecord(request.body);
-        return service.editProject(params.id, { title: readString(value.title, 'title'), brief: readString(value.brief, 'brief'),
+        return requestService(_context).editProject(params.id, { title: readString(value.title, 'title'), brief: readString(value.brief, 'brief'),
           budgetRange: readOptionalString(value.budgetRange, 'budgetRange'), deadlineIso: readOptionalString(value.deadlineIso, 'deadlineIso'),
           priority: readOptionalPriority(value.priority) ?? missingProjectPriority(), expectedRevision: readPositiveInteger(value.expectedRevision, 'expectedRevision') }, clock());
       }),
@@ -285,14 +295,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/milestones',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectMilestones(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectMilestones(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/milestones',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectMilestone(params.id, readMilestoneInput(params.id, request.body, clock))
+          requestService(_context).createProjectMilestone(params.id, readMilestoneInput(params.id, request.body, clock))
         ),
     },
     {
@@ -300,7 +310,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/milestones/:milestoneId',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.editProjectMilestone(
+          requestService(_context).editProjectMilestone(
             params.id,
             params.milestoneId,
             readEditMilestoneInput(request.body),
@@ -313,7 +323,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/milestones/:milestoneId/complete',
       handler: async (request, _context, params) => await runProjectOpsRequest(() => {
         const input = readCompleteMilestoneInput(request.body, clock);
-        return service.completeProjectMilestone(
+        return requestService(_context).completeProjectMilestone(
           params.id,
           params.milestoneId,
           input.expectedRevision === undefined ? input.completedAtIso : input
@@ -325,7 +335,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/milestones/:milestoneId/reopen',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.reopenProjectMilestone(
+          requestService(_context).reopenProjectMilestone(
             params.id,
             params.milestoneId,
             readReopenMilestoneInput(request.body, clock)
@@ -336,14 +346,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/deliverables',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectDeliverables(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectDeliverables(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/deliverables',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectDeliverable(params.id, readDeliverableInput(params.id, request.body, clock, Boolean(_context.get('projectops.operator'))))
+          requestService(_context).createProjectDeliverable(params.id, readDeliverableInput(params.id, request.body, clock, Boolean(_context.get('projectops.operator'))))
         ),
     },
     {
@@ -351,7 +361,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/deliverables/:deliverableId/accept',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.acceptProjectDeliverable(
+          requestService(_context).acceptProjectDeliverable(
             params.id,
             params.deliverableId,
             readAcceptedAtIso(request.body, clock, Boolean(_context.get('projectops.operator')))
@@ -362,14 +372,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/invoices',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectInvoices(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectInvoices(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/invoices',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectInvoice(params.id, readInvoiceInput(params.id, request.body, clock, !!_context.get('projectops.operator')))
+          requestService(_context).createProjectInvoice(params.id, readInvoiceInput(params.id, request.body, clock, !!_context.get('projectops.operator')))
         ),
     },
     {
@@ -377,7 +387,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/invoices/:invoiceId/pay',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.markProjectInvoicePaid(
+          requestService(_context).markProjectInvoicePaid(
             params.id,
             params.invoiceId,
             readPaidAtIso(request.body, clock, !!_context.get('projectops.operator'))
@@ -388,14 +398,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/change-requests',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectChangeRequests(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectChangeRequests(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/change-requests',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectChangeRequest(
+          requestService(_context).createProjectChangeRequest(
             params.id,
             readChangeRequestInput(params.id, request.body, clock)
           )
@@ -406,7 +416,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/change-requests/:changeRequestId/approve',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.approveProjectChangeRequest(
+          requestService(_context).approveProjectChangeRequest(
             params.id,
             params.changeRequestId,
             readChangeRequestDecisionInput(request.body, clock)
@@ -418,7 +428,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/change-requests/:changeRequestId/reject',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.rejectProjectChangeRequest(
+          requestService(_context).rejectProjectChangeRequest(
             params.id,
             params.changeRequestId,
             readChangeRequestDecisionInput(request.body, clock)
@@ -429,14 +439,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/issues',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectIssues(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectIssues(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/issues',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectIssue(params.id, readIssueInput(params.id, request.body, clock))
+          requestService(_context).createProjectIssue(params.id, readIssueInput(params.id, request.body, clock))
         ),
     },
     {
@@ -444,7 +454,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/issues/:issueId/resolve',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.resolveProjectIssue(
+          requestService(_context).resolveProjectIssue(
             params.id,
             params.issueId,
             readResolveIssueInput(request.body, clock)
@@ -455,14 +465,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/risks',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectRisks(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectRisks(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/risks',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectRisk(params.id, readRiskInput(params.id, request.body, clock))
+          requestService(_context).createProjectRisk(params.id, readRiskInput(params.id, request.body, clock))
         ),
     },
     {
@@ -470,7 +480,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/risks/:riskId/mitigate',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.mitigateProjectRisk(
+          requestService(_context).mitigateProjectRisk(
             params.id,
             params.riskId,
             readMitigateRiskInput(request.body, clock)
@@ -481,14 +491,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/feedback',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectFeedback(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectFeedback(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/feedback',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectFeedback(params.id, readFeedbackInput(params.id, request.body, clock, Boolean(_context.get('projectops.operator'))))
+          requestService(_context).createProjectFeedback(params.id, readFeedbackInput(params.id, request.body, clock, Boolean(_context.get('projectops.operator'))))
         ),
     },
     {
@@ -496,7 +506,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/feedback/:feedbackId/address',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.addressProjectFeedback(
+          requestService(_context).addressProjectFeedback(
             params.id,
             params.feedbackId,
             readAddressFeedbackInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
@@ -507,14 +517,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/documents',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectDocuments(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectDocuments(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/documents',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectDocument(params.id, readDocumentInput(params.id, request.body, clock))
+          requestService(_context).createProjectDocument(params.id, readDocumentInput(params.id, request.body, clock))
         ),
     },
     {
@@ -522,7 +532,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/documents/:documentId/archive',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.archiveProjectDocument(
+          requestService(_context).archiveProjectDocument(
             params.id,
             params.documentId,
             readArchiveDocumentInput(request.body, clock)
@@ -533,14 +543,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/notes',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectNotes(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectNotes(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/notes',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectNote(params.id, readNoteInput(params.id, request.body, clock))
+          requestService(_context).createProjectNote(params.id, readNoteInput(params.id, request.body, clock))
         ),
     },
     {
@@ -548,7 +558,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/notes/:noteId/archive',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.archiveProjectNote(
+          requestService(_context).archiveProjectNote(
             params.id,
             params.noteId,
             readArchiveNoteInput(request.body, clock)
@@ -559,14 +569,14 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/tasks',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectTasks(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectTasks(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/tasks',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectTask(params.id, readTaskInput(params.id, request.body, clock))
+          requestService(_context).createProjectTask(params.id, readTaskInput(params.id, request.body, clock))
         ),
     },
     {
@@ -574,7 +584,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/tasks/:taskId',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.editProjectTask(params.id, params.taskId, readEditTaskInput(request.body), clock())
+          requestService(_context).editProjectTask(params.id, params.taskId, readEditTaskInput(request.body), clock())
         ),
     },
     {
@@ -582,7 +592,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/tasks/:taskId/complete',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.completeProjectTask(
+          requestService(_context).completeProjectTask(
             params.id,
             params.taskId,
             readCompleteTaskInput(request.body, clock)
@@ -594,35 +604,35 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/tasks/:taskId/reopen',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.reopenProjectTask(params.id, params.taskId, readReopenTaskInput(request.body, clock))
+          requestService(_context).reopenProjectTask(params.id, params.taskId, readReopenTaskInput(request.body, clock))
         ),
     },
     {
       method: 'GET',
       path: '/projectops/project-requests/:id/work-logs',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectWorkLogs(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectWorkLogs(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/work-logs',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectWorkLog(params.id, readWorkLogInput(params.id, request.body, clock))
+          requestService(_context).createProjectWorkLog(params.id, readWorkLogInput(params.id, request.body, clock))
         ),
     },
     {
       method: 'GET',
       path: '/projectops/project-requests/:id/expenses',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectExpenses(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectExpenses(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/expenses',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectExpense(params.id, readExpenseInput(params.id, request.body, clock))
+          requestService(_context).createProjectExpense(params.id, readExpenseInput(params.id, request.body, clock))
         ),
     },
     {
@@ -630,7 +640,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/expenses/:expenseId/approve',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.approveProjectExpense(
+          requestService(_context).approveProjectExpense(
             params.id,
             params.expenseId,
             readExpenseDecisionInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
@@ -642,7 +652,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/expenses/:expenseId/reject',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.rejectProjectExpense(
+          requestService(_context).rejectProjectExpense(
             params.id,
             params.expenseId,
             readExpenseDecisionInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
@@ -653,28 +663,28 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests/:id/activities',
       handler: async (_request, _context, params) =>
-        await runProjectOpsRequest(() => service.listProjectActivities(params.id)),
+        await runProjectOpsRequest(() => requestService(_context).listProjectActivities(params.id)),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/activities',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectActivity(params.id, readActivityInput(params.id, request.body, clock))
+          requestService(_context).createProjectActivity(params.id, readActivityInput(params.id, request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login))
         ),
     },
     {
       method: 'GET',
       path: '/projectops/project-requests/:id',
       handler: async (_request, _context, params) =>
-        await requireFound(service.getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND'),
+        await requireFound(requestService(_context).getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND'),
     },
     {
       method: 'POST',
       path: '/projectops/project-requests/:id/estimate',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.estimateProjectRequest(params.id, readEstimateInput(request.body, clock))
+          requestService(_context).estimateProjectRequest(params.id, readEstimateInput(request.body, clock))
         ),
     },
     {
@@ -682,7 +692,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/approve',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.approveProjectRequest(params.id, readApprovalInput(request.body, clock))
+          requestService(_context).approveProjectRequest(params.id, readApprovalInput(request.body, clock))
         ),
     },
     {
@@ -692,7 +702,7 @@ export function createProjectOpsRoutes(
         const body = readRecord(request.body);
         const nextStatus = readStatus(body.status);
         return await runProjectOpsRequest(() =>
-          service.transitionProjectRequest(params.id, nextStatus, clock(), readOptionalRevision(body.expectedRevision))
+          requestService(_context).transitionProjectRequest(params.id, nextStatus, clock(), readOptionalRevision(body.expectedRevision))
         );
       },
     },
@@ -704,23 +714,23 @@ export function createProjectOpsRoutes(
         if (!Object.hasOwn(actions, action)) throw new HttpError(400, 'INVALID_PROJECT_CONTROL', 'Unsupported project action.');
         const control = actions[action as keyof typeof actions];
         const revision = readPositiveInteger(body.expectedRevision, 'expectedRevision');
-        return service.getProjectRequest(params.id).then(current => {
+        return requestService(_context).getProjectRequest(params.id).then(current => {
           if (!current) throw new HttpError(404, 'PROJECTOPS_REQUEST_NOT_FOUND', 'Project not found.');
           if (revision !== (current.revision ?? 1)) throw new HttpError(409, 'PROJECTOPS_PROJECT_CHANGED', 'Project changed. Reload before trying again.');
           if (!control.from.includes(current.status)) throw new HttpError(400, 'INVALID_PROJECT_CONTROL', 'This action is not available in the current project state.');
-          return service.transitionProjectRequest(params.id, control.to as ProjectRequestStatus, clock(), revision);
+          return requestService(_context).transitionProjectRequest(params.id, control.to as ProjectRequestStatus, clock(), revision);
         });
       }),
     },
     {
       method: 'GET',
       path: '/projectops/dashboard',
-      handler: async () => await service.getDashboard(),
+      handler: async (_request, _context) => await requestService(_context).getDashboard(),
     },
   ];
   return Object.freeze(routes.map(route => {
     // Guarded resource commands classify missing children before conflicts and enforce terminal parents atomically.
-    if (/\/:id\/(deliverables|feedback|invoices|expenses)(\/|$)/.test(route.path)) return route;
+    if (/\/:id\/(deliverables|feedback|invoices|expenses|activities)(\/|$)/.test(route.path)) return route;
     if (route.method === 'GET' || !route.path.startsWith('/projectops/project-requests/:id') || ['/status','/control'].some(suffix => route.path.endsWith(suffix))) return route;
     return { ...route, handler: async (request, context, params) => {
       const project = await requireFound(service.getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND');
@@ -1210,9 +1220,16 @@ function readExpenseDecisionInput(
 function readActivityInput(
   projectRequestId: string,
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  operator?: string
 ): NewProjectActivityInput {
   const value = readRecord(body);
+  if (operator) {
+    if (Object.keys(value).some(key => key !== 'summary')) throw new HttpError(400, 'INVALID_PROJECTOPS_ANNOTATION', 'Operator annotations accept only summary; identity, event type and audit timestamps are server-owned.');
+    return { id: randomUUID(), projectRequestId, eventType: 'operator_annotation',
+      summary: readString(value.summary, 'summary'), actor: operator, happenedAtIso: clock() };
+  }
+
   return Object.freeze({
     id: readString(value.id, 'id'),
     projectRequestId,
