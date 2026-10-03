@@ -14,6 +14,7 @@ import type {
   DecideProjectExpenseInput,
   DecideProjectChangeRequestInput,
   EstimateProjectRequestInput,
+  MitigateProjectRiskInput,
   NewClientInput,
   NewProjectActivityInput,
   NewProjectChangeRequestInput,
@@ -26,6 +27,7 @@ import type {
   NewProjectMilestoneInput,
   NewProjectNoteInput,
   NewProjectRequestInput,
+  NewProjectRiskInput,
   NewProjectTaskInput,
   NewProjectWorkLogInput,
   ProjectDeliverable,
@@ -42,6 +44,7 @@ import type {
   ProjectNote,
   ProjectRequest,
   ProjectRequestStatus,
+  ProjectRisk,
   ProjectTask,
   ProjectWorkLog,
   ResolveProjectIssueInput,
@@ -109,6 +112,16 @@ export interface ProjectOpsApiService {
     issueId: string,
     input: ResolveProjectIssueInput
   ): Promise<ProjectIssue>;
+  createProjectRisk(
+    projectRequestId: string,
+    input: NewProjectRiskInput
+  ): Promise<ProjectRisk>;
+  listProjectRisks(projectRequestId: string): Promise<readonly ProjectRisk[]>;
+  mitigateProjectRisk(
+    projectRequestId: string,
+    riskId: string,
+    input: MitigateProjectRiskInput
+  ): Promise<ProjectRisk>;
   createProjectFeedback(
     projectRequestId: string,
     input: NewProjectFeedbackInput
@@ -367,6 +380,32 @@ export function createProjectOpsRoutes(
             params.id,
             params.issueId,
             readResolveIssueInput(request.body, clock)
+          )
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/projectops/project-requests/:id/risks',
+      handler: async (_request, _context, params) =>
+        await runProjectOpsRequest(() => service.listProjectRisks(params.id)),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/risks',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.createProjectRisk(params.id, readRiskInput(params.id, request.body, clock))
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/risks/:riskId/mitigate',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.mitigateProjectRisk(
+            params.id,
+            params.riskId,
+            readMitigateRiskInput(request.body, clock)
           )
         ),
     },
@@ -801,6 +840,36 @@ function readResolveIssueInput(body: unknown, clock: () => string): ResolveProje
   });
 }
 
+function readRiskInput(
+  projectRequestId: string,
+  body: unknown,
+  clock: () => string
+): NewProjectRiskInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    id: readString(value.id, 'id'),
+    projectRequestId,
+    title: readString(value.title, 'title'),
+    description: readString(value.description, 'description'),
+    probability: readOptionalRiskLevel(value.probability, 'probability'),
+    impact: readOptionalRiskLevel(value.impact, 'impact'),
+    mitigationPlan: readOptionalString(value.mitigationPlan, 'mitigationPlan'),
+    owner: readOptionalString(value.owner, 'owner'),
+    identifiedAtIso: readOptionalString(value.identifiedAtIso, 'identifiedAtIso') ?? clock(),
+  });
+}
+
+function readMitigateRiskInput(
+  body: unknown,
+  clock: () => string
+): MitigateProjectRiskInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    mitigatedAtIso: readOptionalString(value.mitigatedAtIso, 'mitigatedAtIso') ?? clock(),
+    mitigationNote: readOptionalString(value.mitigationNote, 'mitigationNote'),
+  });
+}
+
 function readFeedbackInput(
   projectRequestId: string,
   body: unknown,
@@ -1047,6 +1116,15 @@ function readOptionalIssueSeverity(value: unknown): NewProjectIssueInput['severi
   if (value === undefined || value === null) return undefined;
   if (value === 'low' || value === 'medium' || value === 'high') return value;
   throw new HttpError(400, 'INVALID_PROJECTOPS_ISSUE_SEVERITY', 'Unsupported project issue severity.');
+}
+
+function readOptionalRiskLevel(
+  value: unknown,
+  field: string
+): NewProjectRiskInput['probability'] {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  throw new HttpError(400, 'INVALID_PROJECTOPS_RISK_LEVEL', `Unsupported project risk ${field}.`);
 }
 
 function readOptionalFeedbackSentiment(value: unknown): NewProjectFeedbackInput['sentiment'] {
