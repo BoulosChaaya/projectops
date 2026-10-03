@@ -58,6 +58,11 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
       billableWorkMinutes: 180,
       nonBillableWorkMinutes: 30,
       latestWorkLoggedAtIso: T1,
+      submittedExpenseCount: 1,
+      approvedExpenseCount: 2,
+      rejectedExpenseCount: 0,
+      submittedExpenseAmountCents: 4500,
+      approvedExpenseAmountCents: 9000,
       latestActivityAtIso: T1,
       latestActivitySummary: 'Client approved launch copy.',
       updatedAtIso: T1,
@@ -82,6 +87,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /Active notes/);
   assert.match(rendered.html, /Open tasks/);
   assert.match(rendered.html, /Billable hours/);
+  assert.match(rendered.html, /Approved expenses/);
   assert.match(rendered.html, /Launch dashboard/);
   assert.match(rendered.html, /Zad Studio/);
   assert.match(rendered.html, /In Progress/);
@@ -96,6 +102,7 @@ unitTest('PROJECTOPS-UI-001: renders dashboard metrics and active request table'
   assert.match(rendered.html, /2 active \/ 1 client/);
   assert.match(rendered.html, /2 open \/ 1 high/);
   assert.match(rendered.html, /3\.0h billable \/ 0\.5h non/);
+  assert.match(rendered.html, /1 submitted \/ 2 approved \(USD 90\.00\)/);
   assert.match(rendered.html, /Client approved launch copy/);
   assert.match(rendered.html, /High/);
 });
@@ -224,6 +231,19 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
     billable: true,
     loggedAtIso: T1,
   });
+  const expense = await repo.createProjectExpense('req-1', {
+    id: 'expense-1',
+    projectRequestId: 'req-1',
+    category: 'software',
+    description: 'Analytics license',
+    amountCents: 4500,
+    currency: 'USD',
+    incurredAtIso: T1,
+  });
+  await repo.approveProjectExpense('req-1', expense.id, {
+    decidedBy: 'Boulos',
+    decidedAtIso: T1,
+  });
 
   const summary = await repo.getDashboard();
   const page = composeProjectOpsDashboardPageFromSummary(summary);
@@ -240,6 +260,7 @@ unitTest('PROJECTOPS-UI-004: renders persisted dashboard data from repository', 
   assert.match(rendered.html, /1 active \/ 1 client/);
   assert.match(rendered.html, /1 open \/ 1 high/);
   assert.match(rendered.html, /1\.5h billable \/ 0\.0h non/);
+  assert.match(rendered.html, /0 submitted \/ 1 approved \(USD 45\.00\)/);
   assert.match(rendered.html, /Estimate sent to client/);
   assert.match(rendered.html, /1 shown/);
 });
@@ -382,6 +403,15 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     billable: false,
     loggedAtIso: T1,
   });
+  await repo.createProjectExpense('req-1', {
+    id: 'expense-1',
+    projectRequestId: 'req-1',
+    category: 'asset',
+    description: 'Stock photo',
+    amountCents: 2500,
+    currency: 'USD',
+    incurredAtIso: T1,
+  });
 
   const server = await startHttpListener({
     port: 0,
@@ -411,6 +441,7 @@ unitTest('PROJECTOPS-UI-006: web route serves repository-backed dashboard HTML',
     assert.match(html, /1 active \/ 0 client/);
     assert.match(html, /1 open \/ 0 high/);
     assert.match(html, /0\.0h billable \/ 1\.0h non/);
+    assert.match(html, /1 submitted \/ 0 approved \(USD 0\.00\)/);
     assert.match(html, /Invoice issued after accepted handoff/);
     assert.match(html, /Zad Studio/);
   } finally {
