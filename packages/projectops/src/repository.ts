@@ -21,10 +21,12 @@ import {
   createProjectMilestone,
   createProjectNote,
   createProjectRequest,
+  createProjectRisk,
   createProjectTask,
   createProjectWorkLog,
   estimateProjectRequest,
   markProjectInvoicePaid,
+  mitigateProjectRisk,
   rejectProjectChangeRequest,
   rejectProjectExpense,
   resolveProjectIssue,
@@ -37,6 +39,7 @@ import {
   type DecideProjectExpenseInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
+  type MitigateProjectRiskInput,
   type NewProjectActivityInput,
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
@@ -47,6 +50,7 @@ import {
   type NewProjectIssueInput,
   type NewProjectMilestoneInput,
   type NewProjectNoteInput,
+  type NewProjectRiskInput,
   type NewClientInput,
   type NewProjectRequestInput,
   type NewProjectTaskInput,
@@ -64,6 +68,7 @@ import {
   type ProjectNote,
   type ProjectRequest,
   type ProjectRequestStatus,
+  type ProjectRisk,
   type ProjectTask,
   type ProjectWorkLog,
   type ResolveProjectIssueInput,
@@ -89,9 +94,11 @@ import {
   insertProjectMilestoneSql,
   insertProjectNoteSql,
   insertProjectRequestSql,
+  insertProjectRiskSql,
   insertProjectTaskSql,
   insertProjectWorkLogSql,
   markProjectInvoicePaidSql,
+  mitigateProjectRiskSql,
   selectClientByIdSql,
   selectClientsSql,
   selectDashboardRowsSql,
@@ -117,6 +124,8 @@ import {
   selectProjectNotesSql,
   selectProjectRequestByIdSql,
   selectProjectRequestsSql,
+  selectProjectRiskByIdSql,
+  selectProjectRisksSql,
   selectProjectTaskByIdSql,
   selectProjectTasksSql,
   selectProjectWorkLogByIdSql,
@@ -498,6 +507,56 @@ export class ProjectOpsRepository {
     const resolved = resolveProjectIssue(current, input);
     const rows = await this.sql.query<ProjectIssue>(resolveProjectIssueSql(resolved));
     return this.requirePersistedProjectIssue(rows, projectRequestId, issueId);
+  }
+
+  public async createProjectRisk(
+    projectRequestId: string,
+    input: NewProjectRiskInput
+  ): Promise<ProjectRisk> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const risk = createProjectRisk(request, input);
+    const existing = await this.getProjectRisk(projectRequestId, risk.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_RISK_ALREADY_EXISTS',
+        `ProjectOps project risk already exists: ${risk.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectRisk>(insertProjectRiskSql(risk));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project risk insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectRisks(projectRequestId: string): Promise<readonly ProjectRisk[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectRisk>(selectProjectRisksSql(projectRequestId));
+  }
+
+  public async getProjectRisk(
+    projectRequestId: string,
+    riskId: string
+  ): Promise<ProjectRisk | undefined> {
+    const rows = await this.sql.query<ProjectRisk>(
+      selectProjectRiskByIdSql(projectRequestId, riskId)
+    );
+    return rows[0];
+  }
+
+  public async mitigateProjectRisk(
+    projectRequestId: string,
+    riskId: string,
+    input: MitigateProjectRiskInput
+  ): Promise<ProjectRisk> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectRisk(projectRequestId, riskId);
+    const mitigated = mitigateProjectRisk(current, input);
+    const rows = await this.sql.query<ProjectRisk>(mitigateProjectRiskSql(mitigated));
+    return this.requirePersistedProjectRisk(rows, projectRequestId, riskId);
   }
 
   public async createProjectFeedback(
@@ -983,6 +1042,21 @@ export class ProjectOpsRepository {
     return issue;
   }
 
+  private async requireProjectRisk(
+    projectRequestId: string,
+    riskId: string
+  ): Promise<ProjectRisk> {
+    const risk = await this.getProjectRisk(projectRequestId, riskId);
+    if (!risk) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_RISK_NOT_FOUND',
+        `Project risk not found: ${riskId}.`
+      );
+    }
+    return risk;
+  }
+
   private async requireProjectFeedback(
     projectRequestId: string,
     feedbackId: string
@@ -1148,6 +1222,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_ISSUE_NOT_FOUND',
         `Project issue not found: ${projectRequestId}/${issueId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectRisk(
+    rows: readonly ProjectRisk[],
+    projectRequestId: string,
+    riskId: string
+  ): ProjectRisk {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_RISK_NOT_FOUND',
+        `Project risk not found: ${projectRequestId}/${riskId}.`
       );
     }
     return persisted;
