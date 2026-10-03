@@ -38,10 +38,10 @@ See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the prev
 Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. The PostgreSQL runtime now protects these routes; contract tests may still inject an unprotected memory harness.
 
 ## Remaining approved work
-Roadmap slices 1-4 are complete. Slices 5-14 remain open. Existing functionality is reused to complete them.
+Roadmap slices 1-5 are complete. Slices 6-14 remain open. Existing functionality is reused to complete them.
 
 ## Next slice
-Slice 5: project workspace and editing. Connect project sections in a detail page and support updating briefs, budgets, priorities and deadlines. The runnable application defaults to loopback and is not deployed.
+Slice 6: estimates and project controls. Implement browser estimate/approve/start/hold/resume/cancel/deliver/archive controls through enforced transitions; close generic status metadata bypass and begin concurrency fixes. The runnable application defaults to loopback and is not deployed.
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.
@@ -81,10 +81,15 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - Browser acceptance verifies protected client pages, creation, safe text rendering, project history, edits, stale-tab conflict/reload, archive confirmation/cancel, filters/search, empty and missing-client states.
 - Limitations: project workspace links/editing are slice 5; client restore/delete are not introduced. No deployment claim.
 
-## Slice 5 implementation: project workspace and editing
+## Completed slice 5: project workspace and editing
 - Project creation on active client pages and navigation from client/dashboard project names.
 - Protected workspace with overview, estimate/approval and all thirteen existing collection sections; independent failure/retry states.
 - Detail edits for title, brief, budget range, priority and deadline, with clearing optional fields and stale revision feedback/reload.
 - Additive migration 0004; revisions include estimate, approval and status writes. Archived projects remain read-only.
 - Dates display in saved operator timezone; deadline inputs explicitly use UTC. Existing budget range transport mapping corrected.
-- Local native verification: 57/57 PASS. PostgreSQL/Chromium acceptance pending before completion.
+- Implementation checkpoint: bac478de02f65f267e1c502400379789e98e5372; PR https://github.com/BoulosChaaya/projectops/pull/4.
+- Local pnpm verify: 57/57 PASS.
+- PostgreSQL acceptance: 9/9 PASS; Chromium journeys: 3/3 PASS; zero skips in https://github.com/BoulosChaaya/projectops/actions/runs/37119697206.
+- Database acceptance verifies migration from the prior schema, budget/deadline transport, concurrent edit rejection, stale edits after estimate/approval changes, metadata preservation, clearing fields and restart persistence.
+- Chromium verifies project creation with saved defaults, navigation from client/dashboard, all collection views, safe stored text and links, independent retry, timezone display, detail edits, stale-tab reload, optional-field clearing, archived read-only views and missing-project feedback.
+- Limitations: controls and workflow/concurrency defects are slice 6; collection editing and automatic history remain their later slices. No deployment claim.
