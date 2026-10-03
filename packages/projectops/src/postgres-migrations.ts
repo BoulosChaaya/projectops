@@ -27,6 +27,11 @@ export async function loadProjectOpsPostgresMigrations(): Promise<readonly Migra
     name: 'project_workspace',
     upSql: await readFile(new URL('../migrations/0004_project_workspace.sql', import.meta.url), 'utf8'),
     reversible: false,
+  }, {
+    version: '0005',
+    name: 'project_controls',
+    upSql: await readFile(new URL('../migrations/0005_project_controls.sql', import.meta.url), 'utf8'),
+    reversible: false,
   }];
 }
 

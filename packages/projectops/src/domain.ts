@@ -36,6 +36,8 @@ export type ProjectRequestStatus =
   | 'estimated'
   | 'approved'
   | 'in_progress'
+  | 'on_hold'
+  | 'cancelled'
   | 'delivered'
   | 'archived';
 
@@ -322,12 +324,14 @@ export interface NewProjectRequestInput {
 }
 
 export interface EstimateProjectRequestInput {
+  readonly expectedRevision?: number;
   readonly amountCents: number;
   readonly currency: string;
   readonly estimatedAtIso: string;
 }
 
 export interface ApproveProjectRequestInput {
+  readonly expectedRevision?: number;
   readonly approvedBy: string;
   readonly approvedAtIso: string;
 }
@@ -539,6 +543,8 @@ export const projectRequestStatuses = Object.freeze([
   'estimated',
   'approved',
   'in_progress',
+  'on_hold',
+  'cancelled',
   'delivered',
   'archived',
 ] satisfies readonly ProjectRequestStatus[]);
@@ -670,10 +676,12 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const workflowTransitions: Readonly<Record<ProjectRequestStatus, readonly ProjectRequestStatus[]>> =
   Object.freeze({
-    new: Object.freeze(['estimated']),
-    estimated: Object.freeze(['approved']),
-    approved: Object.freeze(['in_progress']),
-    in_progress: Object.freeze(['delivered']),
+    new: Object.freeze(['estimated', 'cancelled']),
+    estimated: Object.freeze(['estimated', 'approved', 'cancelled']),
+    approved: Object.freeze(['in_progress', 'cancelled']),
+    in_progress: Object.freeze(['on_hold', 'delivered', 'cancelled']),
+    on_hold: Object.freeze(['in_progress', 'cancelled']),
+    cancelled: Object.freeze(['archived']),
     delivered: Object.freeze(['archived']),
     archived: Object.freeze([]),
   });
@@ -739,6 +747,21 @@ export function transitionProjectRequest(
   nextStatus: ProjectRequestStatus,
   nowIso: string
 ): ProjectRequest {
+  if (nextStatus === 'estimated' || nextStatus === 'approved') {
+    throw new ProjectOpsOperationError('invalid_state', 'PROJECTOPS_EXPLICIT_COMMAND_REQUIRED', 'Use the estimate or approval command to record required metadata.');
+  }
+  const transitioned = advanceProjectRequest(request, nextStatus, nowIso);
+  if (['in_progress', 'on_hold', 'delivered'].includes(nextStatus)) requireProjectApproval(request);
+  return transitioned;
+}
+
+function requireProjectApproval(request: ProjectRequest): void {
+  if (!request.estimateAmountCents || !request.estimateCurrency || !request.estimatedAtIso || !request.approvedAtIso || !request.approvedBy) {
+    throw new ProjectOpsOperationError('invalid_state', 'PROJECTOPS_APPROVAL_REQUIRED', 'A recorded estimate and approval are required before starting, holding, resuming or delivering.');
+  }
+}
+
+function advanceProjectRequest(request: ProjectRequest, nextStatus: ProjectRequestStatus, nowIso: string): ProjectRequest {
   const allowed = workflowTransitions[request.status];
   if (!allowed.includes(nextStatus)) {
     throw new ProjectOpsOperationError(
@@ -759,7 +782,7 @@ export function estimateProjectRequest(
   request: ProjectRequest,
   input: EstimateProjectRequestInput
 ): ProjectRequest {
-  const estimated = transitionProjectRequest(request, 'estimated', input.estimatedAtIso);
+  const estimated = advanceProjectRequest(request, 'estimated', input.estimatedAtIso);
   return Object.freeze({
     ...estimated,
     estimateAmountCents: requireMoneyCents('projectRequest.estimateAmountCents', input.amountCents),
@@ -780,7 +803,7 @@ export function approveProjectRequest(
     );
   }
 
-  const approved = transitionProjectRequest(request, 'approved', input.approvedAtIso);
+  const approved = advanceProjectRequest(request, 'approved', input.approvedAtIso);
   return Object.freeze({
     ...approved,
     approvedAtIso: assertIsoTimestamp('projectRequest.approvedAtIso', input.approvedAtIso),
@@ -1053,7 +1076,7 @@ export function createProjectIssue(
   request: ProjectRequest,
   input: NewProjectIssueInput
 ): ProjectIssue {
-  if (request.status === 'new' || request.status === 'archived') {
+  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_ISSUES',
@@ -1119,7 +1142,7 @@ export function createProjectRisk(
   request: ProjectRequest,
   input: NewProjectRiskInput
 ): ProjectRisk {
-  if (request.status === 'new' || request.status === 'archived') {
+  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_RISKS',
@@ -1195,7 +1218,7 @@ export function createProjectFeedback(
   request: ProjectRequest,
   input: NewProjectFeedbackInput
 ): ProjectFeedback {
-  if (request.status === 'new' || request.status === 'archived') {
+  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_FEEDBACK',
@@ -1262,7 +1285,7 @@ export function createProjectDocument(
   request: ProjectRequest,
   input: NewProjectDocumentInput
 ): ProjectDocument {
-  if (request.status === 'new' || request.status === 'archived') {
+  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_DOCUMENTS',
@@ -1329,7 +1352,7 @@ export function createProjectNote(
   request: ProjectRequest,
   input: NewProjectNoteInput
 ): ProjectNote {
-  if (request.status === 'archived') {
+  if (request.status === 'archived' || request.status === 'cancelled') {
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_NOTES',
@@ -1394,7 +1417,7 @@ export function createProjectTask(
   request: ProjectRequest,
   input: NewProjectTaskInput
 ): ProjectTask {
-  if (request.status === 'new' || request.status === 'archived') {
+  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_TASKS',
@@ -1469,7 +1492,7 @@ export function createProjectWorkLog(
   request: ProjectRequest,
   input: NewProjectWorkLogInput
 ): ProjectWorkLog {
-  if (request.status === 'new' || request.status === 'archived') {
+  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled' || request.status === 'on_hold') {
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_WORK_LOGS',
@@ -1507,7 +1530,7 @@ export function createProjectExpense(
   request: ProjectRequest,
   input: NewProjectExpenseInput
 ): ProjectExpense {
-  if (request.status === 'new' || request.status === 'archived') {
+  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_EXPENSES',

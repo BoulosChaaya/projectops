@@ -108,6 +108,8 @@ export function composeProjectOpsDashboard(
     estimated: 0,
     approved: 0,
     in_progress: 0,
+    on_hold: 0,
+    cancelled: 0,
     delivered: 0,
     archived: 0,
   };
@@ -153,7 +155,7 @@ export function composeProjectOpsDashboard(
 
   for (const row of rows) {
     byStatus[row.status] += 1;
-    if (row.priority === 'high' && row.status !== 'delivered' && row.status !== 'archived') {
+    if (row.priority === 'high' && !['delivered', 'archived', 'cancelled'].includes(row.status)) {
       highPriorityOpen += 1;
     }
     openMilestones += row.openMilestoneCount ?? 0;
@@ -192,13 +194,13 @@ export function composeProjectOpsDashboard(
     rejectedExpenses += row.rejectedExpenseCount ?? 0;
     submittedExpenseAmountCents += row.submittedExpenseAmountCents ?? 0;
     approvedExpenseAmountCents += row.approvedExpenseAmountCents ?? 0;
-    if (row.deadlineIso && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
+    if (row.deadlineIso && !['cancelled','archived','delivered'].includes(row.status) && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
   }
 
   return Object.freeze({
-    totalActiveRequests: rows.filter((row) => row.status !== 'archived').length,
+    totalActiveRequests: rows.filter((row) => !['archived', 'cancelled'].includes(row.status)).length,
     byStatus: Object.freeze(byStatus),
     highPriorityOpen,
     openMilestones,

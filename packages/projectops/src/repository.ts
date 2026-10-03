@@ -258,7 +258,7 @@ export class ProjectOpsRepository {
     if (!request) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_REQUEST_NOT_FOUND', 'Project not found.');
     const prepared = editProject(request, input, nowIso);
     const rows = await this.sql.query<ProjectRequest>(editProjectSql(prepared, input.expectedRevision));
-    if (!rows[0]) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed or is archived. Reload before trying again.');
+    if (!rows[0]) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed or is cancelled/archived. Reload before trying again.');
     return rows[0];
   }
 
@@ -964,9 +964,10 @@ export class ProjectOpsRepository {
     input: EstimateProjectRequestInput
   ): Promise<ProjectRequest> {
     const current = await this.requireProjectRequest(id);
+    const revision = this.projectRevision(current, input.expectedRevision);
     const estimated = estimateProjectRequest(current, input);
-    const rows = await this.sql.query<ProjectRequest>(estimateProjectRequestSql(estimated));
-    return this.requirePersistedProjectRequest(rows, id);
+    const rows = await this.sql.query<ProjectRequest>(estimateProjectRequestSql(estimated, revision, current.status));
+    return this.requireControlWrite(rows);
   }
 
   public async approveProjectRequest(
@@ -974,23 +975,37 @@ export class ProjectOpsRepository {
     input: ApproveProjectRequestInput
   ): Promise<ProjectRequest> {
     const current = await this.requireProjectRequest(id);
+    const revision = this.projectRevision(current, input.expectedRevision);
     const approved = approveProjectRequest(current, input);
-    const rows = await this.sql.query<ProjectRequest>(approveProjectRequestSql(approved));
-    return this.requirePersistedProjectRequest(rows, id);
+    const rows = await this.sql.query<ProjectRequest>(approveProjectRequestSql(approved, revision));
+    return this.requireControlWrite(rows);
   }
 
   public async transitionProjectRequest(
     id: string,
     nextStatus: ProjectRequestStatus,
-    nowIso: string
+    nowIso: string,
+    expectedRevision?: number
   ): Promise<ProjectRequest> {
     const current = await this.requireProjectRequest(id);
-
+    const revision = this.projectRevision(current, expectedRevision);
     const transitioned = transitionProjectRequest(current, nextStatus, nowIso);
     const rows = await this.sql.query<ProjectRequest>(
-      updateProjectRequestStatusSql(id, transitioned.status, transitioned.updatedAtIso)
+      updateProjectRequestStatusSql(id, transitioned.status, transitioned.updatedAtIso, revision, current.status)
     );
-    return this.requirePersistedProjectRequest(rows, id);
+    return this.requireControlWrite(rows);
+  }
+
+  private projectRevision(current: ProjectRequest, expected?: number): number {
+    const revision = current.revision ?? 1;
+    if (expected !== undefined && (!Number.isSafeInteger(expected) || expected < 1 || expected !== revision)) {
+      throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed. Reload before trying again.');
+    }
+    return revision;
+  }
+  private requireControlWrite(rows: readonly ProjectRequest[]): ProjectRequest {
+    if (!rows[0]) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed. Reload before trying again.');
+    return rows[0];
   }
 
   public async getDashboard(): Promise<ProjectOpsDashboardView> {

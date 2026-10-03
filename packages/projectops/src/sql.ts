@@ -48,7 +48,7 @@ export const projectOpsSchemaSql = Object.freeze([
     approved_by TEXT,
     priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high')),
     status TEXT NOT NULL CHECK (
-      status IN ('new', 'estimated', 'approved', 'in_progress', 'delivered', 'archived')
+      status IN ('new', 'estimated', 'approved', 'in_progress', 'on_hold', 'cancelled', 'delivered', 'archived')
     ),
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
@@ -358,7 +358,7 @@ export function insertProjectRequestSql(request: ProjectRequest): SqlStatement {
   });
 }
 
-export function estimateProjectRequestSql(request: ProjectRequest): SqlStatement {
+export function estimateProjectRequestSql(request: ProjectRequest, revision = request.revision ?? 1, previousStatus: ProjectRequestStatus = 'new'): SqlStatement {
   return Object.freeze({
     sql: `UPDATE projectops_project_requests
       SET
@@ -368,7 +368,7 @@ export function estimateProjectRequestSql(request: ProjectRequest): SqlStatement
         status = $5,
         updated_at = $6,
         revision = revision + 1
-      WHERE id = $1
+      WHERE id = $1 AND revision = $7 AND status = $8
       RETURNING *`,
     params: Object.freeze([
       request.id,
@@ -377,11 +377,12 @@ export function estimateProjectRequestSql(request: ProjectRequest): SqlStatement
       request.estimatedAtIso ?? null,
       request.status,
       request.updatedAtIso,
+      revision, previousStatus,
     ]),
   });
 }
 
-export function approveProjectRequestSql(request: ProjectRequest): SqlStatement {
+export function approveProjectRequestSql(request: ProjectRequest, revision = request.revision ?? 1): SqlStatement {
   return Object.freeze({
     sql: `UPDATE projectops_project_requests
       SET
@@ -390,7 +391,7 @@ export function approveProjectRequestSql(request: ProjectRequest): SqlStatement 
         status = $4,
         updated_at = $5,
         revision = revision + 1
-      WHERE id = $1
+      WHERE id = $1 AND revision = $6 AND status = 'estimated'
       RETURNING *`,
     params: Object.freeze([
       request.id,
@@ -398,6 +399,7 @@ export function approveProjectRequestSql(request: ProjectRequest): SqlStatement 
       request.approvedBy ?? null,
       request.status,
       request.updatedAtIso,
+      revision,
     ]),
   });
 }
@@ -1330,21 +1332,23 @@ export function selectClientByIdSql(id: string): SqlStatement {
 export function updateProjectRequestStatusSql(
   id: string,
   status: ProjectRequestStatus,
-  updatedAtIso: string
+  updatedAtIso: string,
+  expectedRevision: number = 1,
+  previousStatus: ProjectRequestStatus = 'approved'
 ): SqlStatement {
   return Object.freeze({
     sql: `UPDATE projectops_project_requests
       SET status = $2, updated_at = $3, revision = revision + 1
-      WHERE id = $1
+      WHERE id = $1 AND revision = $4 AND status = $5
       RETURNING *`,
-    params: Object.freeze([id, status, updatedAtIso]),
+    params: Object.freeze([id, status, updatedAtIso, expectedRevision, previousStatus]),
   });
 }
 
 export function editProjectSql(request: ProjectRequest, expectedRevision: number): SqlStatement {
   return { sql: `UPDATE projectops_project_requests SET title = $2, brief = $3, budget_range = $4,
     deadline_at = $5, priority = $6, updated_at = $7, revision = revision + 1
-    WHERE id = $1 AND revision = $8 AND status <> 'archived' RETURNING *`,
+    WHERE id = $1 AND revision = $8 AND status NOT IN ('archived', 'cancelled') RETURNING *`,
     params: [request.id, request.title, request.brief, request.budgetRange ?? null, request.deadlineIso ?? null,
       request.priority, request.updatedAtIso, expectedRevision] };
 }
@@ -1545,7 +1549,7 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_activities
       ORDER BY project_request_id, happened_at DESC, created_at DESC, id ASC
     ) act ON act.project_request_id = pr.id
-    WHERE pr.status != 'archived'
+    WHERE pr.status NOT IN ('archived', 'cancelled')
     ORDER BY pr.updated_at DESC, pr.created_at DESC`,
     params: Object.freeze([]),
   });
