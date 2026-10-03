@@ -27,6 +27,9 @@ export interface ProjectOpsDashboardRow {
   readonly openIssueCount?: number;
   readonly highOpenIssueCount?: number;
   readonly resolvedIssueCount?: number;
+  readonly openRiskCount?: number;
+  readonly highOpenRiskCount?: number;
+  readonly mitigatedRiskCount?: number;
   readonly openFeedbackCount?: number;
   readonly addressedFeedbackCount?: number;
   readonly negativeOpenFeedbackCount?: number;
@@ -71,6 +74,9 @@ export interface ProjectOpsDashboardView {
   readonly openIssues: number;
   readonly highOpenIssues: number;
   readonly resolvedIssues: number;
+  readonly openRisks: number;
+  readonly highOpenRisks: number;
+  readonly mitigatedRisks: number;
   readonly openFeedback: number;
   readonly addressedFeedback: number;
   readonly negativeOpenFeedback: number;
@@ -121,6 +127,9 @@ export function composeProjectOpsDashboard(
   let openIssues = 0;
   let highOpenIssues = 0;
   let resolvedIssues = 0;
+  let openRisks = 0;
+  let highOpenRisks = 0;
+  let mitigatedRisks = 0;
   let openFeedback = 0;
   let addressedFeedback = 0;
   let negativeOpenFeedback = 0;
@@ -161,6 +170,9 @@ export function composeProjectOpsDashboard(
     openIssues += row.openIssueCount ?? 0;
     highOpenIssues += row.highOpenIssueCount ?? 0;
     resolvedIssues += row.resolvedIssueCount ?? 0;
+    openRisks += row.openRiskCount ?? 0;
+    highOpenRisks += row.highOpenRiskCount ?? 0;
+    mitigatedRisks += row.mitigatedRiskCount ?? 0;
     openFeedback += row.openFeedbackCount ?? 0;
     addressedFeedback += row.addressedFeedbackCount ?? 0;
     negativeOpenFeedback += row.negativeOpenFeedbackCount ?? 0;
@@ -203,6 +215,9 @@ export function composeProjectOpsDashboard(
     openIssues,
     highOpenIssues,
     resolvedIssues,
+    openRisks,
+    highOpenRisks,
+    mitigatedRisks,
     openFeedback,
     addressedFeedback,
     negativeOpenFeedback,
