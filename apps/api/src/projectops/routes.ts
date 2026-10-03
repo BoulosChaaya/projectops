@@ -11,9 +11,12 @@ import type {
   ArchiveProjectNoteInput,
   ApproveProjectRequestInput,
   CompleteProjectTaskInput,
+  CompleteProjectMilestoneInput,
   DecideProjectExpenseInput,
   DecideProjectChangeRequestInput,
   EstimateProjectRequestInput,
+  EditProjectMilestoneInput,
+  EditProjectTaskInput,
   MitigateProjectRiskInput,
   NewClientInput,
   EditProjectInput,
@@ -51,6 +54,8 @@ import type {
   ProjectTask,
   ProjectWorkLog,
   ResolveProjectIssueInput,
+  ReopenProjectMilestoneInput,
+  ReopenProjectTaskInput,
 } from '../../../../packages/projectops/src/index.ts';
 
 export interface ProjectOpsApiService {
@@ -72,8 +77,10 @@ export interface ProjectOpsApiService {
   completeProjectMilestone(
     projectRequestId: string,
     milestoneId: string,
-    completedAtIso: string
+    input: string | CompleteProjectMilestoneInput
   ): Promise<ProjectMilestone>;
+  editProjectMilestone(projectRequestId: string, milestoneId: string, input: EditProjectMilestoneInput, nowIso: string): Promise<ProjectMilestone>;
+  reopenProjectMilestone(projectRequestId: string, milestoneId: string, input: ReopenProjectMilestoneInput): Promise<ProjectMilestone>;
   createProjectDeliverable(
     projectRequestId: string,
     input: NewProjectDeliverableInput
@@ -169,6 +176,8 @@ export interface ProjectOpsApiService {
     taskId: string,
     input: CompleteProjectTaskInput
   ): Promise<ProjectTask>;
+  editProjectTask(projectRequestId: string, taskId: string, input: EditProjectTaskInput, nowIso: string): Promise<ProjectTask>;
+  reopenProjectTask(projectRequestId: string, taskId: string, input: ReopenProjectTaskInput): Promise<ProjectTask>;
   createProjectWorkLog(
     projectRequestId: string,
     input: NewProjectWorkLogInput
@@ -287,14 +296,39 @@ export function createProjectOpsRoutes(
         ),
     },
     {
-      method: 'POST',
-      path: '/projectops/project-requests/:id/milestones/:milestoneId/complete',
+      method: 'PUT',
+      path: '/projectops/project-requests/:id/milestones/:milestoneId',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.completeProjectMilestone(
+          service.editProjectMilestone(
             params.id,
             params.milestoneId,
-            readCompletedAtIso(request.body, clock)
+            readEditMilestoneInput(request.body),
+            clock()
+          )
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/milestones/:milestoneId/complete',
+      handler: async (request, _context, params) => await runProjectOpsRequest(() => {
+        const input = readCompleteMilestoneInput(request.body, clock);
+        return service.completeProjectMilestone(
+          params.id,
+          params.milestoneId,
+          input.expectedRevision === undefined ? input.completedAtIso : input
+        );
+      }),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/milestones/:milestoneId/reopen',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.reopenProjectMilestone(
+            params.id,
+            params.milestoneId,
+            readReopenMilestoneInput(request.body, clock)
           )
         ),
     },
@@ -536,6 +570,14 @@ export function createProjectOpsRoutes(
         ),
     },
     {
+      method: 'PUT',
+      path: '/projectops/project-requests/:id/tasks/:taskId',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.editProjectTask(params.id, params.taskId, readEditTaskInput(request.body), clock())
+        ),
+    },
+    {
       method: 'POST',
       path: '/projectops/project-requests/:id/tasks/:taskId/complete',
       handler: async (request, _context, params) =>
@@ -545,6 +587,14 @@ export function createProjectOpsRoutes(
             params.taskId,
             readCompleteTaskInput(request.body, clock)
           )
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/projectops/project-requests/:id/tasks/:taskId/reopen',
+      handler: async (request, _context, params) =>
+        await runProjectOpsRequest(() =>
+          service.reopenProjectTask(params.id, params.taskId, readReopenTaskInput(request.body, clock))
         ),
     },
     {
@@ -759,6 +809,9 @@ function readClientRevision(value: unknown): number {
 function missingProjectPriority(): never {
   throw new HttpError(400, 'INVALID_PROJECT_PRIORITY', 'Project priority is required.');
 }
+function missingTaskPriority(): never {
+  throw new HttpError(400, 'INVALID_PROJECTOPS_TASK_PRIORITY', 'Task priority is required.');
+}
 
 function readProjectRequestInput(body: unknown, clock: () => string): NewProjectRequestInput {
   const value = readRecord(body);
@@ -808,9 +861,29 @@ function readMilestoneInput(
   });
 }
 
-function readCompletedAtIso(body: unknown, clock: () => string): string {
+function readCompleteMilestoneInput(body: unknown, clock: () => string): CompleteProjectMilestoneInput {
   const value = readRecord(body);
-  return readOptionalString(value.completedAtIso, 'completedAtIso') ?? clock();
+  return Object.freeze({
+    completedAtIso: readOptionalString(value.completedAtIso, 'completedAtIso') ?? clock(),
+    expectedRevision: readOptionalRevision(value.expectedRevision),
+  });
+}
+
+function readEditMilestoneInput(body: unknown): EditProjectMilestoneInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    title: readString(value.title, 'title'),
+    dueAtIso: readOptionalString(value.dueAtIso, 'dueAtIso'),
+    expectedRevision: readPositiveInteger(value.expectedRevision, 'expectedRevision'),
+  });
+}
+
+function readReopenMilestoneInput(body: unknown, clock: () => string): ReopenProjectMilestoneInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    reopenedAtIso: readOptionalString(value.reopenedAtIso, 'reopenedAtIso') ?? clock(),
+    expectedRevision: readPositiveInteger(value.expectedRevision, 'expectedRevision'),
+  });
 }
 
 function readDeliverableInput(
@@ -1053,6 +1126,27 @@ function readCompleteTaskInput(
   return Object.freeze({
     completedBy: readString(value.completedBy, 'completedBy'),
     completedAtIso: readOptionalString(value.completedAtIso, 'completedAtIso') ?? clock(),
+    expectedRevision: readOptionalRevision(value.expectedRevision),
+  });
+}
+
+function readEditTaskInput(body: unknown): EditProjectTaskInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    title: readString(value.title, 'title'),
+    description: readOptionalString(value.description, 'description'),
+    assignee: readOptionalString(value.assignee, 'assignee'),
+    priority: readOptionalTaskPriority(value.priority) ?? missingTaskPriority(),
+    dueAtIso: readOptionalString(value.dueAtIso, 'dueAtIso'),
+    expectedRevision: readPositiveInteger(value.expectedRevision, 'expectedRevision'),
+  });
+}
+
+function readReopenTaskInput(body: unknown, clock: () => string): ReopenProjectTaskInput {
+  const value = readRecord(body);
+  return Object.freeze({
+    reopenedAtIso: readOptionalString(value.reopenedAtIso, 'reopenedAtIso') ?? clock(),
+    expectedRevision: readPositiveInteger(value.expectedRevision, 'expectedRevision'),
   });
 }
 

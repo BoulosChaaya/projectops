@@ -62,6 +62,7 @@ export const projectOpsSchemaSql = Object.freeze([
     created_at TIMESTAMPTZ NOT NULL,
     completed_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
     PRIMARY KEY (project_request_id, id)
   )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_deliverables (
@@ -209,6 +210,7 @@ export const projectOpsSchemaSql = Object.freeze([
     completed_at TIMESTAMPTZ,
     completed_by TEXT,
     updated_at TIMESTAMPTZ NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
     PRIMARY KEY (project_request_id, id)
   )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_work_logs (
@@ -414,8 +416,14 @@ export function insertProjectMilestoneSql(milestone: ProjectMilestone): SqlState
       status,
       created_at,
       completed_at,
-      updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      updated_at,
+      revision
+    ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+      FROM (
+        SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status IN ('approved', 'in_progress')
+        FOR UPDATE
+      ) AS parent
     RETURNING *`,
     params: Object.freeze([
       milestone.id,
@@ -426,6 +434,7 @@ export function insertProjectMilestoneSql(milestone: ProjectMilestone): SqlState
       milestone.createdAtIso,
       milestone.completedAtIso ?? null,
       milestone.updatedAtIso,
+      milestone.revision ?? 1,
     ]),
   });
 }
@@ -452,18 +461,76 @@ export function selectProjectMilestoneByIdSql(
   });
 }
 
-export function completeProjectMilestoneSql(milestone: ProjectMilestone): SqlStatement {
+export function editProjectMilestoneSql(
+  milestone: ProjectMilestone,
+  expectedRevision: number
+): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_milestones
-      SET status = $3, completed_at = $4, updated_at = $5
-      WHERE project_request_id = $1 AND id = $2
-      RETURNING *`,
+    sql: `UPDATE projectops_project_milestones AS milestone
+      SET title = $3, due_at = $4, updated_at = $5, revision = milestone.revision + 1
+      FROM (
+        SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status IN ('approved', 'in_progress')
+        FOR UPDATE
+      ) AS parent
+      WHERE milestone.project_request_id = parent.id AND milestone.id = $2
+        AND milestone.revision = $6 AND milestone.status = 'open'
+      RETURNING milestone.*`,
     params: Object.freeze([
       milestone.projectRequestId,
       milestone.id,
-      milestone.status,
-      milestone.completedAtIso ?? null,
+      milestone.title,
+      milestone.dueAtIso ?? null,
       milestone.updatedAtIso,
+      expectedRevision,
+    ]),
+  });
+}
+
+export function completeProjectMilestoneSql(
+  milestone: ProjectMilestone,
+  expectedRevision: number
+): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_milestones AS milestone
+      SET status = 'completed', completed_at = $3, updated_at = $3, revision = milestone.revision + 1
+      FROM (
+        SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status IN ('approved', 'in_progress', 'on_hold', 'delivered')
+        FOR UPDATE
+      ) AS parent
+      WHERE milestone.project_request_id = parent.id AND milestone.id = $2
+        AND milestone.revision = $4 AND milestone.status = 'open'
+      RETURNING milestone.*`,
+    params: Object.freeze([
+      milestone.projectRequestId,
+      milestone.id,
+      milestone.completedAtIso ?? null,
+      expectedRevision,
+    ]),
+  });
+}
+
+export function reopenProjectMilestoneSql(
+  milestone: ProjectMilestone,
+  expectedRevision: number
+): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_milestones AS milestone
+      SET status = 'open', completed_at = NULL, updated_at = $3, revision = milestone.revision + 1
+      FROM (
+        SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status IN ('approved', 'in_progress')
+        FOR UPDATE
+      ) AS parent
+      WHERE milestone.project_request_id = parent.id AND milestone.id = $2
+        AND milestone.revision = $4 AND milestone.status = 'completed'
+      RETURNING milestone.*`,
+    params: Object.freeze([
+      milestone.projectRequestId,
+      milestone.id,
+      milestone.updatedAtIso,
+      expectedRevision,
     ]),
   });
 }
@@ -1060,8 +1127,14 @@ export function insertProjectTaskSql(task: ProjectTask): SqlStatement {
       created_at,
       completed_at,
       completed_by,
-      updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      updated_at,
+      revision
+    ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+      FROM (
+        SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered')
+        FOR UPDATE
+      ) AS parent
     RETURNING *`,
     params: Object.freeze([
       task.id,
@@ -1076,6 +1149,7 @@ export function insertProjectTaskSql(task: ProjectTask): SqlStatement {
       task.completedAtIso ?? null,
       task.completedBy ?? null,
       task.updatedAtIso,
+      task.revision ?? 1,
     ]),
   });
 }
@@ -1102,19 +1176,74 @@ export function selectProjectTaskByIdSql(
   });
 }
 
-export function completeProjectTaskSql(task: ProjectTask): SqlStatement {
+export function editProjectTaskSql(task: ProjectTask, expectedRevision: number): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_tasks
-      SET status = $3, completed_at = $4, completed_by = $5, updated_at = $6
-      WHERE project_request_id = $1 AND id = $2
-      RETURNING *`,
+    sql: `UPDATE projectops_project_tasks AS task
+      SET title = $3, description = $4, assignee = $5, priority = $6,
+        due_at = $7, updated_at = $8, revision = task.revision + 1
+      FROM (
+        SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered')
+        FOR UPDATE
+      ) AS parent
+      WHERE task.project_request_id = parent.id AND task.id = $2
+        AND task.revision = $9 AND task.status = 'open'
+      RETURNING task.*`,
     params: Object.freeze([
       task.projectRequestId,
       task.id,
-      task.status,
+      task.title,
+      task.description ?? null,
+      task.assignee ?? null,
+      task.priority,
+      task.dueAtIso ?? null,
+      task.updatedAtIso,
+      expectedRevision,
+    ]),
+  });
+}
+
+export function completeProjectTaskSql(task: ProjectTask, expectedRevision: number): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_tasks AS task
+      SET status = 'completed', completed_at = $3, completed_by = $4,
+        updated_at = $3, revision = task.revision + 1
+      FROM (
+        SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered')
+        FOR UPDATE
+      ) AS parent
+      WHERE task.project_request_id = parent.id AND task.id = $2
+        AND task.revision = $5 AND task.status = 'open'
+      RETURNING task.*`,
+    params: Object.freeze([
+      task.projectRequestId,
+      task.id,
       task.completedAtIso ?? null,
       task.completedBy ?? null,
+      expectedRevision,
+    ]),
+  });
+}
+
+export function reopenProjectTaskSql(task: ProjectTask, expectedRevision: number): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_tasks AS task
+      SET status = 'open', completed_at = NULL, completed_by = NULL,
+        updated_at = $3, revision = task.revision + 1
+      FROM (
+        SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered')
+        FOR UPDATE
+      ) AS parent
+      WHERE task.project_request_id = parent.id AND task.id = $2
+        AND task.revision = $4 AND task.status = 'completed'
+      RETURNING task.*`,
+    params: Object.freeze([
+      task.projectRequestId,
+      task.id,
       task.updatedAtIso,
+      expectedRevision,
     ]),
   });
 }

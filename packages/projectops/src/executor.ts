@@ -160,7 +160,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_MILESTONES')) {
       const row = this.insertProjectMilestone(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_DELIVERABLES')) {
@@ -205,7 +205,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_TASKS')) {
       const row = this.insertProjectTask(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_WORK_LOGS')) {
@@ -277,7 +277,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     }
 
     if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_MILESTONES')) {
-      const row = this.completeProjectMilestone(statement.params);
+      const row = this.mutateProjectMilestone(statement.params, upper);
       return Object.freeze(row ? [row as T] : []);
     }
 
@@ -421,7 +421,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     }
 
     if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_TASKS')) {
-      const row = this.completeProjectTask(statement.params);
+      const row = this.mutateProjectTask(statement.params, upper);
       return Object.freeze(row ? [row as T] : []);
     }
 
@@ -633,11 +633,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectMilestone(params: readonly unknown[]): ProjectOpsMilestoneRow {
+  private insertProjectMilestone(params: readonly unknown[]): ProjectOpsMilestoneRow | undefined {
     const projectRequestId = asString(params[1], 'projectMilestone.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
+    if (!['approved', 'in_progress'].includes(parent.status)) return undefined;
 
     const row = Object.freeze({
       id: asString(params[0], 'projectMilestone.id'),
@@ -648,6 +650,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       createdAtIso: asString(params[5], 'projectMilestone.createdAtIso'),
       completedAtIso: asOptionalString(params[6]),
       updatedAtIso: asString(params[7], 'projectMilestone.updatedAtIso'),
+      revision: asNumber(params[8], 'projectMilestone.revision'),
     } satisfies ProjectOpsMilestoneRow);
 
     const key = milestoneKey(projectRequestId, row.id);
@@ -910,11 +913,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectTask(params: readonly unknown[]): ProjectOpsTaskRow {
+  private insertProjectTask(params: readonly unknown[]): ProjectOpsTaskRow | undefined {
     const projectRequestId = asString(params[1], 'projectTask.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
+    if (!['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'].includes(parent.status)) return undefined;
 
     const row = Object.freeze({
       id: asString(params[0], 'projectTask.id'),
@@ -929,6 +934,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       completedAtIso: asOptionalString(params[9]),
       completedBy: asOptionalString(params[10]),
       updatedAtIso: asString(params[11], 'projectTask.updatedAtIso'),
+      revision: asNumber(params[12], 'projectTask.revision'),
     } satisfies ProjectOpsTaskRow);
 
     const key = taskKey(projectRequestId, row.id);
@@ -1076,17 +1082,42 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return next;
   }
 
-  private completeProjectMilestone(params: readonly unknown[]): ProjectOpsMilestoneRow | undefined {
+  private mutateProjectMilestone(
+    params: readonly unknown[],
+    sql: string
+  ): ProjectOpsMilestoneRow | undefined {
     const projectRequestId = asString(params[0], 'projectMilestone.projectRequestId');
     const id = asString(params[1], 'projectMilestone.id');
+    const parent = this.projectRequests.get(projectRequestId);
     const current = this.projectMilestones.get(milestoneKey(projectRequestId, id));
-    if (!current) return undefined;
+    const edit = sql.includes('SET TITLE =');
+    const complete = sql.includes("SET STATUS = 'COMPLETED'");
+    const expectedRevision = Number(params[edit ? 5 : 3]);
+    const allowedStates = complete
+      ? ['approved', 'in_progress', 'on_hold', 'delivered']
+      : ['approved', 'in_progress'];
+    const expectedStatus = complete || edit ? 'open' : 'completed';
+    if (!parent || !allowedStates.includes(parent.status) || !current ||
+      (current.revision ?? 1) !== expectedRevision || current.status !== expectedStatus) return undefined;
 
-    const next = Object.freeze({
+    const next = Object.freeze(edit ? {
       ...current,
-      status: asString(params[2], 'projectMilestone.status'),
-      completedAtIso: asOptionalString(params[3]),
+      title: asString(params[2], 'projectMilestone.title'),
+      dueAtIso: asOptionalString(params[3]),
       updatedAtIso: asString(params[4], 'projectMilestone.updatedAtIso'),
+      revision: expectedRevision + 1,
+    } : complete ? {
+      ...current,
+      status: 'completed',
+      completedAtIso: asOptionalString(params[2]),
+      updatedAtIso: asString(params[2], 'projectMilestone.updatedAtIso'),
+      revision: expectedRevision + 1,
+    } : {
+      ...current,
+      status: 'open',
+      completedAtIso: undefined,
+      updatedAtIso: asString(params[2], 'projectMilestone.updatedAtIso'),
+      revision: expectedRevision + 1,
     });
     this.projectMilestones.set(milestoneKey(projectRequestId, id), next);
     return next;
@@ -1228,18 +1259,41 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return next;
   }
 
-  private completeProjectTask(params: readonly unknown[]): ProjectOpsTaskRow | undefined {
+  private mutateProjectTask(params: readonly unknown[], sql: string): ProjectOpsTaskRow | undefined {
     const projectRequestId = asString(params[0], 'projectTask.projectRequestId');
     const id = asString(params[1], 'projectTask.id');
+    const parent = this.projectRequests.get(projectRequestId);
     const current = this.projectTasks.get(taskKey(projectRequestId, id));
-    if (!current) return undefined;
+    const edit = sql.includes('SET TITLE =');
+    const complete = sql.includes("SET STATUS = 'COMPLETED'");
+    const expectedRevision = Number(params[edit ? 8 : complete ? 4 : 3]);
+    const expectedStatus = complete || edit ? 'open' : 'completed';
+    if (!parent || !['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'].includes(parent.status) ||
+      !current || (current.revision ?? 1) !== expectedRevision || current.status !== expectedStatus) return undefined;
 
-    const next = Object.freeze({
+    const next = Object.freeze(edit ? {
       ...current,
-      status: asString(params[2], 'projectTask.status'),
-      completedAtIso: asOptionalString(params[3]),
-      completedBy: asOptionalString(params[4]),
-      updatedAtIso: asString(params[5], 'projectTask.updatedAtIso'),
+      title: asString(params[2], 'projectTask.title'),
+      description: asOptionalString(params[3]),
+      assignee: asOptionalString(params[4]),
+      priority: asString(params[5], 'projectTask.priority'),
+      dueAtIso: asOptionalString(params[6]),
+      updatedAtIso: asString(params[7], 'projectTask.updatedAtIso'),
+      revision: expectedRevision + 1,
+    } : complete ? {
+      ...current,
+      status: 'completed',
+      completedAtIso: asOptionalString(params[2]),
+      completedBy: asOptionalString(params[3]),
+      updatedAtIso: asString(params[2], 'projectTask.updatedAtIso'),
+      revision: expectedRevision + 1,
+    } : {
+      ...current,
+      status: 'open',
+      completedAtIso: undefined,
+      completedBy: undefined,
+      updatedAtIso: asString(params[2], 'projectTask.updatedAtIso'),
+      revision: expectedRevision + 1,
     });
     this.projectTasks.set(taskKey(projectRequestId, id), next);
     return next;
@@ -2267,6 +2321,7 @@ interface ProjectOpsRequestRow {
 }
 
 interface ProjectOpsMilestoneRow {
+  readonly revision?: number;
   readonly id: string;
   readonly projectRequestId: string;
   readonly title: string;
@@ -2393,6 +2448,7 @@ interface ProjectOpsNoteRow {
 }
 
 interface ProjectOpsTaskRow {
+  readonly revision?: number;
   readonly id: string;
   readonly projectRequestId: string;
   readonly title: string;

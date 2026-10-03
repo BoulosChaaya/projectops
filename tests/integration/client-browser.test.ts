@@ -61,7 +61,7 @@ test('Client browser journey creates, searches, edits, resolves stale data and a
       await page.getByText('No clients found.', { exact: false }).waitFor();
       await page.getByLabel('Search', { exact: true }).fill('UPDATED'); await page.getByRole('button', { name: 'Search', exact: true }).click();
       await page.getByRole('link', { name: 'Updated studio', exact: true }).waitFor();
-      await page.goto(app.server.origin + '/projectops/client-management/missing'); await page.getByText('Client not found.', { exact: true }).waitFor();
+      await page.goto(app.server.origin + '/projectops/client-management/missing'); await page.locator('#client-status').getByText('Client not found.', { exact: true }).waitFor();
       assert.deepEqual(errors, []);
     } finally { await browser?.close(); await app.close(); }
   });

@@ -124,6 +124,7 @@ export function editProject(request: ProjectRequest, input: EditProjectInput, no
 }
 
 export interface ProjectMilestone {
+  readonly revision?: number;
   readonly id: string;
   readonly projectRequestId: string;
   readonly title: string;
@@ -250,6 +251,7 @@ export interface ProjectNote {
 }
 
 export interface ProjectTask {
+  readonly revision?: number;
   readonly id: string;
   readonly projectRequestId: string;
   readonly title: string;
@@ -342,6 +344,22 @@ export interface NewProjectMilestoneInput {
   readonly title: string;
   readonly dueAtIso?: string;
   readonly createdAtIso: string;
+}
+
+export interface EditProjectMilestoneInput {
+  readonly title: string;
+  readonly dueAtIso?: string;
+  readonly expectedRevision: number;
+}
+
+export interface CompleteProjectMilestoneInput {
+  readonly completedAtIso: string;
+  readonly expectedRevision?: number;
+}
+
+export interface ReopenProjectMilestoneInput {
+  readonly reopenedAtIso: string;
+  readonly expectedRevision: number;
 }
 
 export interface NewProjectDeliverableInput {
@@ -470,9 +488,24 @@ export interface NewProjectTaskInput {
   readonly createdAtIso: string;
 }
 
+export interface EditProjectTaskInput {
+  readonly title: string;
+  readonly description?: string;
+  readonly assignee?: string;
+  readonly priority: ProjectTaskPriority;
+  readonly dueAtIso?: string;
+  readonly expectedRevision: number;
+}
+
 export interface CompleteProjectTaskInput {
   readonly completedBy: string;
   readonly completedAtIso: string;
+  readonly expectedRevision?: number;
+}
+
+export interface ReopenProjectTaskInput {
+  readonly reopenedAtIso: string;
+  readonly expectedRevision: number;
 }
 
 export interface NewProjectWorkLogInput {
@@ -843,6 +876,7 @@ export function createProjectMilestone(
   }
 
   return Object.freeze({
+    revision: 1,
     id,
     projectRequestId,
     title: requireText('projectMilestone.title', input.title, 160),
@@ -850,6 +884,36 @@ export function createProjectMilestone(
     status: 'open',
     createdAtIso,
     updatedAtIso: createdAtIso,
+  });
+}
+
+export function editProjectMilestone(
+  request: ProjectRequest,
+  milestone: ProjectMilestone,
+  input: EditProjectMilestoneInput,
+  nowIso: string
+): ProjectMilestone {
+  requirePlanningRevision('milestone', input.expectedRevision);
+  requireMilestoneParentState(request, 'edit');
+  if (milestone.status !== 'open') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_MILESTONE_NOT_OPEN',
+      'Completed milestones must be reopened before editing.'
+    );
+  }
+  const validated = createProjectMilestone(request, {
+    id: milestone.id,
+    projectRequestId: milestone.projectRequestId,
+    title: input.title,
+    dueAtIso: input.dueAtIso,
+    createdAtIso: milestone.createdAtIso,
+  });
+  return Object.freeze({
+    ...milestone,
+    title: validated.title,
+    dueAtIso: validated.dueAtIso,
+    updatedAtIso: assertIsoTimestamp('projectMilestone.updatedAtIso', nowIso),
   });
 }
 
@@ -871,6 +935,29 @@ export function completeProjectMilestone(
     status: 'completed',
     completedAtIso: completedAt,
     updatedAtIso: completedAt,
+  });
+}
+
+export function reopenProjectMilestone(
+  request: ProjectRequest,
+  milestone: ProjectMilestone,
+  input: ReopenProjectMilestoneInput
+): ProjectMilestone {
+  requirePlanningRevision('milestone', input.expectedRevision);
+  requireMilestoneParentState(request, 'reopen');
+  if (milestone.status !== 'completed') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_MILESTONE_NOT_COMPLETED',
+      'Only completed milestones can be reopened.'
+    );
+  }
+  const reopenedAtIso = assertIsoTimestamp('projectMilestone.reopenedAtIso', input.reopenedAtIso);
+  return Object.freeze({
+    ...milestone,
+    status: 'open',
+    completedAtIso: undefined,
+    updatedAtIso: reopenedAtIso,
   });
 }
 
@@ -1421,7 +1508,7 @@ export function createProjectTask(
     throw new ProjectOpsOperationError(
       'invalid_state',
       'PROJECTOPS_REQUEST_NOT_READY_FOR_TASKS',
-      'Project request must be estimated, approved, in progress, or delivered before adding tasks.'
+      'Project request must be estimated, approved, in progress, on hold, or delivered before adding tasks.'
     );
   }
 
@@ -1453,6 +1540,7 @@ export function createProjectTask(
   }
 
   return Object.freeze({
+    revision: 1,
     id,
     projectRequestId,
     title: requireText('projectTask.title', input.title, 160),
@@ -1463,6 +1551,42 @@ export function createProjectTask(
     dueAtIso,
     createdAtIso,
     updatedAtIso: createdAtIso,
+  });
+}
+
+export function editProjectTask(
+  request: ProjectRequest,
+  task: ProjectTask,
+  input: EditProjectTaskInput,
+  nowIso: string
+): ProjectTask {
+  requirePlanningRevision('task', input.expectedRevision);
+  requireTaskParentState(request, 'edit');
+  if (task.status !== 'open') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_TASK_NOT_OPEN',
+      'Completed tasks must be reopened before editing.'
+    );
+  }
+  const validated = createProjectTask(request, {
+    id: task.id,
+    projectRequestId: task.projectRequestId,
+    title: input.title,
+    description: input.description,
+    assignee: input.assignee,
+    priority: input.priority,
+    dueAtIso: input.dueAtIso,
+    createdAtIso: task.createdAtIso,
+  });
+  return Object.freeze({
+    ...task,
+    title: validated.title,
+    description: validated.description,
+    assignee: validated.assignee,
+    priority: validated.priority,
+    dueAtIso: validated.dueAtIso,
+    updatedAtIso: assertIsoTimestamp('projectTask.updatedAtIso', nowIso),
   });
 }
 
@@ -1486,6 +1610,69 @@ export function completeProjectTask(
     completedBy: requireText('projectTask.completedBy', input.completedBy, 120),
     updatedAtIso: completedAtIso,
   });
+}
+
+export function reopenProjectTask(
+  request: ProjectRequest,
+  task: ProjectTask,
+  input: ReopenProjectTaskInput
+): ProjectTask {
+  requirePlanningRevision('task', input.expectedRevision);
+  requireTaskParentState(request, 'reopen');
+  if (task.status !== 'completed') {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_TASK_NOT_COMPLETED',
+      'Only completed tasks can be reopened.'
+    );
+  }
+  const reopenedAtIso = assertIsoTimestamp('projectTask.reopenedAtIso', input.reopenedAtIso);
+  return Object.freeze({
+    ...task,
+    status: 'open',
+    completedAtIso: undefined,
+    completedBy: undefined,
+    updatedAtIso: reopenedAtIso,
+  });
+}
+
+export function requireMilestoneParentState(
+  request: ProjectRequest,
+  command: 'edit' | 'complete' | 'reopen'
+): void {
+  const allowed = command === 'complete'
+    ? ['approved', 'in_progress', 'on_hold', 'delivered']
+    : ['approved', 'in_progress'];
+  if (!allowed.includes(request.status)) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_MILESTONES',
+      `Project state does not allow this milestone ${command} command.`
+    );
+  }
+}
+
+export function requireTaskParentState(
+  request: ProjectRequest,
+  command: 'edit' | 'complete' | 'reopen'
+): void {
+  if (!['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'].includes(request.status)) {
+    throw new ProjectOpsOperationError(
+      'invalid_state',
+      'PROJECTOPS_REQUEST_NOT_READY_FOR_TASKS',
+      `Project state does not allow this task ${command} command.`
+    );
+  }
+}
+
+export function requirePlanningRevision(entity: 'milestone' | 'task', value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value >= 2147483647) {
+    throw new ProjectOpsValidationError(
+      entity === 'milestone' ? 'INVALID_PROJECTOPS_MILESTONE_REVISION' : 'INVALID_PROJECTOPS_TASK_REVISION',
+      `A valid ${entity} revision is required.`
+    );
+  }
+  return value;
 }
 
 export function createProjectWorkLog(

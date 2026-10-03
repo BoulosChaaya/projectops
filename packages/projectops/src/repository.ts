@@ -31,11 +31,18 @@ import {
   createProjectRisk,
   createProjectTask,
   createProjectWorkLog,
+  editProjectMilestone,
+  editProjectTask,
   estimateProjectRequest,
   markProjectInvoicePaid,
   mitigateProjectRisk,
   rejectProjectChangeRequest,
   rejectProjectExpense,
+  reopenProjectMilestone,
+  reopenProjectTask,
+  requireMilestoneParentState,
+  requirePlanningRevision,
+  requireTaskParentState,
   resolveProjectIssue,
   transitionProjectRequest,
   type AddressProjectFeedbackInput,
@@ -43,9 +50,12 @@ import {
   type ArchiveProjectNoteInput,
   type ApproveProjectRequestInput,
   type CompleteProjectTaskInput,
+  type CompleteProjectMilestoneInput,
   type DecideProjectExpenseInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
+  type EditProjectMilestoneInput,
+  type EditProjectTaskInput,
   type MitigateProjectRiskInput,
   type NewProjectActivityInput,
   type NewProjectChangeRequestInput,
@@ -79,6 +89,8 @@ import {
   type ProjectTask,
   type ProjectWorkLog,
   type ResolveProjectIssueInput,
+  type ReopenProjectMilestoneInput,
+  type ReopenProjectTaskInput,
 } from './domain.ts';
 import {
   acceptProjectDeliverableSql,
@@ -88,6 +100,8 @@ import {
   approveProjectRequestSql,
   completeProjectTaskSql,
   completeProjectMilestoneSql,
+  editProjectMilestoneSql,
+  editProjectTaskSql,
   estimateProjectRequestSql,
   insertClientSql,
   editProjectSql,
@@ -142,6 +156,8 @@ import {
   selectProjectWorkLogByIdSql,
   selectProjectWorkLogsSql,
   resolveProjectIssueSql,
+  reopenProjectMilestoneSql,
+  reopenProjectTaskSql,
   updateProjectChangeRequestDecisionSql,
   updateProjectExpenseDecisionSql,
   updateProjectRequestStatusSql,
@@ -280,7 +296,11 @@ export class ProjectOpsRepository {
     const rows = await this.sql.query<ProjectMilestone>(insertProjectMilestoneSql(milestone));
     const persisted = rows[0];
     if (!persisted) {
-      throw new Error('ProjectOps project milestone insert did not return a row.');
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_MILESTONE_CHANGED',
+        'Project state changed before the milestone could be created. Reload before trying again.'
+      );
     }
     return persisted;
   }
@@ -305,13 +325,43 @@ export class ProjectOpsRepository {
   public async completeProjectMilestone(
     projectRequestId: string,
     milestoneId: string,
-    completedAtIso: string
+    input: string | CompleteProjectMilestoneInput
   ): Promise<ProjectMilestone> {
-    await this.requireProjectRequest(projectRequestId);
+    const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectMilestone(projectRequestId, milestoneId);
-    const completed = completeProjectMilestone(current, completedAtIso);
-    const rows = await this.sql.query<ProjectMilestone>(completeProjectMilestoneSql(completed));
-    return this.requirePersistedProjectMilestone(rows, projectRequestId, milestoneId);
+    const normalized = typeof input === 'string' ? { completedAtIso: input } : input;
+    const revision = this.planningRevision(current.revision, normalized.expectedRevision, 'milestone');
+    requireMilestoneParentState(request, 'complete');
+    const completed = completeProjectMilestone(current, normalized.completedAtIso);
+    const rows = await this.sql.query<ProjectMilestone>(completeProjectMilestoneSql(completed, revision));
+    return this.requirePlanningWrite(rows, 'milestone');
+  }
+
+  public async editProjectMilestone(
+    projectRequestId: string,
+    milestoneId: string,
+    input: EditProjectMilestoneInput,
+    nowIso: string
+  ): Promise<ProjectMilestone> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectMilestone(projectRequestId, milestoneId);
+    const revision = this.planningRevision(current.revision, input.expectedRevision, 'milestone');
+    const edited = editProjectMilestone(request, current, input, nowIso);
+    const rows = await this.sql.query<ProjectMilestone>(editProjectMilestoneSql(edited, revision));
+    return this.requirePlanningWrite(rows, 'milestone');
+  }
+
+  public async reopenProjectMilestone(
+    projectRequestId: string,
+    milestoneId: string,
+    input: ReopenProjectMilestoneInput
+  ): Promise<ProjectMilestone> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectMilestone(projectRequestId, milestoneId);
+    const revision = this.planningRevision(current.revision, input.expectedRevision, 'milestone');
+    const reopened = reopenProjectMilestone(request, current, input);
+    const rows = await this.sql.query<ProjectMilestone>(reopenProjectMilestoneSql(reopened, revision));
+    return this.requirePlanningWrite(rows, 'milestone');
   }
 
   public async createProjectDeliverable(
@@ -783,7 +833,11 @@ export class ProjectOpsRepository {
     const rows = await this.sql.query<ProjectTask>(insertProjectTaskSql(task));
     const persisted = rows[0];
     if (!persisted) {
-      throw new Error('ProjectOps project task insert did not return a row.');
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_TASK_CHANGED',
+        'Project state changed before the task could be created. Reload before trying again.'
+      );
     }
     return persisted;
   }
@@ -808,11 +862,40 @@ export class ProjectOpsRepository {
     taskId: string,
     input: CompleteProjectTaskInput
   ): Promise<ProjectTask> {
-    await this.requireProjectRequest(projectRequestId);
+    const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectTask(projectRequestId, taskId);
+    const revision = this.planningRevision(current.revision, input.expectedRevision, 'task');
+    requireTaskParentState(request, 'complete');
     const completed = completeProjectTask(current, input);
-    const rows = await this.sql.query<ProjectTask>(completeProjectTaskSql(completed));
-    return this.requirePersistedProjectTask(rows, projectRequestId, taskId);
+    const rows = await this.sql.query<ProjectTask>(completeProjectTaskSql(completed, revision));
+    return this.requirePlanningWrite(rows, 'task');
+  }
+
+  public async editProjectTask(
+    projectRequestId: string,
+    taskId: string,
+    input: EditProjectTaskInput,
+    nowIso: string
+  ): Promise<ProjectTask> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectTask(projectRequestId, taskId);
+    const revision = this.planningRevision(current.revision, input.expectedRevision, 'task');
+    const edited = editProjectTask(request, current, input, nowIso);
+    const rows = await this.sql.query<ProjectTask>(editProjectTaskSql(edited, revision));
+    return this.requirePlanningWrite(rows, 'task');
+  }
+
+  public async reopenProjectTask(
+    projectRequestId: string,
+    taskId: string,
+    input: ReopenProjectTaskInput
+  ): Promise<ProjectTask> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectTask(projectRequestId, taskId);
+    const revision = this.planningRevision(current.revision, input.expectedRevision, 'task');
+    const reopened = reopenProjectTask(request, current, input);
+    const rows = await this.sql.query<ProjectTask>(reopenProjectTaskSql(reopened, revision));
+    return this.requirePlanningWrite(rows, 'task');
   }
 
   public async createProjectWorkLog(
@@ -1005,6 +1088,39 @@ export class ProjectOpsRepository {
   }
   private requireControlWrite(rows: readonly ProjectRequest[]): ProjectRequest {
     if (!rows[0]) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed. Reload before trying again.');
+    return rows[0];
+  }
+
+  private planningRevision(
+    currentRevision: number | undefined,
+    expectedRevision: number | undefined,
+    entity: 'milestone' | 'task'
+  ): number {
+    const current = currentRevision ?? 1;
+    if (expectedRevision !== undefined) {
+      requirePlanningRevision(entity, expectedRevision);
+      if (expectedRevision !== current) {
+        throw new ProjectOpsOperationError(
+          'conflict',
+          entity === 'milestone' ? 'PROJECTOPS_MILESTONE_CHANGED' : 'PROJECTOPS_TASK_CHANGED',
+          `${entity === 'milestone' ? 'Milestone' : 'Task'} changed. Reload before trying again.`
+        );
+      }
+    }
+    return current;
+  }
+
+  private requirePlanningWrite<T extends ProjectMilestone | ProjectTask>(
+    rows: readonly T[],
+    entity: 'milestone' | 'task'
+  ): T {
+    if (!rows[0]) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        entity === 'milestone' ? 'PROJECTOPS_MILESTONE_CHANGED' : 'PROJECTOPS_TASK_CHANGED',
+        `${entity === 'milestone' ? 'Milestone' : 'Task'} or project state changed. Reload before trying again.`
+      );
+    }
     return rows[0];
   }
 
