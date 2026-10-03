@@ -196,6 +196,10 @@ export class ProjectOpsRepository {
 
   /** A fresh repository avoids shared mutable operator identity between requests. */
   public withHistory(context: ProjectHistoryContext): ProjectOpsRepository {
+    // The legacy activity model permits NULL actors; new automatic records must not inherit that option.
+    if (typeof context.actor !== 'string' || !context.actor.trim() || context.actor.length > 120) {
+      throw new Error('Automatic history requires a valid authenticated operator identity.');
+    }
     return new ProjectOpsRepository(this.sql, Object.freeze({ ...context }));
   }
 

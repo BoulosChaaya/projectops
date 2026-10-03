@@ -42,6 +42,7 @@ test('Every covered command rolls back all business rows and revisions when requ
 
 test('History adds no false events on validation/missing/state failures and excludes foundational change requests', async () => {
   const { repo } = await fixture();
+  for (const actor of ['', ' ', 'x'.repeat(121), undefined]) assert.throws(() => repo.withHistory({ actor, clock: () => AUDIT_TIME } as any), /authenticated operator identity/);
   await repo.createProjectRequest({ id: 'r', clientId: 'c', title: 'Project', brief: 'Brief', createdAtIso: BUSINESS_TIME });
   const before = await repo.listProjectActivities('r');
   for (const run of [
