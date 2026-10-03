@@ -58,6 +58,7 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('Active notes', String(summary.activeNotes))}
       ${renderMetric('Open tasks', String(summary.openTasks))}
       ${renderMetric('Billable hours', formatHours(summary.billableWorkMinutes))}
+      ${renderMetric('Approved expenses', formatMoney(summary.approvedExpenseAmountCents, 'USD'))}
       ${renderMetric('In progress', String(summary.byStatus.in_progress))}
       ${renderMetric('Delivered', String(summary.byStatus.delivered))}
     </section>
@@ -112,6 +113,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Notes</th>
           <th scope="col">Tasks</th>
           <th scope="col">Work</th>
+          <th scope="col">Expenses</th>
           <th scope="col">Latest Activity</th>
           <th scope="col">Priority</th>
           <th scope="col">Deadline</th>
@@ -143,6 +145,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatNotes(row))}</td>
     <td>${escapeHtml(formatTasks(row))}</td>
     <td>${escapeHtml(formatWork(row))}</td>
+    <td>${escapeHtml(formatExpenses(row))}</td>
     <td>${escapeHtml(formatLatestActivity(row))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
     <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
@@ -224,6 +227,11 @@ function formatTasks(row: ProjectOpsDashboardRow): string {
 
 function formatWork(row: ProjectOpsDashboardRow): string {
   return `${formatHours(row.billableWorkMinutes ?? 0)} billable / ${formatHours(row.nonBillableWorkMinutes ?? 0)} non`;
+}
+
+function formatExpenses(row: ProjectOpsDashboardRow): string {
+  const approved = formatMoney(row.approvedExpenseAmountCents ?? 0, row.estimateCurrency ?? 'USD');
+  return `${row.submittedExpenseCount ?? 0} submitted / ${row.approvedExpenseCount ?? 0} approved (${approved})`;
 }
 
 function formatLatestActivity(row: ProjectOpsDashboardRow): string {
