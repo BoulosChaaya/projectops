@@ -10,6 +10,7 @@ import type {
   ProjectMilestone,
   ProjectNote,
   ProjectOpsClient,
+  ClientFilter,
   ProjectRequest,
   ProjectRequestStatus,
   ProjectRisk,
@@ -29,6 +30,7 @@ export const projectOpsSchemaSql = Object.freeze([
     contact_name TEXT,
     email TEXT,
     status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
     created_at TIMESTAMPTZ NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_requests (
@@ -332,7 +334,8 @@ export function insertProjectRequestSql(request: ProjectRequest): SqlStatement {
       status,
       created_at,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    FROM projectops_clients WHERE id = $2 AND status = 'active' FOR SHARE
     RETURNING *`,
     params: Object.freeze([
       request.id,
@@ -1287,13 +1290,29 @@ export function selectProjectActivityByIdSql(
   });
 }
 
-export function selectClientsSql(): SqlStatement {
+export function selectClientsSql(filter: Required<ClientFilter> = { q: '', status: 'all' }): SqlStatement {
   return Object.freeze({
     sql: `SELECT *
       FROM projectops_clients
+      WHERE ($1 = 'all' OR status = $1)
+        AND strpos(lower(name || ' ' || COALESCE(contact_name, '') || ' ' || COALESCE(email, '')), $2) > 0
       ORDER BY created_at DESC, id ASC`,
-    params: Object.freeze([]),
+    params: Object.freeze([filter.status, filter.q]),
   });
+}
+
+export function editClientSql(client: ProjectOpsClient, revision: number): SqlStatement {
+  return { sql: `UPDATE projectops_clients SET name = $2, contact_name = $3, email = $4, revision = revision + 1
+    WHERE id = $1 AND revision = $5 AND status = 'active' RETURNING *`,
+    params: [client.id, client.name, client.contactName ?? null, client.email ?? null, revision] };
+}
+export function archiveClientSql(id: string, revision: number): SqlStatement {
+  return { sql: `UPDATE projectops_clients SET status = 'archived', revision = revision + 1
+    WHERE id = $1 AND revision = $2 AND status = 'active' RETURNING *`, params: [id, revision] };
+}
+export function selectClientProjectsSql(id: string): SqlStatement {
+  return { sql: `SELECT * FROM projectops_project_requests WHERE client_id = $1
+    ORDER BY updated_at DESC, created_at DESC, id ASC`, params: [id] };
 }
 
 export function selectClientByIdSql(id: string): SqlStatement {

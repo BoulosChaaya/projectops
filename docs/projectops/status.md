@@ -68,3 +68,10 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - Browser acceptance verifies invalid credentials, sign-in, saved defaults after reload, credential change, re-login, logout and protected-page redirects.
 - Final follow-up preserves the configured loopback hostname for browser Origin matching and checks localhost in the native access test.
 - Limitations: no deployment; timezone display, mixed-currency totals and remaining product browser workflows are assigned to later slices.
+
+## Slice 4 implementation: client management
+- Browser directory and client detail page: create, search/status filters, view, edit and confirm archive, with projects per client.
+- Empty, missing-client, validation and stale-revision states; deliberate reload preserves concurrency decisions.
+- Additive migration 0003 initializes client revisions; conditional writes reject stale edits/archives.
+- Archived clients retain history and are read-only; new project creation checks and locks the client row.
+- Local pnpm verify: 55/55 PASS. PostgreSQL and Chromium acceptance pending before completion.

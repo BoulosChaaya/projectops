@@ -9,6 +9,7 @@ import type { HealthService } from '../health/health.service.ts';
 import { createProjectOpsRoutes } from './routes.ts';
 import { createProjectOpsRepositoryService } from './service.ts';
 import type { ProjectOpsAccess } from './access.ts';
+import { createClientWebRoutes } from '../../../web/src/projectops/client-routes.ts';
 
 export interface ProjectOpsAppConfig {
   readonly sql: ProjectOpsSqlExecutor;
@@ -33,6 +34,7 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
   const productRoutes = [
     ...createProjectOpsRoutes(service, config.clock),
     createProjectOpsDashboardWebRoute(service),
+    ...createClientWebRoutes(),
   ];
   const routes = Object.freeze(config.access ? [
     ...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(),

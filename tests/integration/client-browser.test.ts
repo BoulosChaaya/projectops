@@ -1,0 +1,68 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+import { operatorFixture } from './operator-fixture.ts';
+import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgres-app.ts';
+import { ProjectOpsOperatorStore } from '../../packages/projectops/src/operator.ts';
+
+test('Client browser journey creates, searches, edits, resolves stale data and archives with project history', async () => {
+  await operatorFixture(async (databaseUrl, pool) => {
+    const app = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0 });
+    let browser;
+    try {
+      await new ProjectOpsOperatorStore(pool).provision('operator', 'client-browser-password');
+      browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext(); const page = await context.newPage();
+      const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+      await page.goto(app.server.origin + '/projectops/client-management');
+      assert.ok(page.url().endsWith('/projectops/login'));
+      await page.getByLabel('Login', { exact: true }).fill('operator'); await page.getByLabel('Password', { exact: true }).fill('client-browser-password');
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL('**/projectops');
+      await page.getByRole('link', { name: 'Clients', exact: true }).click();
+      await page.getByText('No clients found.', { exact: false }).waitFor();
+      const create = page.locator('#create');
+      await create.getByLabel('Client name').fill('<script>Studio</script> %_');
+      await create.getByLabel('Contact name').fill('Boulos'); await create.getByLabel('Email').fill('contact@example.com');
+      await create.getByRole('button', { name: 'Create client', exact: true }).click(); await page.waitForURL('**/client-management/*');
+      await page.getByRole('heading', { name: '<script>Studio</script> %_', exact: true }).waitFor();
+      await page.getByText('No projects for this client.', { exact: true }).waitFor();
+      const clientId = page.url().split('/').at(-1)!;
+      const token = await context.request.get(app.server.origin + '/projectops/access/session').then(r => r.json());
+      const project = await context.request.post(app.server.origin + '/projectops/project-requests', { headers: { origin: app.server.origin, 'x-csrf-token': token.csrfToken }, data: { id: 'client-history', clientId, title: 'Client project history', brief: 'Existing work' } });
+      assert.equal(project.status(), 200);
+      await page.reload(); await page.getByRole('cell', { name: 'Client project history', exact: true }).waitFor();
+      const stale = await context.newPage(); stale.on('pageerror', e => errors.push(e.message));
+      await stale.goto(page.url()); await stale.getByRole('button', { name: 'Save changes', exact: true }).waitFor();
+      await stale.getByRole('button', { name: 'Save changes', exact: true }).isEnabled();
+      await page.locator('#edit').getByLabel('Client name').fill('Updated studio');
+      await page.locator('#edit').getByLabel('Contact name').fill(''); await page.locator('#edit').getByLabel('Email').fill('');
+      await page.getByRole('button', { name: 'Save changes', exact: true }).click(); await page.locator('#message').filter({ hasText: 'Client saved.' }).waitFor();
+      await stale.locator('#edit').getByLabel('Client name').fill('Stale overwrite');
+      await stale.getByRole('button', { name: 'Save changes', exact: true }).click();
+      await stale.locator('#message').filter({ hasText: 'Reload before trying again.' }).waitFor();
+      await stale.getByRole('button', { name: 'Reload client', exact: true }).click();
+      await stale.getByRole('heading', { name: 'Updated studio', exact: true }).waitFor(); await stale.close();
+      assert.equal(await page.locator('#edit').getByLabel('Email').inputValue(), '');
+      await page.getByRole('button', { name: 'Archive client', exact: true }).click();
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+      assert.ok(await page.getByRole('button', { name: 'Archive client', exact: true }).isVisible());
+      await page.getByRole('button', { name: 'Archive client', exact: true }).click();
+      await page.getByRole('button', { name: 'Confirm archive', exact: true }).click();
+      await page.locator('#message').filter({ hasText: 'Client archived.' }).waitFor();
+      await page.reload(); await page.getByText('Archived client', { exact: true }).waitFor();
+      await page.getByRole('cell', { name: 'Client project history', exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Save changes', exact: true }).isVisible(), false);
+      await page.getByRole('link', { name: 'Back to clients', exact: true }).click();
+      await page.getByText('No clients found.', { exact: false }).waitFor();
+      await page.getByLabel('Status', { exact: true }).selectOption('archived');
+      await page.getByRole('button', { name: 'Search', exact: true }).click();
+      await page.getByRole('link', { name: 'Updated studio', exact: true }).waitFor();
+      await page.getByLabel('Search', { exact: true }).fill('no-match'); await page.getByRole('button', { name: 'Search', exact: true }).click();
+      await page.getByText('No clients found.', { exact: false }).waitFor();
+      await page.getByLabel('Search', { exact: true }).fill('UPDATED'); await page.getByRole('button', { name: 'Search', exact: true }).click();
+      await page.getByRole('link', { name: 'Updated studio', exact: true }).waitFor();
+      await page.goto(app.server.origin + '/projectops/client-management/missing'); await page.getByText('Client not found.', { exact: true }).waitFor();
+      assert.deepEqual(errors, []);
+    } finally { await browser?.close(); await app.close(); }
+  });
+});

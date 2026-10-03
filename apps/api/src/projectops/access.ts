@@ -36,7 +36,7 @@ export class ProjectOpsAccess {
     return { ...route, handler: async (request, context, params) => {
       const session = await this.store.resolve(this.readCookie(request));
       if (!session) {
-        if (request.method === 'GET' && ['/projectops', '/projectops/settings'].includes(route.path)) return { status: 302, headers: { location: '/projectops/login', 'cache-control': 'no-store' }, body: '' };
+        if (request.method === 'GET' && (['/projectops', '/projectops/settings'].includes(route.path) || route.path.startsWith('/projectops/client-management'))) return { status: 302, headers: { location: '/projectops/login', 'cache-control': 'no-store' }, body: '' };
         return json({ message: 'Sign in required.' }, 401);
       }
       context.set('projectops.operator', session);

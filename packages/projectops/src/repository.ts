@@ -12,6 +12,11 @@ import {
   createProjectChangeRequest,
   createProjectActivity,
   createClient,
+  editClient,
+  validateClientFilter,
+  validateClientRevision,
+  type EditClientInput,
+  type ClientFilter,
   createProjectDeliverable,
   createProjectDocument,
   createProjectExpense,
@@ -83,6 +88,9 @@ import {
   completeProjectMilestoneSql,
   estimateProjectRequestSql,
   insertClientSql,
+  editClientSql,
+  archiveClientSql,
+  selectClientProjectsSql,
   insertProjectActivitySql,
   insertProjectChangeRequestSql,
   insertProjectDeliverableSql,
@@ -195,13 +203,37 @@ export class ProjectOpsRepository {
     const rows = await this.sql.query<ProjectRequest>(insertProjectRequestSql(request));
     const persisted = rows[0];
     if (!persisted) {
-      throw new Error('ProjectOps project request insert did not return a row.');
+      throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_CLIENT_ARCHIVED', 'Archived clients cannot receive new projects.');
     }
     return persisted;
   }
 
-  public async listClients(): Promise<readonly ProjectOpsClient[]> {
-    return await this.sql.query<ProjectOpsClient>(selectClientsSql());
+  public async listClients(filter: ClientFilter = {}): Promise<readonly ProjectOpsClient[]> {
+    return await this.sql.query<ProjectOpsClient>(selectClientsSql(validateClientFilter(filter)));
+  }
+
+  public async editClient(id: string, input: EditClientInput): Promise<ProjectOpsClient> {
+    const client = await this.requireClient(id);
+    const prepared = editClient(client, input);
+    const rows = await this.sql.query<ProjectOpsClient>(editClientSql(prepared, input.expectedRevision));
+    if (!rows[0]) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_CLIENT_CHANGED', 'Client changed or is archived. Reload before trying again.');
+    return rows[0];
+  }
+  public async archiveClient(id: string, expectedRevision: number): Promise<ProjectOpsClient> {
+    validateClientRevision(expectedRevision);
+    await this.requireClient(id);
+    const rows = await this.sql.query<ProjectOpsClient>(archiveClientSql(id, expectedRevision));
+    if (!rows[0]) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_CLIENT_CHANGED', 'Client changed or is archived. Reload before trying again.');
+    return rows[0];
+  }
+  public async listClientProjects(id: string): Promise<readonly ProjectRequest[]> {
+    await this.requireClient(id);
+    return await this.sql.query<ProjectRequest>(selectClientProjectsSql(id));
+  }
+  private async requireClient(id: string): Promise<ProjectOpsClient> {
+    const client = await this.getClient(id);
+    if (!client) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_CLIENT_NOT_FOUND', 'Client not found.');
+    return client;
   }
 
   public async getClient(id: string): Promise<ProjectOpsClient | undefined> {

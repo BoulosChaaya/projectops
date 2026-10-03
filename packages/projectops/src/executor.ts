@@ -223,6 +223,28 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       return Object.freeze([row as T]);
     }
 
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_CLIENTS WHERE ($1')) {
+      const [status, query] = statement.params.map(String);
+      return Object.freeze(this.selectClients().filter(row =>
+        (status === 'all' || row.status === status) && `${row.name} ${row.contactName ?? ''} ${row.email ?? ''}`.toLowerCase().includes(query)
+      ) as T[]);
+    }
+    if (upper.startsWith('UPDATE PROJECTOPS_CLIENTS SET')) {
+      const id = String(statement.params[0]);
+      const row = this.clients.get(id);
+      const archive = upper.includes("SET STATUS = 'ARCHIVED'");
+      const revision = Number(statement.params[archive ? 1 : 4]);
+      if (!row || row.status !== 'active' || (row.revision ?? 1) !== revision) return Object.freeze([]);
+      const updated = Object.freeze(archive ? { ...row, status: 'archived', revision: revision + 1 } : {
+        ...row, name: String(statement.params[1]), contactName: statement.params[2] == null ? undefined : String(statement.params[2]),
+        email: statement.params[3] == null ? undefined : String(statement.params[3]), revision: revision + 1,
+      });
+      this.clients.set(id, updated);
+      return Object.freeze([toClient(updated) as T]);
+    }
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_REQUESTS WHERE CLIENT_ID = $1')) {
+      return Object.freeze(this.selectProjectRequests().filter(row => row.clientId === statement.params[0]) as T[]);
+    }
     if (upper.startsWith('SELECT * FROM PROJECTOPS_CLIENTS ORDER BY CREATED_AT DESC')) {
       return Object.freeze(this.selectClients() as T[]);
     }
@@ -557,6 +579,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       email: asOptionalString(params[3]),
       status: asString(params[4], 'client.status'),
       createdAtIso: asString(params[5], 'client.createdAtIso'),
+      revision: 1,
     } satisfies ProjectOpsClientRow);
 
     if (this.clients.has(row.id)) {
@@ -570,6 +593,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     const clientId = asString(params[1], 'projectRequest.clientId');
     if (!this.clients.has(clientId)) {
       throw new Error(`ProjectOps client not found: ${clientId}`);
+    }
+    if (this.clients.get(clientId)!.status !== 'active') {
+      throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_CLIENT_ARCHIVED', 'Archived clients cannot receive new projects.');
     }
 
     const row = Object.freeze({
@@ -2198,6 +2224,7 @@ function mapProjectOpsStorageError(error: unknown, statement: SqlStatement): unk
 }
 
 interface ProjectOpsClientRow {
+  readonly revision?: number;
   readonly id: string;
   readonly name: string;
   readonly contactName?: string;

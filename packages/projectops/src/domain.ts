@@ -46,6 +46,40 @@ export interface ProjectOpsClient {
   readonly email?: string;
   readonly status: ClientStatus;
   readonly createdAtIso: string;
+  readonly revision?: number;
+}
+
+export interface ClientFilter {
+  readonly q?: string;
+  readonly status?: 'active' | 'archived' | 'all';
+}
+export interface EditClientInput {
+  readonly name: string;
+  readonly contactName?: string;
+  readonly email?: string;
+  readonly expectedRevision: number;
+}
+export function validateClientFilter(filter: ClientFilter = {}): Required<ClientFilter> {
+  const q = filter.q ?? '';
+  const status = filter.status ?? 'all';
+  if (typeof q !== 'string' || q.length > 120 || !['active', 'archived', 'all'].includes(status)) {
+    throw new ProjectOpsValidationError('INVALID_CLIENT_FILTER', 'Invalid client search or status filter.');
+  }
+  return { q: q.trim().toLowerCase(), status };
+}
+export function validateClientRevision(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value >= 2147483647) {
+    throw new ProjectOpsValidationError('INVALID_CLIENT_REVISION', 'A valid client revision is required.');
+  }
+  return value;
+}
+export function editClient(client: ProjectOpsClient, input: EditClientInput): ProjectOpsClient {
+  validateClientRevision(input.expectedRevision);
+  return Object.freeze({ ...client,
+    name: requireText('client.name', input.name, 120),
+    contactName: optionalText('client.contactName', input.contactName, 120),
+    email: optionalEmail('client.email', input.email),
+  });
 }
 
 export interface ProjectRequest {
@@ -635,6 +669,7 @@ export function createClient(input: NewClientInput): ProjectOpsClient {
     contactName,
     email,
     status: 'active',
+    revision: 1,
     createdAtIso: assertIsoTimestamp('client.createdAtIso', input.createdAtIso),
   });
 }
