@@ -21,10 +21,12 @@ import {
   createProjectMilestone,
   createProjectNote,
   createProjectRequest,
+  createProjectRisk,
   createProjectTask,
   createProjectWorkLog,
   estimateProjectRequest,
   markProjectInvoicePaid,
+  mitigateProjectRisk,
   rejectProjectChangeRequest,
   rejectProjectExpense,
   resolveProjectIssue,
@@ -54,6 +56,7 @@ import {
   type NewProjectMilestoneInput,
   type NewProjectNoteInput,
   type NewProjectRequestInput,
+  type NewProjectRiskInput,
   type NewProjectTaskInput,
   type NewProjectWorkLogInput,
   type ProjectDeliverable,
@@ -70,9 +73,11 @@ import {
   type ProjectNote,
   type ProjectRequest,
   type ProjectRequestStatus,
+  type ProjectRisk,
   type ProjectTask,
   type ProjectWorkLog,
   type ResolveProjectIssueInput,
+  type MitigateProjectRiskInput,
   type SqlStatement,
 } from '../packages/projectops/src/index.ts';
 import { createProjectOpsRoutes, type ProjectOpsApiService } from '../apps/api/src/projectops/routes.ts';
@@ -333,6 +338,27 @@ unitTest('PROJECTOPS-001: client to project request workflow enforces legal vert
   });
   assert.equal(rejectedExpense.status, 'rejected');
 
+  const risk = createProjectRisk(approved, {
+    id: 'risk-1',
+    projectRequestId: request.id,
+    title: 'Late content delivery',
+    description: 'Client content may arrive after implementation starts.',
+    probability: 'high',
+    impact: 'medium',
+    mitigationPlan: 'Prepare placeholder copy and confirm deadline.',
+    owner: 'Boulos',
+    identifiedAtIso: T2,
+  });
+  assert.equal(risk.status, 'open');
+  assert.equal(risk.probability, 'high');
+
+  const mitigatedRisk = mitigateProjectRisk(risk, {
+    mitigatedAtIso: T3,
+    mitigationNote: 'Client approved placeholder copy.',
+  });
+  assert.equal(mitigatedRisk.status, 'mitigated');
+  assert.equal(mitigatedRisk.mitigationNote, 'Client approved placeholder copy.');
+
   assert.throws(
     () => transitionProjectRequest(estimated, 'delivered', T1),
     /Illegal project request transition/
@@ -364,6 +390,7 @@ unitTest('PROJECTOPS-002: raw SQL contracts are parameterized and describe the f
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_invoices/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_change_requests/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_issues/);
+  assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_risks/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_feedback/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_documents/);
   assert.match(projectOpsSchemaSql.join('\n'), /CREATE TABLE IF NOT EXISTS projectops_project_notes/);
@@ -678,6 +705,45 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(resolveIssueRes.status, 200);
     assert.equal(resolvedIssue.status, 'resolved');
 
+    const riskRes = await fetch(`${server.origin}/projectops/project-requests/req-2/risks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'risk-1',
+        title: 'Late content delivery',
+        description: 'Client content may arrive after implementation starts.',
+        probability: 'high',
+        impact: 'medium',
+        mitigationPlan: 'Prepare placeholder copy and confirm deadline.',
+        owner: 'Boulos',
+        identifiedAtIso: T2,
+      }),
+    });
+    const risk = await riskRes.json() as ProjectRisk;
+    assert.equal(riskRes.status, 200);
+    assert.equal(risk.status, 'open');
+    assert.equal(risk.probability, 'high');
+
+    const risksRes = await fetch(`${server.origin}/projectops/project-requests/req-2/risks`);
+    assert.equal(risksRes.status, 200);
+    const risks = await risksRes.json() as readonly ProjectRisk[];
+    assert.equal(risks.length, 1);
+
+    const mitigateRiskRes = await fetch(
+      `${server.origin}/projectops/project-requests/req-2/risks/risk-1/mitigate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          mitigatedAtIso: T3,
+          mitigationNote: 'Client approved placeholder copy.',
+        }),
+      }
+    );
+    const mitigatedRisk = await mitigateRiskRes.json() as ProjectRisk;
+    assert.equal(mitigateRiskRes.status, 200);
+    assert.equal(mitigatedRisk.status, 'mitigated');
+
     const feedbackRes = await fetch(`${server.origin}/projectops/project-requests/req-2/feedback`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -930,6 +996,8 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.approvedChangeRequests, 1);
     assert.equal(dashboard.openIssues, 0);
     assert.equal(dashboard.resolvedIssues, 1);
+    assert.equal(dashboard.openRisks, 0);
+    assert.equal(dashboard.mitigatedRisks, 1);
     assert.equal(dashboard.openFeedback, 0);
     assert.equal(dashboard.addressedFeedback, 1);
     assert.equal(dashboard.negativeOpenFeedback, 0);
@@ -1100,6 +1168,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const invoices = new Map<string, ProjectInvoice>();
   const changeRequests = new Map<string, ProjectChangeRequest>();
   const issues = new Map<string, ProjectIssue>();
+  const risks = new Map<string, ProjectRisk>();
   const feedback = new Map<string, ProjectFeedback>();
   const documents = new Map<string, ProjectDocument>();
   const notes = new Map<string, ProjectNote>();
@@ -1313,6 +1382,43 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       }
       const next = resolveProjectIssue(current, input);
       issues.set(key, next);
+      return next;
+    },
+    async createProjectRisk(
+      projectRequestId: string,
+      input: NewProjectRiskInput
+    ): Promise<ProjectRisk> {
+      const request = requests.get(projectRequestId);
+      if (!request) {
+        throw new Error(`Project request not found: ${projectRequestId}`);
+      }
+      const risk = createProjectRisk(request, input);
+      risks.set(riskKey(projectRequestId, risk.id), risk);
+      return risk;
+    },
+    async listProjectRisks(projectRequestId: string): Promise<readonly ProjectRisk[]> {
+      return Object.freeze(
+        [...risks.values()]
+          .filter((risk) => risk.projectRequestId === projectRequestId)
+          .sort((a, b) => (
+            b.identifiedAtIso.localeCompare(a.identifiedAtIso) ||
+            b.updatedAtIso.localeCompare(a.updatedAtIso) ||
+            a.id.localeCompare(b.id)
+          ))
+      );
+    },
+    async mitigateProjectRisk(
+      projectRequestId: string,
+      riskId: string,
+      input: MitigateProjectRiskInput
+    ): Promise<ProjectRisk> {
+      const key = riskKey(projectRequestId, riskId);
+      const current = risks.get(key);
+      if (!current) {
+        throw new Error(`Project risk not found: ${projectRequestId}/${riskId}`);
+      }
+      const next = mitigateProjectRisk(current, input);
+      risks.set(key, next);
       return next;
     },
     async createProjectFeedback(
@@ -1622,6 +1728,9 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             openIssueCount: countIssues(issues, request.id, 'open'),
             highOpenIssueCount: countHighOpenIssues(issues, request.id),
             resolvedIssueCount: countIssues(issues, request.id, 'resolved'),
+            openRiskCount: countRisks(risks, request.id, 'open'),
+            highOpenRiskCount: countHighOpenRisks(risks, request.id),
+            mitigatedRiskCount: countRisks(risks, request.id, 'mitigated'),
             openFeedbackCount: countFeedback(feedback, request.id, 'open'),
             addressedFeedbackCount: countFeedback(feedback, request.id, 'addressed'),
             negativeOpenFeedbackCount: countNegativeOpenFeedback(feedback, request.id),
@@ -1671,6 +1780,10 @@ function changeRequestKey(projectRequestId: string, changeRequestId: string): st
 
 function issueKey(projectRequestId: string, issueId: string): string {
   return `${projectRequestId}\0${issueId}`;
+}
+
+function riskKey(projectRequestId: string, riskId: string): string {
+  return `${projectRequestId}\0${riskId}`;
 }
 
 function feedbackKey(projectRequestId: string, feedbackId: string): string {
@@ -1767,6 +1880,29 @@ function countHighOpenIssues(
 ): number {
   return [...issues.values()].filter(
     (issue) => issue.projectRequestId === projectRequestId && issue.status === 'open' && issue.severity === 'high'
+  ).length;
+}
+
+function countRisks(
+  risks: ReadonlyMap<string, ProjectRisk>,
+  projectRequestId: string,
+  status: ProjectRisk['status']
+): number {
+  return [...risks.values()].filter(
+    (risk) => risk.projectRequestId === projectRequestId && risk.status === status
+  ).length;
+}
+
+function countHighOpenRisks(
+  risks: ReadonlyMap<string, ProjectRisk>,
+  projectRequestId: string
+): number {
+  return [...risks.values()].filter(
+    (risk) => (
+      risk.projectRequestId === projectRequestId &&
+      risk.status === 'open' &&
+      (risk.impact === 'high' || risk.probability === 'high')
+    )
   ).length;
 }
 
