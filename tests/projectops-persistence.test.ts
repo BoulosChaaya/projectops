@@ -9,6 +9,7 @@ import {
   type ProjectOpsDashboardView,
   type ProjectDeliverable,
   type ProjectDocument,
+  type ProjectExpense,
   type ProjectFeedback,
   type ProjectInvoice,
   type ProjectMilestone,
@@ -217,6 +218,24 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
     loggedAtIso: T3,
   });
   const workLogs = await repo.listProjectWorkLogs('req-1');
+  const expense = await repo.createProjectExpense('req-1', {
+    id: 'expense-1',
+    projectRequestId: 'req-1',
+    category: 'software',
+    description: 'Analytics license',
+    vendor: 'MetricsCo',
+    amountCents: 4500,
+    currency: 'USD',
+    reimbursable: true,
+    receiptUrl: 'https://example.com/projectops/receipt.pdf',
+    incurredAtIso: T3,
+  });
+  const approvedExpense = await repo.approveProjectExpense('req-1', 'expense-1', {
+    decidedBy: 'Boulos',
+    decidedAtIso: T3,
+    decisionNote: 'Approved for launch reporting.',
+  });
+  const expenses = await repo.listProjectExpenses('req-1');
   const activity = await repo.createProjectActivity('req-1', {
     id: 'activity-1',
     projectRequestId: 'req-1',
@@ -277,6 +296,10 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(workLog.billable, true);
   assert.equal(workLogs.length, 1);
   assert.equal(workLogs[0]?.taskId, 'task-1');
+  assert.equal(expense.status, 'submitted');
+  assert.equal(approvedExpense.status, 'approved');
+  assert.equal(expenses.length, 1);
+  assert.equal(expenses[0]?.amountCents, 4500);
   assert.equal(activity.eventType, 'note_added');
   assert.equal(activities.length, 1);
   assert.equal(activities[0]?.summary, 'Client approved paid invoice and handoff.');
@@ -300,6 +323,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(snapshot.projectNotes[0]?.status, 'archived');
   assert.equal(snapshot.projectTasks[0]?.status, 'completed');
   assert.equal(snapshot.projectWorkLogs[0]?.minutes, 120);
+  assert.equal(snapshot.projectExpenses[0]?.status, 'approved');
   assert.equal(snapshot.projectActivities[0]?.summary, 'Client approved paid invoice and handoff.');
   assert.equal(dashboard.totalActiveRequests, 1);
   assert.equal(dashboard.byStatus.approved, 1);
@@ -328,6 +352,8 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.workLogs, 1);
   assert.equal(dashboard.billableWorkMinutes, 120);
   assert.equal(dashboard.nonBillableWorkMinutes, 0);
+  assert.equal(dashboard.approvedExpenses, 1);
+  assert.equal(dashboard.approvedExpenseAmountCents, 4500);
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
   assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
@@ -340,6 +366,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.rows[0]?.archivedNoteCount, 1);
   assert.equal(dashboard.rows[0]?.completedTaskCount, 1);
   assert.equal(dashboard.rows[0]?.billableWorkMinutes, 120);
+  assert.equal(dashboard.rows[0]?.approvedExpenseAmountCents, 4500);
   assert.equal(dashboard.rows[0]?.latestActivitySummary, 'Client approved paid invoice and handoff.');
 });
 
@@ -723,6 +750,37 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     const workLogs = await workLogsRes.json() as readonly ProjectWorkLog[];
     assert.equal(workLogs.length, 1);
 
+    const expense = await expectOkJson<ProjectExpense>(
+      `${server.origin}/projectops/project-requests/req-1/expenses`,
+      {
+        id: 'expense-1',
+        category: 'software',
+        description: 'Analytics license',
+        vendor: 'MetricsCo',
+        amountCents: 4500,
+        currency: 'USD',
+        reimbursable: true,
+        receiptUrl: 'https://example.com/projectops/receipt.pdf',
+        incurredAtIso: T3,
+      }
+    );
+    assert.equal(expense.status, 'submitted');
+
+    const expensesRes = await fetch(`${server.origin}/projectops/project-requests/req-1/expenses`);
+    assert.equal(expensesRes.status, 200);
+    const expenses = await expensesRes.json() as readonly ProjectExpense[];
+    assert.equal(expenses.length, 1);
+
+    const approvedExpense = await expectOkJson<ProjectExpense>(
+      `${server.origin}/projectops/project-requests/req-1/expenses/expense-1/approve`,
+      {
+        decidedBy: 'Boulos',
+        decidedAtIso: T3,
+        decisionNote: 'Approved for launch reporting.',
+      }
+    );
+    assert.equal(approvedExpense.status, 'approved');
+
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
     const clients = await clientsRes.json() as readonly { id: string }[];
@@ -763,6 +821,8 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.completedTasks, 1);
     assert.equal(dashboard.workLogs, 1);
     assert.equal(dashboard.billableWorkMinutes, 120);
+    assert.equal(dashboard.approvedExpenses, 1);
+    assert.equal(dashboard.approvedExpenseAmountCents, 4500);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
     assert.equal(sql.snapshot().projectMilestones[0]?.status, 'completed');
     assert.equal(sql.snapshot().projectDeliverables[0]?.status, 'accepted');
@@ -772,6 +832,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(sql.snapshot().projectNotes[0]?.status, 'archived');
     assert.equal(sql.snapshot().projectTasks[0]?.status, 'completed');
     assert.equal(sql.snapshot().projectWorkLogs[0]?.minutes, 120);
+    assert.equal(sql.snapshot().projectExpenses[0]?.status, 'approved');
   } finally {
     await server.close();
   }
