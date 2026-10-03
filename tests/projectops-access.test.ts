@@ -28,8 +28,9 @@ test('All product routes require a session and writes enforce Origin, JSON and C
     async saveDefaults(value) { return validateOperatorDefaults(value); },
     async changeCredentials() { return true; },
   });
-  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), port: 0, access });
+  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), host: 'localhost', port: 0, access });
   const origin = app.server.origin;
+  assert.equal(new URL(origin).hostname, 'localhost');
   try {
     for (const route of app.routes.filter(r => !r.path.includes('/access/') && r.path !== '/projectops/login')) {
       const method = typeof route.method === 'string' ? route.method : route.method[0];

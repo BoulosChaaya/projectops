@@ -37,11 +37,17 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
   const routes = Object.freeze(config.access ? [
     ...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(),
   ] : productRoutes);
-  const server = await startHttpListener({
+  const listener = await startHttpListener({
     host: config.host,
     port: config.port,
     routes,
     healthService: config.healthService,
+  });
+  // Keep the configured hostname: localhost may bind an IPv6 address, and
+  // browser Origin must match the URL operators actually open.
+  const host = config.host ?? listener.host;
+  const server = Object.freeze({ ...listener,
+    origin: `http://${host.includes(':') ? `[${host}]` : host}:${listener.port}`,
   });
   config.access?.configureOrigin(server.origin);
 
