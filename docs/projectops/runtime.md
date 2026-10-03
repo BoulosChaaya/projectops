@@ -19,6 +19,7 @@ Startup applies the frozen migration artifacts in a transaction and records thei
 pnpm verify
 export PROJECTOPS_TEST_DATABASE_URL='postgres://user:password@127.0.0.1:5432/projectops_test'
 pnpm test:postgres
+pnpm test:browser
 ```
 
 The PostgreSQL acceptance command fails if its URL is missing. It creates unique test schemas and removes only those schemas afterward. Use a dedicated test database and a role allowed to create schemas. It checks API writes and dashboard reads across application restart, simultaneous migration startup, a new migration version, checksum drift, transactional rollback and unmanaged-schema refusal. GitHub Actions runs it against PostgreSQL 16.
@@ -58,7 +59,7 @@ The workspace displays overview/estimate/approval details and all existing colle
 
 PUT /projectops/project-requests/:id updates title, brief, budgetRange, priority and deadlineIso using expectedRevision. Optional budget/deadline fields can be cleared. Identity, client, creation date, workflow state, estimate and approval metadata are preserved. Cancelled and archived projects are read-only. Migration 0004 initializes revisions; project edits and estimate/approval/control writes increment them, so a stale editor also detects workflow changes. Parent estimate, approval and status writes check the expected revision and current state atomically.
 
-Deadline inputs explicitly use UTC; displayed dates use the operator's saved IANA timezone. API deadlines remain ISO instants and cannot precede project creation. Forms reject invalid input and offer a deliberate reload on 409 conflicts. Planning/execution/delivery/finance editing controls and automatic history remain their later approved slices; this workspace connects their current records.
+Deadline inputs explicitly use UTC; displayed dates use the operator's saved IANA timezone. API deadlines remain ISO instants and cannot precede project creation. Forms reject invalid input and offer a deliberate reload on 409 conflicts. Execution/delivery/finance editing controls and automatic history remain their later approved slices; this workspace connects their current records.
 
 ## Estimates and project controls
 
@@ -68,4 +69,23 @@ Available actions follow the project state: approved → start; in progress → 
 
 POST /projectops/project-requests/:id/control accepts action (start, hold, resume, cancel, deliver, archive) and expectedRevision. Estimate and approval commands accept expectedRevision; browser requests always send it. The older status/estimate/approval API payloads may omit a revision for compatibility, but the repository still checks the revision/state read by that command when writing. Stale commands return 409 and the browser offers Reload project. Generic status writes cannot create estimated/approved states; use the explicit commands that record their metadata. Starting, holding, resuming and delivering require recorded estimate/approval metadata.
 
-Migration 0005 adds on_hold/cancelled to the status constraint without rewriting existing records. Legacy estimated records missing an estimate can be estimated again; legacy approved records missing required metadata cannot start and can be cancelled/archived. Child routes reject ordinary writes to cancelled/archived projects. Atomic concurrency guards for child collection commands, including a child write racing cancellation, belong to the planning/execution/delivery/finances slices. Delivery acceptance/completion gates are slice 9, mixed-currency totals slice 10, and automatic activity records slice 11.
+Migration 0005 adds on_hold/cancelled to the status constraint without rewriting existing records. Legacy estimated records missing an estimate can be estimated again; legacy approved records missing required metadata cannot start and can be cancelled/archived. Child routes reject ordinary writes to cancelled/archived projects. Atomic concurrency guards for execution/delivery/finance child commands remain in their assigned slices. Delivery acceptance/completion gates are slice 9, mixed-currency totals slice 10, and automatic activity records slice 11.
+
+## Planning
+
+The Milestones and Tasks workspace sections provide browser creation, editing, due-date changes and clearing, completion and reopening. Milestone edits change only title and optional due date. Task edits change title, optional description, optional assignee, priority and optional due date. Empty optional fields clear their stored values. Completion metadata is set by completion and cleared by reopening; identity, parent, creation time and status/completion metadata are not directly editable. Stored text is inserted through text-only DOM APIs.
+
+Milestones can be created and edited while the project is approved or in progress. An open milestone can be completed while the project is approved, in progress, on hold or delivered; a completed milestone can be reopened only while approved or in progress. Task creation, editing, completion and reopening are available while the project is estimated, approved, in progress, on hold or delivered. Edits require an open child; completion changes open to completed; reopening changes completed to open. New, cancelled and archived states reject task commands, and cancelled/archived states reject every milestone command. Read-only project states retain their planning records in the workspace.
+
+The collection GET/POST and completion routes remain available. Planning also provides:
+
+```text
+PUT  /projectops/project-requests/:id/milestones/:milestoneId
+POST /projectops/project-requests/:id/milestones/:milestoneId/reopen
+PUT  /projectops/project-requests/:id/tasks/:taskId
+POST /projectops/project-requests/:id/tasks/:taskId/reopen
+```
+
+Migration 0006 adds `revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0)` to both child tables, so upgraded records start at revision 1. New records also start at 1. Edit, complete and reopen atomically compare and increment the child revision; browser commands send the displayed revision and expose a deliberate reload after a 409 conflict. Compatibility completion callers that omit a revision still use the revision read by that command, and the SQL guard remains conditional.
+
+Every planning insert/update locks and validates the parent project row in the same SQL statement. Updates also compare child identity, revision and required child status. If cancellation/archive obtains the parent lock first, the waiting child command conflicts and leaves the child unchanged; if the child commits first, the later lifecycle command may proceed. Planning changes do not increment the project revision. Native, real PostgreSQL and Chromium coverage runs through the verification commands above.

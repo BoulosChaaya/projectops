@@ -38,10 +38,10 @@ See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the prev
 Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. The PostgreSQL runtime now protects these routes; contract tests may still inject an unprotected memory harness.
 
 ## Remaining approved work
-Roadmap slices 1-6 are complete. Slices 7-14 remain open. Existing functionality is reused to complete them.
+Roadmap slices 1-7 are complete. Slices 8-14 remain open. Existing functionality is reused to complete them.
 
 ## Next slice
-Slice 7: planning. Implement browser create/edit/reschedule/complete/reopen tasks and milestones, with persistence, validation and atomic child-command state/concurrency checks. The runnable application defaults to loopback and is not deployed.
+Slice 8: execution workspace. Manage work logs, notes, document links, issues and risks through the browser. The runnable application defaults to loopback and is not deployed.
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.
@@ -106,3 +106,17 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - Database acceptance verifies migration from the prior schema, stale revisions, estimate/approval and cancellation/delivery races, hold across restart, terminal write rejection and record retention. A shared-snapshot barrier ensures both competing commands read the same state before writing, proving the SQL guard itself rejects one decision.
 - Chromium verifies currency defaults and exact decimal conversion, estimate revision, stale-tab approval rejection/reload, confirmation dismissal, estimate-to-archive lifecycle, hold/resume, cancellation, dashboard removal and retained client history.
 - Limitations: atomic child-command guards (including writes racing cancellation) remain in slices 7-10; delivery acceptance/completion gates remain slice 9, currency-separated totals slice 10, and automatic history slice 11. No deployment claim.
+
+## Completed slice 7: planning
+- Protected workspace forms create, edit, reschedule, complete and reopen tasks and milestones. Optional dates and task description/assignee fields can be cleared; records remain visible when the project is read-only; stored user text is rendered safely.
+- Milestone creation/editing/reopening is limited to approved/in-progress projects; completion is also allowed on held/delivered projects. Task commands are allowed for estimated, approved, in-progress, held and delivered projects. Child status rules require open records for edit/complete and completed records for reopen.
+- Additive migration 0006 gives tasks and milestones positive integer revisions, defaulting existing records to revision 1. Edit, complete and reopen increment the child revision without incrementing the project revision.
+- Child SQL writes conditionally check identity, revision and child status while locking/checking the parent project in the same statement. This prevents a child write from committing after cancellation/archive wins the parent-row serialization race.
+- New PUT edit and POST reopen routes follow the existing protected route boundary. Browser completion sends the expected child revision; compatible older completion calls still derive a revision before issuing the same guarded SQL write.
+- Implementation checkpoint: 4b13645460b8733e02c35aa33fdd5763288284c1.
+- `pnpm verify`: 63/63 PASS; hygiene passed for 567 files.
+- `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:postgres`: 13/13 PASS, zero skips.
+- `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:browser`: 5/5 PASS, zero skips. The pre-identified duplicate `Client not found.` locator was scoped to `#client-status`; no client-management behavior changed.
+- PostgreSQL acceptance verifies fresh and pre-0006 migration, existing-row revision initialization, full planning persistence across restart, optional-field clearing, state restrictions and deterministic failures. Controlled races prove one winner for competing edits and edit-versus-complete, stale command rejection, cancellation winning against task/milestone mutations with unchanged children, and the reverse order where a child commits before cancellation.
+- Chromium acceptance verifies creation, validation, safe text, edit/reschedule/clear, completion/reopen, reload persistence, stale-tab conflict feedback and held/cancelled read-only behavior.
+- Limitations: execution workspace editing remains slice 8, delivery acceptance/completion gates remain slice 9, currency-separated totals remain slice 10, and automatic history remains slice 11. No deployment claim.
