@@ -36,6 +36,7 @@ export const projectOpsSchemaSql = Object.freeze([
   `CREATE TABLE IF NOT EXISTS projectops_project_requests (
     id TEXT PRIMARY KEY,
     client_id TEXT NOT NULL REFERENCES projectops_clients(id) ON DELETE RESTRICT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
     title TEXT NOT NULL,
     brief TEXT NOT NULL,
     budget_range TEXT,
@@ -365,7 +366,8 @@ export function estimateProjectRequestSql(request: ProjectRequest): SqlStatement
         estimate_currency = $3,
         estimated_at = $4,
         status = $5,
-        updated_at = $6
+        updated_at = $6,
+        revision = revision + 1
       WHERE id = $1
       RETURNING *`,
     params: Object.freeze([
@@ -386,7 +388,8 @@ export function approveProjectRequestSql(request: ProjectRequest): SqlStatement 
         approved_at = $2,
         approved_by = $3,
         status = $4,
-        updated_at = $5
+        updated_at = $5,
+        revision = revision + 1
       WHERE id = $1
       RETURNING *`,
     params: Object.freeze([
@@ -1331,11 +1334,19 @@ export function updateProjectRequestStatusSql(
 ): SqlStatement {
   return Object.freeze({
     sql: `UPDATE projectops_project_requests
-      SET status = $2, updated_at = $3
+      SET status = $2, updated_at = $3, revision = revision + 1
       WHERE id = $1
       RETURNING *`,
     params: Object.freeze([id, status, updatedAtIso]),
   });
+}
+
+export function editProjectSql(request: ProjectRequest, expectedRevision: number): SqlStatement {
+  return { sql: `UPDATE projectops_project_requests SET title = $2, brief = $3, budget_range = $4,
+    deadline_at = $5, priority = $6, updated_at = $7, revision = revision + 1
+    WHERE id = $1 AND revision = $8 AND status <> 'archived' RETURNING *`,
+    params: [request.id, request.title, request.brief, request.budgetRange ?? null, request.deadlineIso ?? null,
+      request.priority, request.updatedAtIso, expectedRevision] };
 }
 
 export function selectProjectRequestsSql(): SqlStatement {

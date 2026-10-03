@@ -80,3 +80,11 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - Database acceptance verifies upgrading the prior schema, concurrent edits, literal search, clearing contact fields, restart persistence, archive/history retention, and an insert blocked by a concurrent archive.
 - Browser acceptance verifies protected client pages, creation, safe text rendering, project history, edits, stale-tab conflict/reload, archive confirmation/cancel, filters/search, empty and missing-client states.
 - Limitations: project workspace links/editing are slice 5; client restore/delete are not introduced. No deployment claim.
+
+## Slice 5 implementation: project workspace and editing
+- Project creation on active client pages and navigation from client/dashboard project names.
+- Protected workspace with overview, estimate/approval and all thirteen existing collection sections; independent failure/retry states.
+- Detail edits for title, brief, budget range, priority and deadline, with clearing optional fields and stale revision feedback/reload.
+- Additive migration 0004; revisions include estimate, approval and status writes. Archived projects remain read-only.
+- Dates display in saved operator timezone; deadline inputs explicitly use UTC. Existing budget range transport mapping corrected.
+- Local native verification: 57/57 PASS. PostgreSQL/Chromium acceptance pending before completion.

@@ -83,6 +83,7 @@ export function editClient(client: ProjectOpsClient, input: EditClientInput): Pr
 }
 
 export interface ProjectRequest {
+  readonly revision?: number;
   readonly id: string;
   readonly clientId: string;
   readonly title: string;
@@ -98,6 +99,26 @@ export interface ProjectRequest {
   readonly status: ProjectRequestStatus;
   readonly createdAtIso: string;
   readonly updatedAtIso: string;
+}
+
+export interface EditProjectInput {
+  readonly title: string;
+  readonly brief: string;
+  readonly budgetRange?: string;
+  readonly deadlineIso?: string;
+  readonly priority: ProjectPriority;
+  readonly expectedRevision: number;
+}
+export function editProject(request: ProjectRequest, input: EditProjectInput, nowIso: string): ProjectRequest {
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1 || input.expectedRevision >= 2147483647) {
+    throw new ProjectOpsValidationError('INVALID_PROJECT_REVISION', 'A valid project revision is required.');
+  }
+  const validated = createProjectRequest({ id: request.id, clientId: request.clientId,
+    title: input.title, brief: input.brief, budgetRange: input.budgetRange, deadlineIso: input.deadlineIso,
+    priority: input.priority, createdAtIso: request.createdAtIso });
+  return Object.freeze({ ...request, title: validated.title, brief: validated.brief,
+    budgetRange: validated.budgetRange, deadlineIso: validated.deadlineIso, priority: validated.priority,
+    updatedAtIso: assertIsoTimestamp('projectRequest.updatedAtIso', nowIso) });
 }
 
 export interface ProjectMilestone {
@@ -707,6 +728,7 @@ export function createProjectRequest(input: NewProjectRequestInput): ProjectRequ
     deadlineIso,
     priority,
     status: 'new',
+    revision: 1,
     createdAtIso,
     updatedAtIso: createdAtIso,
   });

@@ -463,6 +463,15 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       return Object.freeze(this.selectProjectActivities(projectRequestId) as T[]);
     }
 
+    if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_REQUESTS SET TITLE = $2')) {
+      const id = String(statement.params[0]); const current = this.projectRequests.get(id);
+      const revision = Number(statement.params[7]);
+      if (!current || current.status === 'archived' || (current.revision ?? 1) !== revision) return Object.freeze([]);
+      const next = Object.freeze({ ...current, title: String(statement.params[1]), brief: String(statement.params[2]),
+        budgetRange: asOptionalString(statement.params[3]), deadlineIso: asOptionalString(statement.params[4]),
+        priority: String(statement.params[5]), updatedAtIso: String(statement.params[6]), revision: revision + 1 });
+      this.projectRequests.set(id, next); return Object.freeze([next as T]);
+    }
     if (upper.startsWith('UPDATE PROJECTOPS_PROJECT_REQUESTS') && upper.includes('ESTIMATE_AMOUNT_CENTS')) {
       const row = this.estimateProjectRequest(statement.params);
       return Object.freeze(row ? [row as T] : []);
@@ -614,6 +623,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       status: asString(params[12], 'projectRequest.status'),
       createdAtIso: asString(params[13], 'projectRequest.createdAtIso'),
       updatedAtIso: asString(params[14], 'projectRequest.updatedAtIso'),
+      revision: 1,
     } satisfies ProjectOpsRequestRow);
 
     if (this.projectRequests.has(row.id)) {
@@ -1028,6 +1038,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       estimatedAtIso: asOptionalString(params[3]),
       status: asString(params[4], 'projectRequest.status'),
       updatedAtIso: asString(params[5], 'projectRequest.updatedAtIso'),
+      revision: (current.revision ?? 1) + 1,
     });
     this.projectRequests.set(id, next);
     return next;
@@ -1044,6 +1055,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       approvedBy: asOptionalString(params[2]),
       status: asString(params[3], 'projectRequest.status'),
       updatedAtIso: asString(params[4], 'projectRequest.updatedAtIso'),
+      revision: (current.revision ?? 1) + 1,
     });
     this.projectRequests.set(id, next);
     return next;
@@ -1058,6 +1070,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       ...current,
       status: asString(params[1], 'projectRequest.status'),
       updatedAtIso: asString(params[2], 'projectRequest.updatedAtIso'),
+      revision: (current.revision ?? 1) + 1,
     });
     this.projectRequests.set(id, next);
     return next;
@@ -1758,6 +1771,7 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
     ...source,
     ...(source.client_id !== undefined ? { clientId: source.client_id } : {}),
     ...(source.client_name !== undefined ? { clientName: source.client_name } : {}),
+    ...(source.budget_range !== undefined ? { budgetRange: normalizeOptionalValue(source.budget_range) } : {}),
     ...(source.project_request_id !== undefined ? { projectRequestId: source.project_request_id } : {}),
     ...(source.task_id !== undefined ? { taskId: normalizeOptionalValue(source.task_id) } : {}),
     ...(source.milestone_id !== undefined ? { milestoneId: normalizeOptionalValue(source.milestone_id) } : {}),
@@ -2234,6 +2248,7 @@ interface ProjectOpsClientRow {
 }
 
 interface ProjectOpsRequestRow {
+  readonly revision?: number;
   readonly id: string;
   readonly clientId: string;
   readonly title: string;
