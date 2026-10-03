@@ -32,7 +32,7 @@ test('Controls upgrade and atomic estimate/approval/cancellation decisions persi
       await send(root + '/notes', { id: 'n', author: 'Operator', body: 'Retained record' });
       current = await read('r'); assert.equal((await send(root + '/control', { action: 'hold', expectedRevision: current.revision })).status, 200);
       current = await read('r'); assert.equal((await send(root + '/control', { action: 'deliver', expectedRevision: current.revision })).status, 400);
-      assert.equal((await send(root + '/work-logs', { id: 'w', actor: 'Operator', minutes: 30, note: 'Blocked while held' })).status, 400);
+      assert.equal((await send(root + '/work-logs', { id: 'w', actor: 'Operator', minutes: 30, note: 'Blocked while held' })).status, 409);
       await app.close(); app = await startProjectOpsPostgresApp(config); origin = app.server.origin;
       current = await read('r'); assert.equal(current.status, 'on_hold');
       assert.equal((await send(root + '/control', { action: 'resume', expectedRevision: current.revision })).status, 200);

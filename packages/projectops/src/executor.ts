@@ -180,12 +180,12 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_ISSUES')) {
       const row = this.insertProjectIssue(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_RISKS')) {
       const row = this.insertProjectRisk(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_FEEDBACK')) {
@@ -195,12 +195,12 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_DOCUMENTS')) {
       const row = this.insertProjectDocument(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_NOTES')) {
       const row = this.insertProjectNote(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_TASKS')) {
@@ -210,7 +210,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_WORK_LOGS')) {
       const row = this.insertProjectWorkLog(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_EXPENSES')) {
@@ -760,11 +760,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectIssue(params: readonly unknown[]): ProjectOpsIssueRow {
+  private insertProjectIssue(params: readonly unknown[]): ProjectOpsIssueRow | undefined {
     const projectRequestId = asString(params[1], 'projectIssue.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
+    if (!['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'].includes(parent.status)) return undefined;
 
     const row = Object.freeze({
       id: asString(params[0], 'projectIssue.id'),
@@ -788,11 +790,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectRisk(params: readonly unknown[]): ProjectOpsRiskRow {
+  private insertProjectRisk(params: readonly unknown[]): ProjectOpsRiskRow | undefined {
     const projectRequestId = asString(params[1], 'projectRisk.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
+    if (!['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'].includes(parent.status)) return undefined;
 
     const row = Object.freeze({
       id: asString(params[0], 'projectRisk.id'),
@@ -852,11 +856,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectDocument(params: readonly unknown[]): ProjectOpsDocumentRow {
+  private insertProjectDocument(params: readonly unknown[]): ProjectOpsDocumentRow | undefined {
     const projectRequestId = asString(params[1], 'projectDocument.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
+    if (!['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'].includes(parent.status)) return undefined;
 
     const deliverableId = asOptionalString(params[2]);
     if (deliverableId && !this.projectDeliverables.has(deliverableKey(projectRequestId, deliverableId))) {
@@ -886,11 +892,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectNote(params: readonly unknown[]): ProjectOpsNoteRow {
+  private insertProjectNote(params: readonly unknown[]): ProjectOpsNoteRow | undefined {
     const projectRequestId = asString(params[1], 'projectNote.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
+    if (['cancelled', 'archived'].includes(parent.status)) return undefined;
 
     const row = Object.freeze({
       id: asString(params[0], 'projectNote.id'),
@@ -945,11 +953,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectWorkLog(params: readonly unknown[]): ProjectOpsWorkLogRow {
+  private insertProjectWorkLog(params: readonly unknown[]): ProjectOpsWorkLogRow | undefined {
     const projectRequestId = asString(params[1], 'projectWorkLog.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
+    if (!['estimated', 'approved', 'in_progress', 'delivered'].includes(parent.status)) return undefined;
 
     const taskId = asOptionalString(params[2]);
     if (taskId && !this.projectTasks.has(taskKey(projectRequestId, taskId))) {
@@ -1176,8 +1186,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private resolveProjectIssue(params: readonly unknown[]): ProjectOpsIssueRow | undefined {
     const projectRequestId = asString(params[0], 'projectIssue.projectRequestId');
     const id = asString(params[1], 'projectIssue.id');
+    const parent = this.projectRequests.get(projectRequestId);
     const current = this.projectIssues.get(issueKey(projectRequestId, id));
-    if (!current) return undefined;
+    if (!parent || ['cancelled', 'archived'].includes(parent.status) || !current || current.status !== 'open') return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1193,8 +1204,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private mitigateProjectRisk(params: readonly unknown[]): ProjectOpsRiskRow | undefined {
     const projectRequestId = asString(params[0], 'projectRisk.projectRequestId');
     const id = asString(params[1], 'projectRisk.id');
+    const parent = this.projectRequests.get(projectRequestId);
     const current = this.projectRisks.get(riskKey(projectRequestId, id));
-    if (!current) return undefined;
+    if (!parent || ['cancelled', 'archived'].includes(parent.status) || !current || current.status !== 'open') return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1228,8 +1240,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private archiveProjectDocument(params: readonly unknown[]): ProjectOpsDocumentRow | undefined {
     const projectRequestId = asString(params[0], 'projectDocument.projectRequestId');
     const id = asString(params[1], 'projectDocument.id');
+    const parent = this.projectRequests.get(projectRequestId);
     const current = this.projectDocuments.get(documentKey(projectRequestId, id));
-    if (!current) return undefined;
+    if (!parent || ['cancelled', 'archived'].includes(parent.status) || !current || current.status !== 'active') return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1245,8 +1258,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private archiveProjectNote(params: readonly unknown[]): ProjectOpsNoteRow | undefined {
     const projectRequestId = asString(params[0], 'projectNote.projectRequestId');
     const id = asString(params[1], 'projectNote.id');
+    const parent = this.projectRequests.get(projectRequestId);
     const current = this.projectNotes.get(noteKey(projectRequestId, id));
-    if (!current) return undefined;
+    if (!parent || ['cancelled', 'archived'].includes(parent.status) || !current || current.status !== 'active') return undefined;
 
     const next = Object.freeze({
       ...current,

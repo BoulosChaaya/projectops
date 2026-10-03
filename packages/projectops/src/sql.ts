@@ -765,7 +765,10 @@ export function insertProjectIssueSql(issue: ProjectIssue): SqlStatement {
       resolved_at,
       resolution_note,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    ) SELECT $1, parent.id, $3, $4, $5, $6, $7, $8, $9, $10, $11
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered')
+        FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       issue.id,
@@ -807,9 +810,12 @@ export function selectProjectIssueByIdSql(
 
 export function resolveProjectIssueSql(issue: ProjectIssue): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_issues
+    sql: `UPDATE projectops_project_issues AS child
       SET status = $3, resolved_at = $4, resolution_note = $5, updated_at = $6
-      WHERE project_request_id = $1 AND id = $2
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status NOT IN ('cancelled', 'archived')
+        FOR UPDATE) AS parent
+      WHERE child.project_request_id = parent.id AND child.id = $2 AND child.status = 'open'
       RETURNING *`,
     params: Object.freeze([
       issue.projectRequestId,
@@ -838,7 +844,10 @@ export function insertProjectRiskSql(risk: ProjectRisk): SqlStatement {
       mitigated_at,
       mitigation_note,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    ) SELECT $1, parent.id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered')
+        FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       risk.id,
@@ -882,9 +891,12 @@ export function selectProjectRiskByIdSql(
 
 export function mitigateProjectRiskSql(risk: ProjectRisk): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_risks
+    sql: `UPDATE projectops_project_risks AS child
       SET status = $3, mitigated_at = $4, mitigation_note = $5, updated_at = $6
-      WHERE project_request_id = $1 AND id = $2
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status NOT IN ('cancelled', 'archived')
+        FOR UPDATE) AS parent
+      WHERE child.project_request_id = parent.id AND child.id = $2 AND child.status = 'open'
       RETURNING *`,
     params: Object.freeze([
       risk.projectRequestId,
@@ -986,7 +998,10 @@ export function insertProjectDocumentSql(document: ProjectDocument): SqlStatemen
       archived_at,
       archived_by,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    ) SELECT $1, parent.id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered')
+        FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       document.id,
@@ -1029,9 +1044,12 @@ export function selectProjectDocumentByIdSql(
 
 export function archiveProjectDocumentSql(document: ProjectDocument): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_documents
+    sql: `UPDATE projectops_project_documents AS child
       SET status = $3, archived_at = $4, archived_by = $5, updated_at = $6
-      WHERE project_request_id = $1 AND id = $2
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status NOT IN ('cancelled', 'archived')
+        FOR UPDATE) AS parent
+      WHERE child.project_request_id = parent.id AND child.id = $2 AND child.status = 'active'
       RETURNING *`,
     params: Object.freeze([
       document.projectRequestId,
@@ -1057,7 +1075,10 @@ export function insertProjectNoteSql(note: ProjectNote): SqlStatement {
       archived_at,
       archived_by,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    ) SELECT $1, parent.id, $3, $4, $5, $6, $7, $8, $9, $10
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status NOT IN ('cancelled', 'archived')
+        FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       note.id,
@@ -1098,9 +1119,12 @@ export function selectProjectNoteByIdSql(
 
 export function archiveProjectNoteSql(note: ProjectNote): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_notes
+    sql: `UPDATE projectops_project_notes AS child
       SET status = $3, archived_at = $4, archived_by = $5, updated_at = $6
-      WHERE project_request_id = $1 AND id = $2
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status NOT IN ('cancelled', 'archived')
+        FOR UPDATE) AS parent
+      WHERE child.project_request_id = parent.id AND child.id = $2 AND child.status = 'active'
       RETURNING *`,
     params: Object.freeze([
       note.projectRequestId,
@@ -1260,7 +1284,10 @@ export function insertProjectWorkLogSql(workLog: ProjectWorkLog): SqlStatement {
       note,
       logged_at,
       created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    ) SELECT $1, parent.id, $3, $4, $5, $6, $7, $8, $9
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status IN ('estimated', 'approved', 'in_progress', 'delivered')
+        FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       workLog.id,

@@ -40,6 +40,7 @@ import {
   rejectProjectExpense,
   reopenProjectMilestone,
   reopenProjectTask,
+  requireExecutionActionParentState,
   requireMilestoneParentState,
   requirePlanningRevision,
   requireTaskParentState,
@@ -76,6 +77,7 @@ import {
   type ProjectChangeRequest,
   type ProjectDeliverable,
   type ProjectDocument,
+  type ProjectExecutionResource,
   type ProjectExpense,
   type ProjectFeedback,
   type ProjectInvoice,
@@ -569,11 +571,7 @@ export class ProjectOpsRepository {
     }
 
     const rows = await this.sql.query<ProjectIssue>(insertProjectIssueSql(issue));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project issue insert did not return a row.');
-    }
-    return persisted;
+    return await this.requireExecutionCreateWrite(rows, projectRequestId, 'issue');
   }
 
   public async listProjectIssues(projectRequestId: string): Promise<readonly ProjectIssue[]> {
@@ -596,11 +594,12 @@ export class ProjectOpsRepository {
     issueId: string,
     input: ResolveProjectIssueInput
   ): Promise<ProjectIssue> {
-    await this.requireProjectRequest(projectRequestId);
+    const request = await this.requireProjectRequest(projectRequestId);
+    requireExecutionActionParentState(request);
     const current = await this.requireProjectIssue(projectRequestId, issueId);
     const resolved = resolveProjectIssue(current, input);
     const rows = await this.sql.query<ProjectIssue>(resolveProjectIssueSql(resolved));
-    return this.requirePersistedProjectIssue(rows, projectRequestId, issueId);
+    return await this.requireExecutionActionWrite(rows, projectRequestId, issueId, 'issue');
   }
 
   public async createProjectRisk(
@@ -619,11 +618,7 @@ export class ProjectOpsRepository {
     }
 
     const rows = await this.sql.query<ProjectRisk>(insertProjectRiskSql(risk));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project risk insert did not return a row.');
-    }
-    return persisted;
+    return await this.requireExecutionCreateWrite(rows, projectRequestId, 'risk');
   }
 
   public async listProjectRisks(projectRequestId: string): Promise<readonly ProjectRisk[]> {
@@ -646,11 +641,12 @@ export class ProjectOpsRepository {
     riskId: string,
     input: MitigateProjectRiskInput
   ): Promise<ProjectRisk> {
-    await this.requireProjectRequest(projectRequestId);
+    const request = await this.requireProjectRequest(projectRequestId);
+    requireExecutionActionParentState(request);
     const current = await this.requireProjectRisk(projectRequestId, riskId);
     const mitigated = mitigateProjectRisk(current, input);
     const rows = await this.sql.query<ProjectRisk>(mitigateProjectRiskSql(mitigated));
-    return this.requirePersistedProjectRisk(rows, projectRequestId, riskId);
+    return await this.requireExecutionActionWrite(rows, projectRequestId, riskId, 'risk');
   }
 
   public async createProjectFeedback(
@@ -729,11 +725,7 @@ export class ProjectOpsRepository {
     }
 
     const rows = await this.sql.query<ProjectDocument>(insertProjectDocumentSql(document));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project document insert did not return a row.');
-    }
-    return persisted;
+    return await this.requireExecutionCreateWrite(rows, projectRequestId, 'document');
   }
 
   public async listProjectDocuments(
@@ -758,11 +750,12 @@ export class ProjectOpsRepository {
     documentId: string,
     input: ArchiveProjectDocumentInput
   ): Promise<ProjectDocument> {
-    await this.requireProjectRequest(projectRequestId);
+    const request = await this.requireProjectRequest(projectRequestId);
+    requireExecutionActionParentState(request);
     const current = await this.requireProjectDocument(projectRequestId, documentId);
     const archived = archiveProjectDocument(current, input);
     const rows = await this.sql.query<ProjectDocument>(archiveProjectDocumentSql(archived));
-    return this.requirePersistedProjectDocument(rows, projectRequestId, documentId);
+    return await this.requireExecutionActionWrite(rows, projectRequestId, documentId, 'document');
   }
 
   public async createProjectNote(
@@ -781,11 +774,7 @@ export class ProjectOpsRepository {
     }
 
     const rows = await this.sql.query<ProjectNote>(insertProjectNoteSql(note));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project note insert did not return a row.');
-    }
-    return persisted;
+    return await this.requireExecutionCreateWrite(rows, projectRequestId, 'note');
   }
 
   public async listProjectNotes(projectRequestId: string): Promise<readonly ProjectNote[]> {
@@ -808,11 +797,12 @@ export class ProjectOpsRepository {
     noteId: string,
     input: ArchiveProjectNoteInput
   ): Promise<ProjectNote> {
-    await this.requireProjectRequest(projectRequestId);
+    const request = await this.requireProjectRequest(projectRequestId);
+    requireExecutionActionParentState(request);
     const current = await this.requireProjectNote(projectRequestId, noteId);
     const archived = archiveProjectNote(current, input);
     const rows = await this.sql.query<ProjectNote>(archiveProjectNoteSql(archived));
-    return this.requirePersistedProjectNote(rows, projectRequestId, noteId);
+    return await this.requireExecutionActionWrite(rows, projectRequestId, noteId, 'note');
   }
 
   public async createProjectTask(
@@ -918,11 +908,7 @@ export class ProjectOpsRepository {
     }
 
     const rows = await this.sql.query<ProjectWorkLog>(insertProjectWorkLogSql(workLog));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project work log insert did not return a row.');
-    }
-    return persisted;
+    return await this.requireExecutionCreateWrite(rows, projectRequestId, 'work_log');
   }
 
   public async listProjectWorkLogs(projectRequestId: string): Promise<readonly ProjectWorkLog[]> {
@@ -1122,6 +1108,40 @@ export class ProjectOpsRepository {
       );
     }
     return rows[0];
+  }
+
+  private async requireExecutionCreateWrite<T>(
+    rows: readonly T[],
+    projectRequestId: string,
+    resource: ProjectExecutionResource
+  ): Promise<T> {
+    if (rows[0]) return rows[0];
+    const request = await this.requireProjectRequest(projectRequestId);
+    throw new ProjectOpsOperationError(
+      'conflict',
+      'PROJECTOPS_EXECUTION_STATE_CHANGED',
+      `Project state ${request.status.replaceAll('_', ' ')} does not allow this ${resource.replace('_', ' ')} command. Reload before trying again.`
+    );
+  }
+
+  private async requireExecutionActionWrite<T extends ProjectIssue | ProjectRisk | ProjectDocument | ProjectNote>(
+    rows: readonly T[],
+    projectRequestId: string,
+    childId: string,
+    resource: Exclude<ProjectExecutionResource, 'work_log'>
+  ): Promise<T> {
+    if (rows[0]) return rows[0];
+    const request = await this.requireProjectRequest(projectRequestId);
+    requireExecutionActionParentState(request);
+    if (resource === 'issue') await this.requireProjectIssue(projectRequestId, childId);
+    if (resource === 'risk') await this.requireProjectRisk(projectRequestId, childId);
+    if (resource === 'document') await this.requireProjectDocument(projectRequestId, childId);
+    if (resource === 'note') await this.requireProjectNote(projectRequestId, childId);
+    throw new ProjectOpsOperationError(
+      'conflict',
+      `PROJECTOPS_${resource.toUpperCase()}_CHANGED`,
+      `${resource[0]?.toUpperCase()}${resource.slice(1)} changed. Reload before trying again.`
+    );
   }
 
   public async getDashboard(): Promise<ProjectOpsDashboardView> {

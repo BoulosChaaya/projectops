@@ -1159,17 +1159,60 @@ export function rejectProjectChangeRequest(
   return decideProjectChangeRequest(changeRequest, 'rejected', input);
 }
 
+export type ProjectExecutionResource = 'work_log' | 'note' | 'document' | 'issue' | 'risk';
+
+const executionCreateStates: Readonly<Record<ProjectExecutionResource, readonly ProjectRequestStatus[]>> =
+  Object.freeze({
+    work_log: Object.freeze(['estimated', 'approved', 'in_progress', 'delivered']),
+    note: Object.freeze(['new', 'estimated', 'approved', 'in_progress', 'on_hold', 'delivered']),
+    document: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered']),
+    issue: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered']),
+    risk: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered']),
+  });
+
+const executionResourceDetails = Object.freeze({
+  work_log: Object.freeze({ code: 'PROJECTOPS_REQUEST_NOT_READY_FOR_WORK_LOGS', noun: 'logging work' }),
+  note: Object.freeze({ code: 'PROJECTOPS_REQUEST_NOT_READY_FOR_NOTES', noun: 'adding notes' }),
+  document: Object.freeze({ code: 'PROJECTOPS_REQUEST_NOT_READY_FOR_DOCUMENTS', noun: 'adding documents' }),
+  issue: Object.freeze({ code: 'PROJECTOPS_REQUEST_NOT_READY_FOR_ISSUES', noun: 'adding issues' }),
+  risk: Object.freeze({ code: 'PROJECTOPS_REQUEST_NOT_READY_FOR_RISKS', noun: 'adding risks' }),
+});
+
+export function executionCreateParentStates(
+  resource: ProjectExecutionResource
+): readonly ProjectRequestStatus[] {
+  return executionCreateStates[resource];
+}
+
+export function requireExecutionCreateParentState(
+  request: ProjectRequest,
+  resource: ProjectExecutionResource
+): void {
+  if (!executionCreateStates[resource].includes(request.status)) {
+    const details = executionResourceDetails[resource];
+    throw new ProjectOpsOperationError(
+      'conflict',
+      details.code,
+      `Project state ${request.status.replaceAll('_', ' ')} does not allow ${details.noun}.`
+    );
+  }
+}
+
+export function requireExecutionActionParentState(request: ProjectRequest): void {
+  if (request.status === 'cancelled' || request.status === 'archived') {
+    throw new ProjectOpsOperationError(
+      'conflict',
+      'PROJECTOPS_PROJECT_READ_ONLY',
+      'Cancelled and archived projects are read-only.'
+    );
+  }
+}
+
 export function createProjectIssue(
   request: ProjectRequest,
   input: NewProjectIssueInput
 ): ProjectIssue {
-  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_ISSUES',
-      'Project request must be estimated, approved, in progress, or delivered before adding issues.'
-    );
-  }
+  requireExecutionCreateParentState(request, 'issue');
 
   const id = requireIdentifier('projectIssue.id', input.id);
   const projectRequestId = requireIdentifier('projectIssue.projectRequestId', input.projectRequestId);
@@ -1209,7 +1252,7 @@ export function resolveProjectIssue(
 ): ProjectIssue {
   if (issue.status === 'resolved') {
     throw new ProjectOpsOperationError(
-      'invalid_state',
+      'conflict',
       'PROJECTOPS_ISSUE_ALREADY_RESOLVED',
       'Project issue is already resolved.'
     );
@@ -1229,13 +1272,7 @@ export function createProjectRisk(
   request: ProjectRequest,
   input: NewProjectRiskInput
 ): ProjectRisk {
-  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_RISKS',
-      'Project request must be estimated, approved, in progress, or delivered before adding risks.'
-    );
-  }
+  requireExecutionCreateParentState(request, 'risk');
 
   const id = requireIdentifier('projectRisk.id', input.id);
   const projectRequestId = requireIdentifier('projectRisk.projectRequestId', input.projectRequestId);
@@ -1285,7 +1322,7 @@ export function mitigateProjectRisk(
 ): ProjectRisk {
   if (risk.status === 'mitigated') {
     throw new ProjectOpsOperationError(
-      'invalid_state',
+      'conflict',
       'PROJECTOPS_RISK_ALREADY_MITIGATED',
       'Project risk is already mitigated.'
     );
@@ -1372,13 +1409,7 @@ export function createProjectDocument(
   request: ProjectRequest,
   input: NewProjectDocumentInput
 ): ProjectDocument {
-  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_DOCUMENTS',
-      'Project request must be estimated, approved, in progress, or delivered before adding documents.'
-    );
-  }
+  requireExecutionCreateParentState(request, 'document');
 
   const id = requireIdentifier('projectDocument.id', input.id);
   const projectRequestId = requireIdentifier('projectDocument.projectRequestId', input.projectRequestId);
@@ -1419,7 +1450,7 @@ export function archiveProjectDocument(
 ): ProjectDocument {
   if (document.status === 'archived') {
     throw new ProjectOpsOperationError(
-      'invalid_state',
+      'conflict',
       'PROJECTOPS_DOCUMENT_ALREADY_ARCHIVED',
       'Project document is already archived.'
     );
@@ -1439,13 +1470,7 @@ export function createProjectNote(
   request: ProjectRequest,
   input: NewProjectNoteInput
 ): ProjectNote {
-  if (request.status === 'archived' || request.status === 'cancelled') {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_NOTES',
-      'Project request must not be archived before adding notes.'
-    );
-  }
+  requireExecutionCreateParentState(request, 'note');
 
   const id = requireIdentifier('projectNote.id', input.id);
   const projectRequestId = requireIdentifier('projectNote.projectRequestId', input.projectRequestId);
@@ -1484,7 +1509,7 @@ export function archiveProjectNote(
 ): ProjectNote {
   if (note.status === 'archived') {
     throw new ProjectOpsOperationError(
-      'invalid_state',
+      'conflict',
       'PROJECTOPS_NOTE_ALREADY_ARCHIVED',
       'Project note is already archived.'
     );
@@ -1679,13 +1704,7 @@ export function createProjectWorkLog(
   request: ProjectRequest,
   input: NewProjectWorkLogInput
 ): ProjectWorkLog {
-  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled' || request.status === 'on_hold') {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_WORK_LOGS',
-      'Project request must be estimated, approved, in progress, or delivered before logging work.'
-    );
-  }
+  requireExecutionCreateParentState(request, 'work_log');
 
   const id = requireIdentifier('projectWorkLog.id', input.id);
   const projectRequestId = requireIdentifier('projectWorkLog.projectRequestId', input.projectRequestId);
