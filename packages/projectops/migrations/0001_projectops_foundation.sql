@@ -110,6 +110,23 @@ CREATE TABLE IF NOT EXISTS projectops_project_issues (
   PRIMARY KEY (project_request_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS projectops_project_risks (
+  id TEXT NOT NULL,
+  project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  probability TEXT NOT NULL CHECK (probability IN ('low', 'medium', 'high')),
+  impact TEXT NOT NULL CHECK (impact IN ('low', 'medium', 'high')),
+  mitigation_plan TEXT,
+  owner TEXT,
+  status TEXT NOT NULL CHECK (status IN ('open', 'mitigated')),
+  identified_at TIMESTAMPTZ NOT NULL,
+  mitigated_at TIMESTAMPTZ,
+  mitigation_note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_request_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS projectops_project_feedback (
   id TEXT NOT NULL,
   project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -258,6 +275,9 @@ CREATE INDEX IF NOT EXISTS projectops_project_change_requests_request_status_idx
 
 CREATE INDEX IF NOT EXISTS projectops_project_issues_request_status_idx
   ON projectops_project_issues (project_request_id, status, severity);
+
+CREATE INDEX IF NOT EXISTS projectops_project_risks_request_status_idx
+  ON projectops_project_risks (project_request_id, status, impact, probability);
 
 CREATE INDEX IF NOT EXISTS projectops_project_feedback_request_status_idx
   ON projectops_project_feedback (project_request_id, status, sentiment);
