@@ -38,6 +38,7 @@ export function renderProjectOpsDashboardPage(
 <body>
   <main class="projectops-shell" aria-labelledby="projectops-title">
     <header class="projectops-header">
+      <a href="/projectops/settings">Operator settings</a>
       <div>
         <p class="eyebrow">ProjectOps</p>
         <h1 id="projectops-title">${escapeHtml(page.title)}</h1>

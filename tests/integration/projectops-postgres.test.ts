@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { ProjectOpsOperatorStore } from '../../packages/projectops/src/operator.ts';
 import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgres-app.ts';
 import {
   loadProjectOpsPostgresMigrations,
@@ -28,9 +29,11 @@ async function fixture(run: (url: string, pool: Pool) => Promise<void>): Promise
   }
 }
 
+const sessions = new Map<string, Record<string, string>>();
+
 async function post(origin: string, path: string, body: Record<string, unknown>) {
   const response = await fetch(`${origin}${path}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'content-type': 'application/json', origin, ...sessions.get(origin) }, body: JSON.stringify(body),
   });
   const result = await response.json();
   assert.equal(response.status, 200, JSON.stringify(result));
@@ -43,6 +46,11 @@ test('PostgreSQL application persists API data across shutdown and restart', asy
     let app = await startProjectOpsPostgresApp(config);
     try {
       const origin = app.server.origin;
+      await new ProjectOpsOperatorStore(pool).provision('operator', 'acceptance-password');
+      const login = await fetch(origin + '/projectops/access/login', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ login: 'operator', password: 'acceptance-password' }) });
+      assert.equal(login.status, 200);
+      const session = { cookie: login.headers.get('set-cookie')!.split(';')[0], 'x-csrf-token': (await login.json()).csrfToken };
+      sessions.set(origin, session);
       assert.equal((await fetch(`${origin}/health/ready`)).status, 200);
       await post(origin, '/projectops/clients', { id: 'client-1', name: 'Restart client', createdAtIso: T0 });
       await post(origin, '/projectops/project-requests', {
@@ -63,21 +71,22 @@ test('PostgreSQL application persists API data across shutdown and restart', asy
       });
       await app.close();
       app = await startProjectOpsPostgresApp(config);
-      const persisted = await fetch(`${app.server.origin}${root}`).then(r => r.json());
+      sessions.set(app.server.origin, session);
+      const persisted = await fetch(`${app.server.origin}${root}`, { headers: session }).then(r => r.json());
       assert.equal(persisted.status, 'approved');
       assert.equal(persisted.estimateAmountCents, 10000);
       assert.equal(persisted.approvedAtIso, T2);
       for (const collection of ['milestones', 'tasks', 'risks', 'invoices']) {
-        const rows = await fetch(`${app.server.origin}${root}/${collection}`).then(r => r.json());
+        const rows = await fetch(`${app.server.origin}${root}/${collection}`, { headers: session }).then(r => r.json());
         assert.equal(rows.length, 1, collection);
       }
-      const summary = await fetch(`${app.server.origin}/projectops/dashboard`).then(r => r.json());
+      const summary = await fetch(`${app.server.origin}/projectops/dashboard`, { headers: session }).then(r => r.json());
       assert.equal(summary.totalActiveRequests, 1);
       assert.equal(summary.openRisks, 1);
       assert.equal(summary.outstandingInvoiceAmountCents, 10000);
-      const html = await fetch(`${app.server.origin}/projectops`).then(r => r.text());
+      const html = await fetch(`${app.server.origin}/projectops`, { headers: session }).then(r => r.text());
       assert.match(html, /Durable project/);
-      assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 1);
+      assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 2);
     } finally { await app.close(); }
   });
 });
@@ -85,15 +94,15 @@ test('PostgreSQL application persists API data across shutdown and restart', asy
 test('PostgreSQL migrations serialize startup, apply upgrades once and reject drift', async () => {
   await fixture(async (_url, pool) => {
     const baseline = await loadProjectOpsPostgresMigrations();
-    const upgrade = { version: '0002', name: 'acceptance_probe', upSql: 'CREATE TABLE upgrade_probe (id INTEGER PRIMARY KEY)' };
+    const upgrade = { version: '0003', name: 'acceptance_probe', upSql: 'CREATE TABLE upgrade_probe (id INTEGER PRIMARY KEY)' };
     const run = async () => {
       const client = await pool.connect();
       try { return await migrateProjectOpsPostgres(client, [...baseline, upgrade]); }
       finally { client.release(); }
     };
     const results = await Promise.all([run(), run()]);
-    assert.deepEqual(results.flat().sort(), ['0001', '0002']);
-    assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 2);
+    assert.deepEqual(results.flat().sort(), ['0001', '0002', '0003']);
+    assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 3);
     const client = await pool.connect();
     try {
       await assert.rejects(() => migrateProjectOpsPostgres(client, [
@@ -112,11 +121,11 @@ test('Failed PostgreSQL migration rolls back schema and ledger together', async 
     try {
       await migrateProjectOpsPostgres(client, baseline);
       await assert.rejects(() => migrateProjectOpsPostgres(client, [...baseline, {
-        version: '0002', name: 'broken_probe',
+        version: '0003', name: 'broken_probe',
         upSql: 'CREATE TABLE rollback_probe (id INTEGER); SELECT * FROM missing_probe_table',
       }]));
       assert.equal((await client.query("SELECT to_regclass('rollback_probe') AS probe")).rows[0].probe, null);
-      assert.equal((await client.query('SELECT * FROM projectops_schema_migrations')).rows.length, 1);
+      assert.equal((await client.query('SELECT * FROM projectops_schema_migrations')).rows.length, 2);
     } finally { client.release(); }
   });
 });

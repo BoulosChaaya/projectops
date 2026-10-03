@@ -35,13 +35,13 @@ See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the prev
 20. Expenses and decisions.
 21. Risks and mitigation.
 
-Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. Access control is not connected to these routes.
+Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. The PostgreSQL runtime now protects these routes; contract tests may still inject an unprotected memory harness.
 
 ## Remaining approved work
-Roadmap slices 1 and 2 are complete. Slices 3-14 remain open. Existing functionality is reused to complete them.
+Roadmap slices 1-3 are complete. Slices 4-14 remain open. Existing functionality is reused to complete them.
 
 ## Next slice
-Slice 3: operator access and settings. Integrate login/logout, protected pages/APIs, credential management and application defaults. The runnable application currently defaults to loopback and is not deployed.
+Slice 4: client management. Complete browser create/view/edit/archive/search, with projects listed per client. The runnable application defaults to loopback and is not deployed.
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.
@@ -55,3 +55,16 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - Acceptance proves fresh migrations, API/dashboard data across application restart, concurrent migration startup, upgrades, drift rejection and schema/ledger rollback.
 - All CI entry points now install pinned dependencies from the frozen lockfile before testing.
 - Limitation: local container blocks changing to the non-root PostgreSQL server user; real database evidence comes from CI. No production deployment or operator access claim.
+
+## Completed slice 3: operator access and settings
+- Database-backed operator, hashed sessions, expiry, login limits and settings in additive migration 0002.
+- Login/settings browser pages; logout, current-password credential changes and revocation.
+- Protected product routes with Origin, JSON and CSRF checks for writes; fixed HTTPS public origin for external binding.
+- Saved priority/currency defaults applied to new requests/estimates when omitted; timezone retained for later display.
+- Operator provisioning is a local stdin command; one operator, no public signup or team model.
+- Implementation checkpoint: 24e46c0091c098f498bece3ea1c69d99827ba896; PR https://github.com/BoulosChaaya/projectops/pull/2.
+- Local pnpm verify: 52/52 PASS.
+- PostgreSQL acceptance: 6/6 PASS, zero skips; Chromium browser journey: 1/1 PASS in https://github.com/BoulosChaaya/projectops/actions/runs/37117409254.
+- Browser acceptance verifies invalid credentials, sign-in, saved defaults after reload, credential change, re-login, logout and protected-page redirects.
+- Final follow-up preserves the configured loopback hostname for browser Origin matching and checks localhost in the native access test.
+- Limitations: no deployment; timezone display, mixed-currency totals and remaining product browser workflows are assigned to later slices.
