@@ -78,6 +78,8 @@ test('Project browser journey creates, navigates every section, edits safely, re
       await page.locator('#message').filter({ hasText: 'Project saved.' }).waitFor(); await page.locator('#deadline').getByText('No deadline', { exact: true }).waitFor();
       await page.getByRole('link', { name: 'Dashboard', exact: true }).click(); await page.getByRole('link', { name: 'Edited project', exact: true }).click();
       await page.getByRole('heading', { name: 'Edited project', exact: true }).waitFor();
+      await send(root + '/deliverables/delivery/accept', {});
+      await send(root + '/feedback/f/address', { addressedBy: 'operator' });
       for (const status of ['in_progress', 'delivered', 'archived']) await send(root + '/status', { status });
       await page.reload(); await page.getByText('Archived projects are read-only.', { exact: true }).waitFor();
       assert.equal(await page.getByRole('button', { name: 'Save project', exact: true }).isVisible(), false);

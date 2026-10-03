@@ -35,6 +35,8 @@ test('Browser estimates, confirmed lifecycle decisions, stale tabs and cancelled
       };
       await page.getByRole('button', { name: 'Approve estimate', exact: true }).click(); await page.getByRole('button', { name: 'Keep current state', exact: true }).click(); assert.equal((await read('r')).status, 'estimated');
       await action('Approve estimate', 'Confirm approval', 'Estimate approved.'); assert.equal((await read('r')).approvedBy, 'operator'); assert.equal(await form.isVisible(), false);
+      await send('project-requests/r/deliverables', { id: 'delivery', title: 'Delivery', artifactUrl: 'https://example.test/artifact' });
+      await send('project-requests/r/deliverables/delivery/accept', {});
       await action('Start project', 'Confirm start', 'Project started.');
       await action('Hold project', 'Confirm hold', 'Project placed on hold.'); assert.equal(await page.getByRole('button', { name: 'Mark delivered', exact: true }).count(), 0);
       await page.reload(); await page.getByRole('button', { name: 'Resume project', exact: true }).waitFor();

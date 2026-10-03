@@ -343,7 +343,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/deliverables',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectDeliverable(params.id, readDeliverableInput(params.id, request.body, clock))
+          service.createProjectDeliverable(params.id, readDeliverableInput(params.id, request.body, clock, Boolean(_context.get('projectops.operator'))))
         ),
     },
     {
@@ -354,7 +354,7 @@ export function createProjectOpsRoutes(
           service.acceptProjectDeliverable(
             params.id,
             params.deliverableId,
-            readAcceptedAtIso(request.body, clock)
+            readAcceptedAtIso(request.body, clock, Boolean(_context.get('projectops.operator')))
           )
         ),
     },
@@ -488,7 +488,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/feedback',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectFeedback(params.id, readFeedbackInput(params.id, request.body, clock))
+          service.createProjectFeedback(params.id, readFeedbackInput(params.id, request.body, clock, Boolean(_context.get('projectops.operator'))))
         ),
     },
     {
@@ -499,7 +499,7 @@ export function createProjectOpsRoutes(
           service.addressProjectFeedback(
             params.id,
             params.feedbackId,
-            readAddressFeedbackInput(request.body, clock)
+            readAddressFeedbackInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
           )
         ),
     },
@@ -719,6 +719,8 @@ export function createProjectOpsRoutes(
     },
   ];
   return Object.freeze(routes.map(route => {
+    // Delivery commands classify missing children before conflicts and enforce terminal parents atomically.
+    if (/\/:id\/(deliverables|feedback)(\/|$)/.test(route.path)) return route;
     if (route.method === 'GET' || !route.path.startsWith('/projectops/project-requests/:id') || ['/status','/control'].some(suffix => route.path.endsWith(suffix))) return route;
     return { ...route, handler: async (request, context, params) => {
       const project = await requireFound(service.getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND');
@@ -889,7 +891,8 @@ function readReopenMilestoneInput(body: unknown, clock: () => string): ReopenPro
 function readDeliverableInput(
   projectRequestId: string,
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  serverControlled = false
 ): NewProjectDeliverableInput {
   const value = readRecord(body);
   return Object.freeze({
@@ -898,13 +901,13 @@ function readDeliverableInput(
     milestoneId: readOptionalString(value.milestoneId, 'milestoneId'),
     title: readString(value.title, 'title'),
     artifactUrl: readString(value.artifactUrl, 'artifactUrl'),
-    submittedAtIso: readOptionalString(value.submittedAtIso, 'submittedAtIso') ?? clock(),
+    submittedAtIso: serverControlled ? clock() : readOptionalString(value.submittedAtIso, 'submittedAtIso') ?? clock(),
   });
 }
 
-function readAcceptedAtIso(body: unknown, clock: () => string): string {
+function readAcceptedAtIso(body: unknown, clock: () => string, serverControlled = false): string {
   const value = readRecord(body);
-  return readOptionalString(value.acceptedAtIso, 'acceptedAtIso') ?? clock();
+  return serverControlled ? clock() : readOptionalString(value.acceptedAtIso, 'acceptedAtIso') ?? clock();
 }
 
 function readInvoiceInput(
@@ -1018,7 +1021,8 @@ function readMitigateRiskInput(
 function readFeedbackInput(
   projectRequestId: string,
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  serverControlled = false
 ): NewProjectFeedbackInput {
   const value = readRecord(body);
   return Object.freeze({
@@ -1028,18 +1032,19 @@ function readFeedbackInput(
     author: readString(value.author, 'author'),
     sentiment: readOptionalFeedbackSentiment(value.sentiment),
     message: readString(value.message, 'message'),
-    receivedAtIso: readOptionalString(value.receivedAtIso, 'receivedAtIso') ?? clock(),
+    receivedAtIso: serverControlled ? clock() : readOptionalString(value.receivedAtIso, 'receivedAtIso') ?? clock(),
   });
 }
 
 function readAddressFeedbackInput(
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  operatorLogin?: string
 ): AddressProjectFeedbackInput {
   const value = readRecord(body);
   return Object.freeze({
-    addressedBy: readString(value.addressedBy, 'addressedBy'),
-    addressedAtIso: readOptionalString(value.addressedAtIso, 'addressedAtIso') ?? clock(),
+    addressedBy: operatorLogin ?? readString(value.addressedBy, 'addressedBy'),
+    addressedAtIso: operatorLogin ? clock() : readOptionalString(value.addressedAtIso, 'addressedAtIso') ?? clock(),
     responseNote: readOptionalString(value.responseNote, 'responseNote'),
   });
 }

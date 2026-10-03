@@ -951,7 +951,7 @@ unitTest('PROJECTOPS-PERSIST-006: API exposes stable write-side error contracts'
       id: 'deliverable-not-ready',
       title: 'Too early',
       artifactUrl: 'https://example.com/projectops/too-early',
-    }, 400, 'PROJECTOPS_REQUEST_NOT_READY_FOR_DELIVERABLES');
+    }, 409, 'PROJECTOPS_REQUEST_NOT_READY_FOR_DELIVERABLES');
 
     await expectProjectOpsError(`${server.origin}/projectops/project-requests/req-1/invoices`, {
       id: 'invoice-not-ready',

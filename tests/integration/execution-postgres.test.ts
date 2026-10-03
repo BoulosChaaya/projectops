@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { operatorFixture } from './operator-fixture.ts';
 import {
   ProjectOpsConnectionSqlExecutor,
+  projectOpsPoolConnection,
   ProjectOpsOperationError,
   ProjectOpsRepository,
   insertProjectIssueSql,
@@ -136,6 +137,8 @@ test('Execution SQL serializes terminal commands and parent lifecycle races', as
     await approved(repo, 'archive-win');
     let archived = await repo.getProjectRequest('archive-win');
     archived = await repo.transitionProjectRequest('archive-win', 'in_progress', T1, archived?.revision);
+    await repo.createProjectDeliverable('archive-win', { id: 'delivery', projectRequestId: 'archive-win', title: 'Delivery', artifactUrl: 'https://example.test/artifact', submittedAtIso: T1 });
+    await repo.acceptProjectDeliverable('archive-win', 'delivery', T1);
     archived = await repo.transitionProjectRequest('archive-win', 'delivered', T1, archived.revision);
     await lifecycleWins(pool, 'archive-win', "status='archived'", 'INSERT INTO projectops_project_notes', () => repo.createProjectNote('archive-win', { id: 'late', projectRequestId: 'archive-win', author: 'operator', body: 'Late', createdAtIso: T2 }));
     assert.equal((await repo.listProjectNotes('archive-win')).length, 0);
@@ -143,9 +146,7 @@ test('Execution SQL serializes terminal commands and parent lifecycle races', as
 });
 
 function repository(pool: any): ProjectOpsRepository {
-  return new ProjectOpsRepository(new ProjectOpsConnectionSqlExecutor({ async query<T>(text: string, params: readonly unknown[] = []) {
-    const result = await pool.query(text, [...params]); return { rows: result.rows as T[], rowCount: result.rowCount ?? 0, command: result.command };
-  } }));
+  return new ProjectOpsRepository(new ProjectOpsConnectionSqlExecutor(projectOpsPoolConnection(pool)));
 }
 
 async function migrate(pool: any): Promise<void> {

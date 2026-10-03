@@ -21,10 +21,39 @@ type ProjectOpsTable =
   | 'projectops_project_activities';
 
 export interface ProjectOpsQueryConnection {
+  transaction?<T>(run: (connection: ProjectOpsQueryConnection) => Promise<T>): Promise<T>;
   query<TRow = Record<string, unknown>>(
     sql: string,
     params?: readonly unknown[]
   ): Promise<RawQueryResult<TRow>>;
+}
+
+/** Lease one connection for the complete callback; pool.query cannot provide transaction affinity. */
+export function projectOpsPoolConnection(pool: {
+  query(sql: string, params: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number | null; command: string }>;
+  connect(): Promise<{ query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number | null; command: string }>; release(): void }>;
+}): ProjectOpsQueryConnection {
+  return {
+    async query<T>(sql: string, params: readonly unknown[] = []) {
+      const result = await pool.query(sql, [...params]);
+      return { rows: result.rows as T[], rowCount: result.rowCount ?? 0, command: result.command };
+    },
+    async transaction<T>(run: (connection: ProjectOpsQueryConnection) => Promise<T>) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+        const result = await run({ async query<T>(sql: string, params: readonly unknown[] = []) {
+          const result = await client.query(sql, [...params]);
+          return { rows: result.rows as T[], rowCount: result.rowCount ?? 0, command: result.command };
+        } });
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally { client.release(); }
+    },
+  };
 }
 
 export class ProjectOpsConnectionSqlExecutor implements ProjectOpsSqlExecutor {
@@ -32,6 +61,11 @@ export class ProjectOpsConnectionSqlExecutor implements ProjectOpsSqlExecutor {
 
   constructor(connection: ProjectOpsQueryConnection) {
     this.connection = connection;
+  }
+
+  public async transaction<T>(run: (sql: ProjectOpsSqlExecutor) => Promise<T>): Promise<T> {
+    if (!this.connection.transaction) throw new Error('ProjectOps connection must support transaction affinity.');
+    return await this.connection.transaction(connection => run(new ProjectOpsConnectionSqlExecutor(connection)));
   }
 
   public async query<T>(statement: SqlStatement): Promise<readonly T[]> {
@@ -45,6 +79,7 @@ export class ProjectOpsConnectionSqlExecutor implements ProjectOpsSqlExecutor {
 }
 
 export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
+  private pending: Promise<unknown> = Promise.resolve();
   private readonly clients = new Map<string, ProjectOpsClientRow>();
   private readonly projectRequests = new Map<string, ProjectOpsRequestRow>();
   private readonly projectMilestones = new Map<string, ProjectOpsMilestoneRow>();
@@ -63,6 +98,28 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private readonly migratedTables = new Set<ProjectOpsTable>();
 
   public async query<T>(statement: SqlStatement): Promise<readonly T[]> {
+    return await this.serialized(() => this.execute<T>(statement));
+  }
+
+  public async transaction<T>(run: (sql: ProjectOpsSqlExecutor) => Promise<T>): Promise<T> {
+    return await this.serialized(async () => {
+      const maps = Object.values(this).filter(value => value instanceof Map) as Map<string, unknown>[];
+      const snapshots = maps.map(map => new Map(map));
+      try { return await run({ query: <TRow>(statement: SqlStatement) => this.execute<TRow>(statement) }); }
+      catch (error) {
+        maps.forEach((map, index) => { map.clear(); for (const [key, value] of snapshots[index]!) map.set(key, value); });
+        throw error;
+      }
+    });
+  }
+
+  private serialized<T>(run: () => Promise<T>): Promise<T> {
+    const result = this.pending.then(run);
+    this.pending = result.catch(() => undefined);
+    return result;
+  }
+
+  private async execute<T>(statement: SqlStatement): Promise<readonly T[]> {
     const sql = normalizeSql(statement.sql);
     const upper = sql.toUpperCase();
 
@@ -165,7 +222,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_DELIVERABLES')) {
       const row = this.insertProjectDeliverable(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_INVOICES')) {
@@ -190,7 +247,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_FEEDBACK')) {
       const row = this.insertProjectFeedback(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_DOCUMENTS')) {
@@ -661,8 +718,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectDeliverable(params: readonly unknown[]): ProjectOpsDeliverableRow {
+  private insertProjectDeliverable(params: readonly unknown[]): ProjectOpsDeliverableRow | undefined {
     const projectRequestId = asString(params[1], 'projectDeliverable.projectRequestId');
+    if (!['approved', 'in_progress'].includes(this.projectRequests.get(projectRequestId)?.status ?? '')) return undefined;
     if (!this.projectRequests.has(projectRequestId)) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
@@ -686,7 +744,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     const key = deliverableKey(projectRequestId, row.id);
     if (this.projectDeliverables.has(key)) {
-      throw new Error(`Duplicate ProjectOps project deliverable id: ${projectRequestId}/${row.id}`);
+      throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_DELIVERABLE_ALREADY_EXISTS', `Project deliverable already exists: ${row.id}.`);
     }
     this.projectDeliverables.set(key, row);
     return row;
@@ -822,8 +880,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectFeedback(params: readonly unknown[]): ProjectOpsFeedbackRow {
+  private insertProjectFeedback(params: readonly unknown[]): ProjectOpsFeedbackRow | undefined {
     const projectRequestId = asString(params[1], 'projectFeedback.projectRequestId');
+    if (!['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'].includes(this.projectRequests.get(projectRequestId)?.status ?? '')) return undefined;
     if (!this.projectRequests.has(projectRequestId)) {
       throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
     }
@@ -850,7 +909,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     const key = feedbackKey(projectRequestId, row.id);
     if (this.projectFeedback.has(key)) {
-      throw new Error(`Duplicate ProjectOps project feedback id: ${projectRequestId}/${row.id}`);
+      throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_FEEDBACK_ALREADY_EXISTS', `Project feedback already exists: ${row.id}.`);
     }
     this.projectFeedback.set(key, row);
     return row;
@@ -1137,7 +1196,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     const projectRequestId = asString(params[0], 'projectDeliverable.projectRequestId');
     const id = asString(params[1], 'projectDeliverable.id');
     const current = this.projectDeliverables.get(deliverableKey(projectRequestId, id));
-    if (!current) return undefined;
+    if (!current || current.status !== 'submitted' || !['approved', 'in_progress', 'on_hold', 'delivered'].includes(this.projectRequests.get(projectRequestId)?.status ?? '')) return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1223,7 +1282,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     const projectRequestId = asString(params[0], 'projectFeedback.projectRequestId');
     const id = asString(params[1], 'projectFeedback.id');
     const current = this.projectFeedback.get(feedbackKey(projectRequestId, id));
-    if (!current) return undefined;
+    if (!current || current.status !== 'open' || !['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'].includes(this.projectRequests.get(projectRequestId)?.status ?? '')) return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -2099,6 +2158,8 @@ function asBoolean(value: unknown, name: string): boolean {
 
 function mapProjectOpsStorageError(error: unknown, statement: SqlStatement): unknown {
   const code = (error as { code?: unknown })?.code;
+  // A guarded child write mentions its parent too; classify constraints by the mutation target.
+  statement = { ...statement, sql: statement.sql.match(/(?:INSERT INTO|UPDATE)\s+(projectops_\w+)/i)?.[1] ?? statement.sql };
   if (code === '23505' && statement.sql.includes('projectops_clients')) {
     return new ProjectOpsOperationError(
       'conflict',
