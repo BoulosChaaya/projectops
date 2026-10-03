@@ -59,7 +59,7 @@ The workspace displays overview/estimate/approval details and all existing colle
 
 PUT /projectops/project-requests/:id updates title, brief, budgetRange, priority and deadlineIso using expectedRevision. Optional budget/deadline fields can be cleared. Identity, client, creation date, workflow state, estimate and approval metadata are preserved. Cancelled and archived projects are read-only. Migration 0004 initializes revisions; project edits and estimate/approval/control writes increment them, so a stale editor also detects workflow changes. Parent estimate, approval and status writes check the expected revision and current state atomically.
 
-Deadline inputs explicitly use UTC; displayed dates use the operator's saved IANA timezone. API deadlines remain ISO instants and cannot precede project creation. Forms reject invalid input and offer a deliberate reload on 409 conflicts. Execution/delivery/finance editing controls and automatic history remain their later approved slices; this workspace connects their current records.
+Deadline inputs explicitly use UTC; displayed dates use the operator's saved IANA timezone. API deadlines remain ISO instants and cannot precede project creation. Forms reject invalid input and offer a deliberate reload on 409 conflicts. Planning, execution and delivery controls are described below. Finance commands and automatic history remain their later approved slices; this workspace connects their current records.
 
 ## Estimates and project controls
 
@@ -69,7 +69,7 @@ Available actions follow the project state: approved → start; in progress → 
 
 POST /projectops/project-requests/:id/control accepts action (start, hold, resume, cancel, deliver, archive) and expectedRevision. Estimate and approval commands accept expectedRevision; browser requests always send it. The older status/estimate/approval API payloads may omit a revision for compatibility, but the repository still checks the revision/state read by that command when writing. Stale commands return 409 and the browser offers Reload project. Generic status writes cannot create estimated/approved states; use the explicit commands that record their metadata. Starting, holding, resuming and delivering require recorded estimate/approval metadata.
 
-Migration 0005 adds on_hold/cancelled to the status constraint without rewriting existing records. Legacy estimated records missing an estimate can be estimated again; legacy approved records missing required metadata cannot start and can be cancelled/archived. Child routes reject ordinary writes to cancelled/archived projects. Atomic concurrency guards for execution/delivery/finance child commands remain in their assigned slices. Delivery acceptance/completion gates are slice 9, mixed-currency totals slice 10, and automatic activity records slice 11.
+Migration 0005 adds on_hold/cancelled to the status constraint without rewriting existing records. Legacy estimated records missing an estimate can be estimated again; legacy approved records missing required metadata cannot start and can be cancelled/archived. Child routes reject ordinary writes to cancelled/archived projects. Planning, execution and delivery commands now enforce their atomic parent guards as described below. Finance child guards and mixed-currency totals remain Slice 10, and automatic activity records remain Slice 11.
 
 ## Planning
 
@@ -102,4 +102,46 @@ The existing collection and action routes are unchanged. Their authentication, a
 
 Each of the five creates uses an insert guarded by a locked parent row and its permitted states. Each of the four terminal actions locks/checks the parent and conditionally updates only the identified open/active child. A cancellation/archive or hold transition that locks the parent first can prevent the corresponding execution write without leaving a partial child change; a child write that commits first may precede the lifecycle transition. Concurrent terminal actions have exactly one winner. Execution writes do not increment the project revision. The existing schema supports this contract, so Slice 8 adds no migration or child revision column.
 
-Slice 8 implementation checkpoint `38358659da73a1bb9bdfd9bc77721e86de2e1934` passed `pnpm verify` with 66/66 tests and 571-file hygiene, `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:postgres` with 15/15 tests, and `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:browser` with 6/6 tests; all three had zero skips. The execution workspace does not add edit, reopen, unarchive, delete or file-upload commands. Delivery acceptance/completion gates remain Slice 9, finances remain Slice 10 and automatic history remains Slice 11. The runtime still defaults to loopback and is not deployed.
+Slice 8 implementation checkpoint `38358659da73a1bb9bdfd9bc77721e86de2e1934` passed `pnpm verify` with 66/66 tests and 571-file hygiene, `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:postgres` with 15/15 tests, and `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:browser` with 6/6 tests; all three had zero skips. The execution workspace does not add edit, reopen, unarchive, delete or file-upload commands. Slice 9 adds the delivery and completion gates described below. Finances remain Slice 10 and automatic history remains Slice 11. The runtime still defaults to loopback and is not deployed.
+
+## Delivery and acceptance
+
+The protected project workspace provides deliverable submission and acceptance, and feedback creation and addressing in an isolated delivery component. Submission accepts a title, HTTP(S) artifact URL and optional existing milestone from the same project; the milestone need not be completed. Feedback accepts source author, positive/neutral/negative sentiment (default neutral), message and an optional existing deliverable from the same project. Addressing accepts an optional response note. Accepted/addressed records and terminal metadata remain visible after project delivery, cancellation or archival. Forms and actions follow the approved parent-state rules:
+
+| Command | Permitted project states | Child transition |
+| --- | --- | --- |
+| Submit deliverable | approved, in_progress | new record → submitted |
+| Accept deliverable | approved, in_progress, on_hold, delivered | submitted → accepted |
+| Create feedback | estimated, approved, in_progress, on_hold, delivered | new record → open |
+| Address feedback | estimated, approved, in_progress, on_hold, delivered | open → addressed |
+
+All other parent states reject that command. Repeating acceptance/addressing conflicts. Read-only states retain all records. Browser validation and server 400/404/409 errors appear in the relevant section, with deliberate reload after conflicts and independent retry after collection-read failures. User text is rendered through text-only DOM APIs; artifact links require HTTP(S), forbid embedded credentials, and carry opener/referrer protection. The database and API reject non-HTTP(S) artifact URLs. Source author remains source attribution; protected addressing always uses the signed-in operator. Protected API audit timestamps always use the server clock even if a caller supplies another timestamp. The unprotected contract-test harness retains its existing explicit timestamp/actor inputs. No audit timestamp is editable in the browser and no acceptedBy was introduced.
+
+Delivery requires **at least one deliverable, every deliverable accepted, and no open feedback**. This is the only completion predicate; tasks, milestones and execution/finance records do not participate. Both existing project status and control routes apply it before in_progress → delivered and again before delivered → archived. Feedback can still be recorded/addressed after delivery, so open post-delivery feedback blocks archival. Cancelled → archived keeps the existing behavior without delivery prerequisites. The browser displays the readiness condition and current counts, while the server remains authoritative and returns `409 PROJECTOPS_DELIVERY_NOT_READY` if readiness fails.
+
+The existing collection/action routes are retained without new routes or migrations:
+
+```text
+GET/POST /projectops/project-requests/:id/deliverables
+POST     /projectops/project-requests/:id/deliverables/:deliverableId/accept
+GET/POST /projectops/project-requests/:id/feedback
+POST     /projectops/project-requests/:id/feedback/:feedbackId/address
+```
+
+Each child create locks/checks the parent within its insert. Acceptance/addressing lock/check the parent and update only the correct submitted/open child. Concurrent terminal actions therefore have one winner without adding revisions to children. Invalid payloads return 400, genuinely missing parents/children/same-project relationships return 404, and state/duplicate/stale/readiness failures return 409. Zero-row guarded writes use only classification reads afterward. SQL constraint mapping identifies the mutation target rather than accidentally classifying the parent mentioned by a guard. Child writes do not increment project revisions.
+
+Delivery and archival use a small transaction-scoped executor capability: the PostgreSQL pool leases one client for BEGIN, every query, COMMIT/ROLLBACK and release. The transaction explicitly uses READ COMMITTED, locks the project, validates its state and expected project revision, then reads deliverables and feedback in subsequent statements. These reads see a child commit that preceded acquisition of the parent lock, avoiding a stale statement snapshot. The same parent lock excludes relevant child changes until the project transition commits. The existing conditional project revision/state update remains intact. Memory execution mirrors business rules and serializes transaction callbacks with rollback; controlled PostgreSQL tests establish the actual row-lock behavior.
+
+Slice 9 implementation checkpoint `f0052156c5b0fc5c805538023656a8e60b8357c7` is on `slice-9-delivery-acceptance`, based on `7c006c38f45820d9246c03e68e9865837538115a`. Its completion gate passed locally:
+
+| Command | Result |
+| --- | --- |
+| `pnpm verify` | 72/72 native tests; 575-file hygiene; zero skips |
+| `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:postgres` | 19/19; zero skips |
+| `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:browser` | 7/7 Chromium journeys; zero skips |
+
+The cloud runs used Node 24.19.0, pnpm 11.19.0, PostgreSQL 16.15 and Playwright Chromium 153.0.8010.12. Test schemas/operators are isolated and cleaned up. The session used `CI=true XDG_DATA_HOME=/tmp/projectops-xdg PNPM_HOME=/tmp/projectops-pnpm` for each command and `PLAYWRIGHT_BROWSERS_PATH=/tmp/projectops-playwright` for the browser command. These external cache paths are environment details, not application settings or repository changes. Set the configured test database URL using the environment; do not put credentials in git. No final failures, skips or database/browser blockers remain.
+
+PostgreSQL acceptance proves create/list/actions and terminal metadata across application restart, defaults/optional relationships, every parent-state restriction, missing/duplicate/constraint classification, unchanged rows after failures, project revision behavior and both delivery/archive readiness rules. Controlled barriers prove exactly one acceptance/addressing winner; cancellation/archival winning against all four commands; hold/delivery winning against submission; child submission/open feedback first blocking delivery; acceptance/addressing first enabling delivery; delivery first permitting later feedback; archival versus post-delivery feedback in both orders; and delivery versus cancellation retaining one project revision winner. Chromium covers the full workflow, all sentiments/source attribution, authenticated addressing, reload persistence, safe text/links, validation and missing relationship feedback, stale terminal actions, zero/submitted/open-feedback delivery blockers, delivered archival rechecking readiness, cancelled archival bypass, all relevant state controls, retained read-only records, independent retries and zero page errors.
+
+Slice 9 awaits independent PR review and has not been merged. Slice 10 is next and has not begun. No deliverable or feedback editing, replacement, versions, rejection, reopening, deletion, uploads, client portal or automatic history is provided. The runtime remains loopback by default and no deployment/final-production-acceptance claim is made.

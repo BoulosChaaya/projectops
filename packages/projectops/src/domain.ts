@@ -961,17 +961,36 @@ export function reopenProjectMilestone(
   });
 }
 
+export const deliveryParentStates = Object.freeze({
+  submit: ['approved', 'in_progress'],
+  accept: ['approved', 'in_progress', 'on_hold', 'delivered'],
+  feedback: ['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'],
+} satisfies Record<string, readonly ProjectRequestStatus[]>);
+
+export function validateDeliveryIdentifier(value: string): string {
+  return requireIdentifier('delivery.identifier', value);
+}
+
+export function requireDeliveryParentState(request: ProjectRequest, command: keyof typeof deliveryParentStates): void {
+  if (!(deliveryParentStates[command] as readonly string[]).includes(request.status)) {
+    throw new ProjectOpsOperationError('conflict',
+      command === 'feedback' ? 'PROJECTOPS_REQUEST_NOT_READY_FOR_FEEDBACK' : 'PROJECTOPS_REQUEST_NOT_READY_FOR_DELIVERABLES',
+      `Project state ${request.status.replaceAll('_', ' ')} does not allow ${command === 'submit' ? 'deliverable submission' : command === 'accept' ? 'deliverable acceptance' : 'feedback commands'}. Allowed states: ${deliveryParentStates[command].join(', ')}.`);
+  }
+}
+
+export function requireDeliveryReadiness(deliverables: readonly ProjectDeliverable[], feedback: readonly ProjectFeedback[]): void {
+  if (!deliverables.length || deliverables.some(row => row.status !== 'accepted') || feedback.some(row => row.status === 'open')) {
+    throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_DELIVERY_NOT_READY',
+      'Delivery requires at least one deliverable, every deliverable accepted, and no open feedback. The same condition applies before archiving a delivered project.');
+  }
+}
+
 export function createProjectDeliverable(
   request: ProjectRequest,
   input: NewProjectDeliverableInput
 ): ProjectDeliverable {
-  if (request.status !== 'approved' && request.status !== 'in_progress') {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_DELIVERABLES',
-      'Project request must be approved or in progress before submitting deliverables.'
-    );
-  }
+  requireDeliveryParentState(request, 'submit');
 
   const id = requireIdentifier('projectDeliverable.id', input.id);
   const projectRequestId = requireIdentifier('projectDeliverable.projectRequestId', input.projectRequestId);
@@ -1002,9 +1021,9 @@ export function acceptProjectDeliverable(
   deliverable: ProjectDeliverable,
   acceptedAtIso: string
 ): ProjectDeliverable {
-  if (deliverable.status === 'accepted') {
+  if (deliverable.status !== 'submitted') {
     throw new ProjectOpsOperationError(
-      'invalid_state',
+      'conflict',
       'PROJECTOPS_DELIVERABLE_ALREADY_ACCEPTED',
       'Project deliverable is already accepted.'
     );
@@ -1342,13 +1361,7 @@ export function createProjectFeedback(
   request: ProjectRequest,
   input: NewProjectFeedbackInput
 ): ProjectFeedback {
-  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_FEEDBACK',
-      'Project request must be estimated, approved, in progress, or delivered before adding feedback.'
-    );
-  }
+  requireDeliveryParentState(request, 'feedback');
 
   const id = requireIdentifier('projectFeedback.id', input.id);
   const projectRequestId = requireIdentifier('projectFeedback.projectRequestId', input.projectRequestId);
@@ -1386,9 +1399,9 @@ export function addressProjectFeedback(
   feedback: ProjectFeedback,
   input: AddressProjectFeedbackInput
 ): ProjectFeedback {
-  if (feedback.status === 'addressed') {
+  if (feedback.status !== 'open') {
     throw new ProjectOpsOperationError(
-      'invalid_state',
+      'conflict',
       'PROJECTOPS_FEEDBACK_ALREADY_ADDRESSED',
       'Project feedback is already addressed.'
     );

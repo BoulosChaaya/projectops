@@ -41,6 +41,9 @@ import {
   reopenProjectMilestone,
   reopenProjectTask,
   requireExecutionActionParentState,
+  requireDeliveryParentState,
+  requireDeliveryReadiness,
+  validateDeliveryIdentifier,
   requireMilestoneParentState,
   requirePlanningRevision,
   requireTaskParentState,
@@ -96,6 +99,7 @@ import {
 } from './domain.ts';
 import {
   acceptProjectDeliverableSql,
+  lockProjectRequestSql,
   addressProjectFeedbackSql,
   archiveProjectDocumentSql,
   archiveProjectNoteSql,
@@ -172,6 +176,7 @@ import {
 } from './dashboard.ts';
 
 export interface ProjectOpsSqlExecutor {
+  transaction?<T>(run: (sql: ProjectOpsSqlExecutor) => Promise<T>): Promise<T>;
   query<T>(statement: SqlStatement): Promise<readonly T[]>;
 }
 
@@ -370,6 +375,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectDeliverableInput
   ): Promise<ProjectDeliverable> {
+    validateDeliveryIdentifier(projectRequestId);
     const request = await this.requireProjectRequest(projectRequestId);
     const deliverable = createProjectDeliverable(request, input);
     if (deliverable.milestoneId) {
@@ -386,16 +392,13 @@ export class ProjectOpsRepository {
     }
 
     const rows = await this.sql.query<ProjectDeliverable>(insertProjectDeliverableSql(deliverable));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project deliverable insert did not return a row.');
-    }
-    return persisted;
+    return await this.requireDeliveryWrite(rows, projectRequestId);
   }
 
   public async listProjectDeliverables(
     projectRequestId: string
   ): Promise<readonly ProjectDeliverable[]> {
+    validateDeliveryIdentifier(projectRequestId);
     await this.requireProjectRequest(projectRequestId);
     return await this.sql.query<ProjectDeliverable>(selectProjectDeliverablesSql(projectRequestId));
   }
@@ -415,11 +418,14 @@ export class ProjectOpsRepository {
     deliverableId: string,
     acceptedAtIso: string
   ): Promise<ProjectDeliverable> {
-    await this.requireProjectRequest(projectRequestId);
+    validateDeliveryIdentifier(projectRequestId);
+    validateDeliveryIdentifier(deliverableId);
+    const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectDeliverable(projectRequestId, deliverableId);
+    requireDeliveryParentState(request, 'accept');
     const accepted = acceptProjectDeliverable(current, acceptedAtIso);
     const rows = await this.sql.query<ProjectDeliverable>(acceptProjectDeliverableSql(accepted));
-    return this.requirePersistedProjectDeliverable(rows, projectRequestId, deliverableId);
+    return await this.requireDeliveryWrite(rows, projectRequestId, 'deliverable', deliverableId);
   }
 
   public async createProjectInvoice(
@@ -653,6 +659,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectFeedbackInput
   ): Promise<ProjectFeedback> {
+    validateDeliveryIdentifier(projectRequestId);
     const request = await this.requireProjectRequest(projectRequestId);
     const feedback = createProjectFeedback(request, input);
     if (feedback.deliverableId) {
@@ -669,16 +676,13 @@ export class ProjectOpsRepository {
     }
 
     const rows = await this.sql.query<ProjectFeedback>(insertProjectFeedbackSql(feedback));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project feedback insert did not return a row.');
-    }
-    return persisted;
+    return await this.requireDeliveryWrite(rows, projectRequestId);
   }
 
   public async listProjectFeedback(
     projectRequestId: string
   ): Promise<readonly ProjectFeedback[]> {
+    validateDeliveryIdentifier(projectRequestId);
     await this.requireProjectRequest(projectRequestId);
     return await this.sql.query<ProjectFeedback>(selectProjectFeedbackSql(projectRequestId));
   }
@@ -698,11 +702,14 @@ export class ProjectOpsRepository {
     feedbackId: string,
     input: AddressProjectFeedbackInput
   ): Promise<ProjectFeedback> {
-    await this.requireProjectRequest(projectRequestId);
+    validateDeliveryIdentifier(projectRequestId);
+    validateDeliveryIdentifier(feedbackId);
+    const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectFeedback(projectRequestId, feedbackId);
+    requireDeliveryParentState(request, 'feedback');
     const addressed = addressProjectFeedback(current, input);
     const rows = await this.sql.query<ProjectFeedback>(addressProjectFeedbackSql(addressed));
-    return this.requirePersistedProjectFeedback(rows, projectRequestId, feedbackId);
+    return await this.requireDeliveryWrite(rows, projectRequestId, 'feedback', feedbackId);
   }
 
   public async createProjectDocument(
@@ -1056,6 +1063,26 @@ export class ProjectOpsRepository {
     nowIso: string,
     expectedRevision?: number
   ): Promise<ProjectRequest> {
+    if (nextStatus === 'delivered' || nextStatus === 'archived') {
+      if (!this.sql.transaction) throw new Error('Delivery and archival require a transaction-scoped ProjectOps executor.');
+      return await this.sql.transaction(async sql => {
+        const scoped = new ProjectOpsRepository(sql);
+        // A separate statement after the lock observes children committed by the previous lock owner.
+        const rows = await sql.query<ProjectRequest>(lockProjectRequestSql(id));
+        const current = rows[0];
+        if (!current) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_REQUEST_NOT_FOUND', `Project request not found: ${id}.`);
+        const revision = scoped.projectRevision(current, expectedRevision);
+        const transitioned = transitionProjectRequest(current, nextStatus, nowIso);
+        if (nextStatus === 'delivered' || current.status === 'delivered') {
+          const deliverables = await sql.query<ProjectDeliverable>(selectProjectDeliverablesSql(id));
+          const feedback = await sql.query<ProjectFeedback>(selectProjectFeedbackSql(id));
+          requireDeliveryReadiness(deliverables, feedback);
+        }
+        return scoped.requireControlWrite(await sql.query<ProjectRequest>(
+          updateProjectRequestStatusSql(id, transitioned.status, transitioned.updatedAtIso, revision, current.status)
+        ));
+      });
+    }
     const current = await this.requireProjectRequest(id);
     const revision = this.projectRevision(current, expectedRevision);
     const transitioned = transitionProjectRequest(current, nextStatus, nowIso);
@@ -1071,6 +1098,15 @@ export class ProjectOpsRepository {
       throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed. Reload before trying again.');
     }
     return revision;
+  }
+
+  private async requireDeliveryWrite<T>(rows: readonly T[], parentId: string, kind?: 'deliverable' | 'feedback', childId?: string): Promise<T> {
+    if (rows[0]) return rows[0];
+    await this.requireProjectRequest(parentId);
+    if (kind === 'deliverable') await this.requireProjectDeliverable(parentId, childId!);
+    if (kind === 'feedback') await this.requireProjectFeedback(parentId, childId!);
+    throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_DELIVERY_CHANGED',
+      'Delivery record or project state changed. Reload before trying again.');
   }
   private requireControlWrite(rows: readonly ProjectRequest[]): ProjectRequest {
     if (!rows[0]) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed. Reload before trying again.');
@@ -1358,21 +1394,6 @@ export class ProjectOpsRepository {
     return persisted;
   }
 
-  private requirePersistedProjectDeliverable(
-    rows: readonly ProjectDeliverable[],
-    projectRequestId: string,
-    deliverableId: string
-  ): ProjectDeliverable {
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new ProjectOpsOperationError(
-        'not_found',
-        'PROJECTOPS_DELIVERABLE_NOT_FOUND',
-        `Project deliverable not found: ${projectRequestId}/${deliverableId}.`
-      );
-    }
-    return persisted;
-  }
 
   private requirePersistedProjectInvoice(
     rows: readonly ProjectInvoice[],
@@ -1438,21 +1459,6 @@ export class ProjectOpsRepository {
     return persisted;
   }
 
-  private requirePersistedProjectFeedback(
-    rows: readonly ProjectFeedback[],
-    projectRequestId: string,
-    feedbackId: string
-  ): ProjectFeedback {
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new ProjectOpsOperationError(
-        'not_found',
-        'PROJECTOPS_FEEDBACK_NOT_FOUND',
-        `Project feedback not found: ${projectRequestId}/${feedbackId}.`
-      );
-    }
-    return persisted;
-  }
 
   private requirePersistedProjectDocument(
     rows: readonly ProjectDocument[],

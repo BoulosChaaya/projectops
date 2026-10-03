@@ -73,6 +73,8 @@ test('Planning migration upgrades existing children and API workflows persist ac
       task = await json(await send('project-requests/r/tasks/t', { title: 'Allowed on hold', priority: 'high', expectedRevision: 5 }, 'PUT'));
       assert.equal((await send('project-requests/r/tasks', { id: 'held-task', title: 'Held task' })).status, 200);
       project = await json(await send('project-requests/r/control', { action: 'resume', expectedRevision: project.revision }));
+      assert.equal((await send('project-requests/r/deliverables', { id: 'delivery', title: 'Delivery', artifactUrl: 'https://example.test/artifact' })).status, 200);
+      assert.equal((await send('project-requests/r/deliverables/delivery/accept', {})).status, 200);
       project = await json(await send('project-requests/r/control', { action: 'deliver', expectedRevision: project.revision }));
       assert.equal((await send('project-requests/r/milestones/m/reopen', { expectedRevision: milestone.revision })).status, 400);
       task = await json(await send('project-requests/r/tasks/t/complete', { completedBy: 'operator', expectedRevision: task.revision }));

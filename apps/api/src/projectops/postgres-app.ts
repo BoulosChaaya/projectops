@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { ProjectOpsConnectionSqlExecutor } from '../../../../packages/projectops/src/executor.ts';
+import { ProjectOpsConnectionSqlExecutor, projectOpsPoolConnection } from '../../../../packages/projectops/src/executor.ts';
 import {
   loadProjectOpsPostgresMigrations,
   migrateProjectOpsPostgres,
@@ -59,12 +59,7 @@ export async function startProjectOpsPostgresApp(
   pool.on('error', () => console.error('ProjectOps database connection failed.'));
   let app: ProjectOpsApp | undefined;
   try {
-    const sql = new ProjectOpsConnectionSqlExecutor({
-      async query<T>(text: string, params: readonly unknown[] = []) {
-        const result = await pool.query(text, [...params]);
-        return { rows: result.rows as T[], rowCount: result.rowCount ?? 0, command: result.command };
-      },
-    });
+    const sql = new ProjectOpsConnectionSqlExecutor(projectOpsPoolConnection(pool));
     app = await startProjectOpsApp({
       sql,
       host: config.host,

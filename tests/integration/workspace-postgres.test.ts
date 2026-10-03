@@ -39,6 +39,8 @@ test('Project upgrade, guarded editing, workflow metadata and clearing fields pe
       assert.equal(saved.status, 'approved'); assert.equal(saved.estimateAmountCents, 5000); assert.equal(saved.approvedBy, 'Operator'); assert.equal(saved.createdAtIso, '2026-10-03T10:00:00.000Z');
       assert.equal((await send('project-requests/r', { title: 'Cleared', brief: 'Clear optional fields', priority: 'low', expectedRevision: 5 }, 'PUT')).status, 200);
       const cleared = await read(); assert.equal(cleared.budgetRange, undefined); assert.equal(cleared.deadlineIso, undefined);
+      assert.equal((await send('project-requests/r/deliverables', { id: 'delivery', title: 'Delivery', artifactUrl: 'https://example.test/artifact' })).status, 200);
+      assert.equal((await send('project-requests/r/deliverables/delivery/accept', {})).status, 200);
       for (const status of ['in_progress', 'delivered', 'archived']) assert.equal((await send('project-requests/r/status', { status })).status, 200);
       assert.equal((await send('project-requests/r', { ...input, expectedRevision: 9 }, 'PUT')).status, 409);
       assert.equal((await send('project-requests/missing', input, 'PUT')).status, 404);

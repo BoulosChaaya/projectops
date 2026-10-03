@@ -547,7 +547,9 @@ export function insertProjectDeliverableSql(deliverable: ProjectDeliverable): Sq
       submitted_at,
       accepted_at,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    ) SELECT $1, parent.id, $3, $4, $5, $6, $7, $8, $9
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status IN ('approved', 'in_progress') FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       deliverable.id,
@@ -561,6 +563,10 @@ export function insertProjectDeliverableSql(deliverable: ProjectDeliverable): Sq
       deliverable.updatedAtIso,
     ]),
   });
+}
+
+export function lockProjectRequestSql(id: string): SqlStatement {
+  return Object.freeze({ sql: 'SELECT * FROM projectops_project_requests WHERE id = $1 FOR UPDATE', params: Object.freeze([id]) });
 }
 
 export function selectProjectDeliverablesSql(projectRequestId: string): SqlStatement {
@@ -587,10 +593,12 @@ export function selectProjectDeliverableByIdSql(
 
 export function acceptProjectDeliverableSql(deliverable: ProjectDeliverable): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_deliverables
+    sql: `UPDATE projectops_project_deliverables AS child
       SET status = $3, accepted_at = $4, updated_at = $5
-      WHERE project_request_id = $1 AND id = $2
-      RETURNING *`,
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status IN ('approved', 'in_progress', 'on_hold', 'delivered') FOR UPDATE) AS parent
+      WHERE child.project_request_id = parent.id AND child.id = $2 AND child.status = 'submitted'
+      RETURNING child.*`,
     params: Object.freeze([
       deliverable.projectRequestId,
       deliverable.id,
@@ -924,7 +932,9 @@ export function insertProjectFeedbackSql(feedback: ProjectFeedback): SqlStatemen
       addressed_by,
       response_note,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    ) SELECT $1, parent.id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $2 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered') FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       feedback.id,
@@ -967,10 +977,12 @@ export function selectProjectFeedbackByIdSql(
 
 export function addressProjectFeedbackSql(feedback: ProjectFeedback): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_feedback
+    sql: `UPDATE projectops_project_feedback AS child
       SET status = $3, addressed_at = $4, addressed_by = $5, response_note = $6, updated_at = $7
-      WHERE project_request_id = $1 AND id = $2
-      RETURNING *`,
+      FROM (SELECT id FROM projectops_project_requests
+        WHERE id = $1 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered') FOR UPDATE) AS parent
+      WHERE child.project_request_id = parent.id AND child.id = $2 AND child.status = 'open'
+      RETURNING child.*`,
     params: Object.freeze([
       feedback.projectRequestId,
       feedback.id,

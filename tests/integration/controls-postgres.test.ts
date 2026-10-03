@@ -36,6 +36,8 @@ test('Controls upgrade and atomic estimate/approval/cancellation decisions persi
       await app.close(); app = await startProjectOpsPostgresApp(config); origin = app.server.origin;
       current = await read('r'); assert.equal(current.status, 'on_hold');
       assert.equal((await send(root + '/control', { action: 'resume', expectedRevision: current.revision })).status, 200);
+      assert.equal((await send(root + '/deliverables', { id: 'delivery', title: 'Delivery', artifactUrl: 'https://example.test/artifact' })).status, 200);
+      assert.equal((await send(root + '/deliverables/delivery/accept', {})).status, 200);
       current = await read('r'); const cancelRace = await Promise.all([send(root + '/control', { action: 'cancel', expectedRevision: current.revision }), send(root + '/control', { action: 'deliver', expectedRevision: current.revision })]);
       assert.deepEqual(cancelRace.map(r => r.status).sort(), [200, 409]); current = await read('r');
       assert.ok(['cancelled', 'delivered'].includes(current.status));
