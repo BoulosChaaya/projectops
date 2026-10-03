@@ -38,10 +38,10 @@ See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the prev
 Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. The PostgreSQL runtime now protects these routes; contract tests may still inject an unprotected memory harness.
 
 ## Remaining approved work
-Roadmap slices 1-7 are complete. Slices 8-14 remain open. Existing functionality is reused to complete them.
+Roadmap slices 1-8 are complete. Slices 9-14 remain open. Existing functionality is reused to complete them.
 
 ## Next slice
-Slice 8: execution workspace. Manage work logs, notes, document links, issues and risks through the browser. The runnable application defaults to loopback and is not deployed.
+Slice 9: delivery and acceptance. The runnable application defaults to loopback and is not deployed.
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.
@@ -120,3 +120,17 @@ Read roadmap.md and this file, inspect the current GitHub branch/worktree, and v
 - PostgreSQL acceptance verifies fresh and pre-0006 migration, existing-row revision initialization, full planning persistence across restart, optional-field clearing, state restrictions and deterministic failures. Controlled races prove one winner for competing edits and edit-versus-complete, stale command rejection, cancellation winning against task/milestone mutations with unchanged children, and the reverse order where a child commits before cancellation.
 - Chromium acceptance verifies creation, validation, safe text, edit/reschedule/clear, completion/reopen, reload persistence, stale-tab conflict feedback and held/cancelled read-only behavior.
 - Limitations: execution workspace editing remains slice 8, delivery acceptance/completion gates remain slice 9, currency-separated totals remain slice 10, and automatic history remains slice 11. No deployment claim.
+
+## Completed slice 8: execution workspace
+- Protected workspace forms create work logs, notes, document links, issues and risks. Notes and document links can be archived, issues resolved and risks mitigated. Work logs remain immutable; no edit, reopen, unarchive, delete or file-upload commands were introduced.
+- Work logs can relate to an existing task and document links to an existing deliverable. Browser writes take actor, author, uploader and action identities from the signed-in operator and use server timestamps. Stored text is rendered safely and document links are restricted to HTTP(S).
+- Work-log creation is allowed for estimated, approved, in-progress and delivered projects. Issue, risk and document creation is also allowed while held. Notes can be created in every nonterminal state. Resolution, mitigation and archival actions are allowed in every nonterminal state. Cancelled/archived parents reject all execution writes while retaining readable records.
+- All nine execution write paths lock and validate the parent row in the same PostgreSQL statement. Creates use a guarded insert; terminal actions additionally require the child identity and expected open/active state. Parent revisions are unchanged, and no schema migration or child revision was added.
+- Zero-row guarded writes are classified after the atomic decision: genuinely missing parents, children, tasks or deliverables return 404; existing resources invalidated by parent state, child state, duplicate identity or a concurrent lifecycle change return 409.
+- Implementation checkpoint: 38358659da73a1bb9bdfd9bc77721e86de2e1934.
+- `pnpm verify`: 66/66 PASS; hygiene passed for 571 files; zero skips.
+- `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:postgres`: 15/15 PASS, zero skips.
+- `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:browser`: 6/6 PASS, zero skips.
+- PostgreSQL acceptance verifies persistence across restart, defaults and optional relationships, terminal metadata, the complete parent-state matrix, unchanged rows on failures, missing-resource and duplicate classification, and memory-executor parity. Controlled races prove one winner for every terminal action; cancellation winning against each create/action leaves children absent/unchanged; hold winning blocks a work log while continuing to permit the other resources; child-first serialization may commit before cancellation; archive-first serialization blocks later writes.
+- Chromium acceptance verifies all five resources, relationships, terminal actions and metadata, reload persistence, validation, stale conflict/reload feedback, new/held/cancelled/archived controls, retained read-only records, safe text and link rendering, independent retry and no unexpected page errors.
+- Limitations: delivery acceptance/completion gates remain slice 9, currency-separated totals remain slice 10, and automatic history remains slice 11. The execution slice does not add editing or reversal commands. No deployment claim.
