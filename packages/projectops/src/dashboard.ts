@@ -1,3 +1,4 @@
+import { mergeFinanceTotals, type ProjectFinanceTotalsByCurrency } from './finances.ts';
 import type { ProjectPriority, ProjectRequestStatus } from './domain.ts';
 
 export interface ProjectOpsDashboardRow {
@@ -19,8 +20,6 @@ export interface ProjectOpsDashboardRow {
   readonly acceptedDeliverableCount?: number;
   readonly issuedInvoiceCount?: number;
   readonly paidInvoiceCount?: number;
-  readonly outstandingInvoiceAmountCents?: number;
-  readonly paidInvoiceAmountCents?: number;
   readonly proposedChangeRequestCount?: number;
   readonly approvedChangeRequestCount?: number;
   readonly rejectedChangeRequestCount?: number;
@@ -49,10 +48,9 @@ export interface ProjectOpsDashboardRow {
   readonly submittedExpenseCount?: number;
   readonly approvedExpenseCount?: number;
   readonly rejectedExpenseCount?: number;
-  readonly submittedExpenseAmountCents?: number;
-  readonly approvedExpenseAmountCents?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
+  readonly financeTotalsByCurrency?: ProjectFinanceTotalsByCurrency;
   readonly updatedAtIso: string;
 }
 
@@ -66,8 +64,6 @@ export interface ProjectOpsDashboardView {
   readonly acceptedDeliverables: number;
   readonly issuedInvoices: number;
   readonly paidInvoices: number;
-  readonly outstandingInvoiceAmountCents: number;
-  readonly paidInvoiceAmountCents: number;
   readonly proposedChangeRequests: number;
   readonly approvedChangeRequests: number;
   readonly rejectedChangeRequests: number;
@@ -94,9 +90,8 @@ export interface ProjectOpsDashboardView {
   readonly submittedExpenses: number;
   readonly approvedExpenses: number;
   readonly rejectedExpenses: number;
-  readonly submittedExpenseAmountCents: number;
-  readonly approvedExpenseAmountCents: number;
   readonly nextDeadline?: ProjectOpsDashboardRow;
+  readonly financeTotalsByCurrency: ProjectFinanceTotalsByCurrency;
   readonly rows: readonly ProjectOpsDashboardRow[];
 }
 
@@ -121,8 +116,6 @@ export function composeProjectOpsDashboard(
   let acceptedDeliverables = 0;
   let issuedInvoices = 0;
   let paidInvoices = 0;
-  let outstandingInvoiceAmountCents = 0;
-  let paidInvoiceAmountCents = 0;
   let proposedChangeRequests = 0;
   let approvedChangeRequests = 0;
   let rejectedChangeRequests = 0;
@@ -149,8 +142,6 @@ export function composeProjectOpsDashboard(
   let submittedExpenses = 0;
   let approvedExpenses = 0;
   let rejectedExpenses = 0;
-  let submittedExpenseAmountCents = 0;
-  let approvedExpenseAmountCents = 0;
   let nextDeadline: ProjectOpsDashboardRow | undefined;
 
   for (const row of rows) {
@@ -164,8 +155,6 @@ export function composeProjectOpsDashboard(
     acceptedDeliverables += row.acceptedDeliverableCount ?? 0;
     issuedInvoices += row.issuedInvoiceCount ?? 0;
     paidInvoices += row.paidInvoiceCount ?? 0;
-    outstandingInvoiceAmountCents += row.outstandingInvoiceAmountCents ?? 0;
-    paidInvoiceAmountCents += row.paidInvoiceAmountCents ?? 0;
     proposedChangeRequests += row.proposedChangeRequestCount ?? 0;
     approvedChangeRequests += row.approvedChangeRequestCount ?? 0;
     rejectedChangeRequests += row.rejectedChangeRequestCount ?? 0;
@@ -192,14 +181,13 @@ export function composeProjectOpsDashboard(
     submittedExpenses += row.submittedExpenseCount ?? 0;
     approvedExpenses += row.approvedExpenseCount ?? 0;
     rejectedExpenses += row.rejectedExpenseCount ?? 0;
-    submittedExpenseAmountCents += row.submittedExpenseAmountCents ?? 0;
-    approvedExpenseAmountCents += row.approvedExpenseAmountCents ?? 0;
     if (row.deadlineIso && !['cancelled','archived','delivered'].includes(row.status) && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
       nextDeadline = row;
     }
   }
 
   return Object.freeze({
+    financeTotalsByCurrency: mergeFinanceTotals(rows.map(row => row.financeTotalsByCurrency ?? {})),
     totalActiveRequests: rows.filter((row) => !['archived', 'cancelled'].includes(row.status)).length,
     byStatus: Object.freeze(byStatus),
     highPriorityOpen,
@@ -209,8 +197,6 @@ export function composeProjectOpsDashboard(
     acceptedDeliverables,
     issuedInvoices,
     paidInvoices,
-    outstandingInvoiceAmountCents,
-    paidInvoiceAmountCents,
     proposedChangeRequests,
     approvedChangeRequests,
     rejectedChangeRequests,
@@ -237,8 +223,6 @@ export function composeProjectOpsDashboard(
     submittedExpenses,
     approvedExpenses,
     rejectedExpenses,
-    submittedExpenseAmountCents,
-    approvedExpenseAmountCents,
     nextDeadline,
     rows: Object.freeze([...rows]),
   });

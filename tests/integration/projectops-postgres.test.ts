@@ -83,7 +83,7 @@ test('PostgreSQL application persists API data across shutdown and restart', asy
       const summary = await fetch(`${app.server.origin}/projectops/dashboard`, { headers: session }).then(r => r.json());
       assert.equal(summary.totalActiveRequests, 1);
       assert.equal(summary.openRisks, 1);
-      assert.equal(summary.outstandingInvoiceAmountCents, 10000);
+      assert.equal(summary.financeTotalsByCurrency?.USD.outstandingInvoiceAmountCents, '10000');
       const html = await fetch(`${app.server.origin}/projectops`, { headers: session }).then(r => r.text());
       assert.match(html, /Durable project/);
       assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 6);

@@ -623,7 +623,7 @@ export function insertProjectInvoiceSql(invoice: ProjectInvoice): SqlStatement {
       due_at,
       paid_at,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11 FROM (SELECT id FROM projectops_project_requests WHERE id = $2 AND status IN ('approved', 'in_progress', 'delivered') FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       invoice.id,
@@ -665,10 +665,11 @@ export function selectProjectInvoiceByIdSql(
 
 export function markProjectInvoicePaidSql(invoice: ProjectInvoice): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_invoices
+    sql: `UPDATE projectops_project_invoices AS child
       SET status = $3, paid_at = $4, updated_at = $5
-      WHERE project_request_id = $1 AND id = $2
-      RETURNING *`,
+      FROM (SELECT id FROM projectops_project_requests WHERE id = $1 AND status IN ('new', 'estimated', 'approved', 'in_progress', 'on_hold', 'delivered') FOR UPDATE) AS parent
+      WHERE child.project_request_id = parent.id AND child.id = $2 AND child.status = 'issued'
+      RETURNING child.*`,
     params: Object.freeze([
       invoice.projectRequestId,
       invoice.id,
@@ -1355,7 +1356,7 @@ export function insertProjectExpenseSql(expense: ProjectExpense): SqlStatement {
       decided_by,
       decision_note,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15 FROM (SELECT id FROM projectops_project_requests WHERE id = $2 AND status IN ('estimated', 'approved', 'in_progress', 'on_hold', 'delivered') FOR UPDATE) AS parent
     RETURNING *`,
     params: Object.freeze([
       expense.id,
@@ -1401,10 +1402,11 @@ export function selectProjectExpenseByIdSql(
 
 export function updateProjectExpenseDecisionSql(expense: ProjectExpense): SqlStatement {
   return Object.freeze({
-    sql: `UPDATE projectops_project_expenses
+    sql: `UPDATE projectops_project_expenses AS child
       SET status = $3, decided_at = $4, decided_by = $5, decision_note = $6, updated_at = $7
-      WHERE project_request_id = $1 AND id = $2
-      RETURNING *`,
+      FROM (SELECT id FROM projectops_project_requests WHERE id = $1 AND status IN ('new', 'estimated', 'approved', 'in_progress', 'on_hold', 'delivered') FOR UPDATE) AS parent
+      WHERE child.project_request_id = parent.id AND child.id = $2 AND child.status = 'submitted'
+      RETURNING child.*`,
     params: Object.freeze([
       expense.projectRequestId,
       expense.id,
@@ -1560,8 +1562,6 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(ds.accepted_deliverables, 0) AS accepted_deliverable_count,
       COALESCE(inv.issued_invoices, 0) AS issued_invoice_count,
       COALESCE(inv.paid_invoices, 0) AS paid_invoice_count,
-      COALESCE(inv.outstanding_amount_cents, 0) AS outstanding_invoice_amount_cents,
-      COALESCE(inv.paid_amount_cents, 0) AS paid_invoice_amount_cents,
       COALESCE(ch.proposed_change_requests, 0) AS proposed_change_request_count,
       COALESCE(ch.approved_change_requests, 0) AS approved_change_request_count,
       COALESCE(ch.rejected_change_requests, 0) AS rejected_change_request_count,
@@ -1590,8 +1590,7 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(ex.submitted_expenses, 0) AS submitted_expense_count,
       COALESCE(ex.approved_expenses, 0) AS approved_expense_count,
       COALESCE(ex.rejected_expenses, 0) AS rejected_expense_count,
-      COALESCE(ex.submitted_amount_cents, 0) AS submitted_expense_amount_cents,
-      COALESCE(ex.approved_amount_cents, 0) AS approved_expense_amount_cents,
+      COALESCE(fin.totals, '{}'::jsonb) AS finance_totals_by_currency,
       act.latest_activity_at,
       act.latest_activity_summary,
       pr.updated_at
@@ -1617,9 +1616,7 @@ export function selectDashboardRowsSql(): SqlStatement {
       SELECT
         project_request_id,
         COUNT(*) FILTER (WHERE status = 'issued') AS issued_invoices,
-        COUNT(*) FILTER (WHERE status = 'paid') AS paid_invoices,
-        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'issued'), 0) AS outstanding_amount_cents,
-        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'paid'), 0) AS paid_amount_cents
+        COUNT(*) FILTER (WHERE status = 'paid') AS paid_invoices
       FROM projectops_project_invoices
       GROUP BY project_request_id
     ) inv ON inv.project_request_id = pr.id
@@ -1703,12 +1700,32 @@ export function selectDashboardRowsSql(): SqlStatement {
         project_request_id,
         COUNT(*) FILTER (WHERE status = 'submitted') AS submitted_expenses,
         COUNT(*) FILTER (WHERE status = 'approved') AS approved_expenses,
-        COUNT(*) FILTER (WHERE status = 'rejected') AS rejected_expenses,
-        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'submitted'), 0) AS submitted_amount_cents,
-        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'approved'), 0) AS approved_amount_cents
+        COUNT(*) FILTER (WHERE status = 'rejected') AS rejected_expenses
       FROM projectops_project_expenses
       GROUP BY project_request_id
     ) ex ON ex.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT project_request_id, jsonb_object_agg(currency, jsonb_build_object(
+        'outstandingInvoiceAmountCents', outstanding::text,
+        'paidInvoiceAmountCents', paid::text,
+        'submittedExpenseAmountCents', submitted::text,
+        'approvedExpenseAmountCents', approved::text)) AS totals
+      FROM (
+        SELECT project_request_id, currency, SUM(outstanding) AS outstanding, SUM(paid) AS paid,
+          SUM(submitted) AS submitted, SUM(approved) AS approved
+        FROM (
+          SELECT project_request_id, currency,
+            CASE WHEN status = 'issued' THEN amount_cents ELSE 0 END AS outstanding,
+            CASE WHEN status = 'paid' THEN amount_cents ELSE 0 END AS paid, 0 AS submitted, 0 AS approved
+          FROM projectops_project_invoices
+          UNION ALL
+          SELECT project_request_id, currency, 0, 0,
+            CASE WHEN status = 'submitted' THEN amount_cents ELSE 0 END,
+            CASE WHEN status = 'approved' THEN amount_cents ELSE 0 END
+          FROM projectops_project_expenses WHERE status IN ('submitted', 'approved')
+        ) amounts GROUP BY project_request_id, currency
+      ) currencies GROUP BY project_request_id
+    ) fin ON fin.project_request_id = pr.id
     LEFT JOIN (
       SELECT DISTINCT ON (project_request_id)
         project_request_id,

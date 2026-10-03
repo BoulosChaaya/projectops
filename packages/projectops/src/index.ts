@@ -5,3 +5,4 @@ export * from './migrations.ts';
 export * from './persistence.ts';
 export * from './repository.ts';
 export * from './sql.ts';
+export * from './finances.ts';

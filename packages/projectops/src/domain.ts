@@ -1038,21 +1038,28 @@ export function acceptProjectDeliverable(
   });
 }
 
+export const financeParentStates = Object.freeze({
+  issue: ['approved', 'in_progress', 'delivered'],
+  submit: ['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'],
+  action: ['new', 'estimated', 'approved', 'in_progress', 'on_hold', 'delivered'],
+} satisfies Record<string, readonly ProjectRequestStatus[]>);
+
+export function validateFinanceIdentifier(value: string): string {
+  return requireIdentifier('finance.identifier', value);
+}
+
+export function requireFinanceParentState(request: ProjectRequest, command: keyof typeof financeParentStates): void {
+  if (!(financeParentStates[command] as readonly string[]).includes(request.status)) {
+    throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_FINANCE_STATE_CONFLICT',
+      `Project state ${request.status.replaceAll('_', ' ')} does not allow ${command === 'issue' ? 'invoice issuance' : command === 'submit' ? 'expense submission' : 'finance actions'}. Allowed states: ${financeParentStates[command].join(', ')}.`);
+  }
+}
+
 export function createProjectInvoice(
   request: ProjectRequest,
   input: NewProjectInvoiceInput
 ): ProjectInvoice {
-  if (
-    request.status !== 'approved' &&
-    request.status !== 'in_progress' &&
-    request.status !== 'delivered'
-  ) {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_INVOICES',
-      'Project request must be approved, in progress, or delivered before issuing invoices.'
-    );
-  }
+  requireFinanceParentState(request, 'issue');
 
   const id = requireIdentifier('projectInvoice.id', input.id);
   const projectRequestId = requireIdentifier('projectInvoice.projectRequestId', input.projectRequestId);
@@ -1091,9 +1098,9 @@ export function markProjectInvoicePaid(
   invoice: ProjectInvoice,
   paidAtIso: string
 ): ProjectInvoice {
-  if (invoice.status === 'paid') {
+  if (invoice.status !== 'issued') {
     throw new ProjectOpsOperationError(
-      'invalid_state',
+      'conflict',
       'PROJECTOPS_INVOICE_ALREADY_PAID',
       'Project invoice is already paid.'
     );
@@ -1749,13 +1756,7 @@ export function createProjectExpense(
   request: ProjectRequest,
   input: NewProjectExpenseInput
 ): ProjectExpense {
-  if (request.status === 'new' || request.status === 'archived' || request.status === 'cancelled') {
-    throw new ProjectOpsOperationError(
-      'invalid_state',
-      'PROJECTOPS_REQUEST_NOT_READY_FOR_EXPENSES',
-      'Project request must be estimated, approved, in progress, or delivered before adding expenses.'
-    );
-  }
+  requireFinanceParentState(request, 'submit');
 
   const id = requireIdentifier('projectExpense.id', input.id);
   const projectRequestId = requireIdentifier('projectExpense.projectRequestId', input.projectRequestId);
@@ -1917,7 +1918,7 @@ function decideProjectExpense(
 ): ProjectExpense {
   if (expense.status !== 'submitted') {
     throw new ProjectOpsOperationError(
-      'invalid_state',
+      'conflict',
       'PROJECTOPS_EXPENSE_ALREADY_DECIDED',
       'Project expense has already been decided.'
     );
