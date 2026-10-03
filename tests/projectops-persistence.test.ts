@@ -15,6 +15,7 @@ import {
   type ProjectMilestone,
   type ProjectNote,
   type ProjectRequest,
+  type ProjectRisk,
   type ProjectTask,
   type ProjectWorkLog,
 } from '../packages/projectops/src/index.ts';
@@ -149,6 +150,22 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
     resolutionNote: 'Assets received.',
   });
   const issues = await repo.listProjectIssues('req-1');
+  const risk = await repo.createProjectRisk('req-1', {
+    id: 'risk-1',
+    projectRequestId: 'req-1',
+    title: 'Late content delivery',
+    description: 'Client content may arrive after implementation starts.',
+    probability: 'high',
+    impact: 'medium',
+    mitigationPlan: 'Prepare placeholder copy and confirm deadline.',
+    owner: 'Boulos',
+    identifiedAtIso: T2,
+  });
+  const mitigatedRisk = await repo.mitigateProjectRisk('req-1', 'risk-1', {
+    mitigatedAtIso: T3,
+    mitigationNote: 'Client approved placeholder copy.',
+  });
+  const risks = await repo.listProjectRisks('req-1');
   const feedback = await repo.createProjectFeedback('req-1', {
     id: 'feedback-1',
     projectRequestId: 'req-1',
@@ -275,6 +292,10 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(resolvedIssue.status, 'resolved');
   assert.equal(issues.length, 1);
   assert.equal(issues[0]?.resolutionNote, 'Assets received.');
+  assert.equal(risk.status, 'open');
+  assert.equal(mitigatedRisk.status, 'mitigated');
+  assert.equal(risks.length, 1);
+  assert.equal(risks[0]?.mitigationNote, 'Client approved placeholder copy.');
   assert.equal(feedback.status, 'open');
   assert.equal(addressedFeedback.status, 'addressed');
   assert.equal(feedbackList.length, 1);
@@ -318,6 +339,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(snapshot.projectInvoices[0]?.status, 'paid');
   assert.equal(snapshot.projectChangeRequests[0]?.status, 'approved');
   assert.equal(snapshot.projectIssues[0]?.status, 'resolved');
+  assert.equal(snapshot.projectRisks[0]?.status, 'mitigated');
   assert.equal(snapshot.projectFeedback[0]?.status, 'addressed');
   assert.equal(snapshot.projectDocuments[0]?.status, 'archived');
   assert.equal(snapshot.projectNotes[0]?.status, 'archived');
@@ -338,6 +360,8 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.approvedChangeRequests, 1);
   assert.equal(dashboard.openIssues, 0);
   assert.equal(dashboard.resolvedIssues, 1);
+  assert.equal(dashboard.openRisks, 0);
+  assert.equal(dashboard.mitigatedRisks, 1);
   assert.equal(dashboard.openFeedback, 0);
   assert.equal(dashboard.addressedFeedback, 1);
   assert.equal(dashboard.negativeOpenFeedback, 0);
@@ -361,6 +385,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.rows[0]?.paidInvoiceAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.approvedChangeRequestCount, 1);
   assert.equal(dashboard.rows[0]?.resolvedIssueCount, 1);
+  assert.equal(dashboard.rows[0]?.mitigatedRiskCount, 1);
   assert.equal(dashboard.rows[0]?.addressedFeedbackCount, 1);
   assert.equal(dashboard.rows[0]?.archivedDocumentCount, 1);
   assert.equal(dashboard.rows[0]?.archivedNoteCount, 1);
@@ -781,6 +806,35 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     );
     assert.equal(approvedExpense.status, 'approved');
 
+    const risk = await expectOkJson<ProjectRisk>(
+      `${server.origin}/projectops/project-requests/req-1/risks`,
+      {
+        id: 'risk-1',
+        title: 'Late content delivery',
+        description: 'Client content may arrive after implementation starts.',
+        probability: 'high',
+        impact: 'medium',
+        mitigationPlan: 'Prepare placeholder copy and confirm deadline.',
+        owner: 'Boulos',
+        identifiedAtIso: T2,
+      }
+    );
+    assert.equal(risk.status, 'open');
+
+    const risksRes = await fetch(`${server.origin}/projectops/project-requests/req-1/risks`);
+    assert.equal(risksRes.status, 200);
+    const risks = await risksRes.json() as readonly ProjectRisk[];
+    assert.equal(risks.length, 1);
+
+    const mitigatedRisk = await expectOkJson<ProjectRisk>(
+      `${server.origin}/projectops/project-requests/req-1/risks/risk-1/mitigate`,
+      {
+        mitigatedAtIso: T3,
+        mitigationNote: 'Client approved placeholder copy.',
+      }
+    );
+    assert.equal(mitigatedRisk.status, 'mitigated');
+
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
     const clients = await clientsRes.json() as readonly { id: string }[];
@@ -823,6 +877,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.billableWorkMinutes, 120);
     assert.equal(dashboard.approvedExpenses, 1);
     assert.equal(dashboard.approvedExpenseAmountCents, 4500);
+    assert.equal(dashboard.mitigatedRisks, 1);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
     assert.equal(sql.snapshot().projectMilestones[0]?.status, 'completed');
     assert.equal(sql.snapshot().projectDeliverables[0]?.status, 'accepted');
@@ -833,6 +888,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(sql.snapshot().projectTasks[0]?.status, 'completed');
     assert.equal(sql.snapshot().projectWorkLogs[0]?.minutes, 120);
     assert.equal(sql.snapshot().projectExpenses[0]?.status, 'approved');
+    assert.equal(sql.snapshot().projectRisks[0]?.status, 'mitigated');
   } finally {
     await server.close();
   }
