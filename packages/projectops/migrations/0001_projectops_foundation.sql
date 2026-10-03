@@ -194,6 +194,25 @@ CREATE TABLE IF NOT EXISTS projectops_project_work_logs (
     ON DELETE SET NULL (task_id)
 );
 
+CREATE TABLE IF NOT EXISTS projectops_project_expenses (
+  id TEXT NOT NULL,
+  project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+  category TEXT NOT NULL CHECK (category IN ('software', 'asset', 'service', 'travel', 'other')),
+  description TEXT NOT NULL,
+  vendor TEXT,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  currency TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  reimbursable BOOLEAN NOT NULL,
+  receipt_url TEXT CHECK (receipt_url IS NULL OR receipt_url ~ '^https?://'),
+  status TEXT NOT NULL CHECK (status IN ('submitted', 'approved', 'rejected')),
+  incurred_at TIMESTAMPTZ NOT NULL,
+  decided_at TIMESTAMPTZ,
+  decided_by TEXT,
+  decision_note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_request_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS projectops_project_activities (
   id TEXT NOT NULL,
   project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -254,6 +273,9 @@ CREATE INDEX IF NOT EXISTS projectops_project_tasks_request_status_idx
 
 CREATE INDEX IF NOT EXISTS projectops_project_work_logs_request_time_idx
   ON projectops_project_work_logs (project_request_id, logged_at DESC, billable);
+
+CREATE INDEX IF NOT EXISTS projectops_project_expenses_request_status_idx
+  ON projectops_project_expenses (project_request_id, status, category, incurred_at DESC);
 
 CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
   ON projectops_project_activities (project_request_id, happened_at DESC);
