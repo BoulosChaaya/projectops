@@ -12,6 +12,7 @@ import type {
   ProjectOpsClient,
   ProjectRequest,
   ProjectRequestStatus,
+  ProjectRisk,
   ProjectTask,
   ProjectWorkLog,
 } from './domain.ts';
@@ -124,6 +125,22 @@ export const projectOpsSchemaSql = Object.freeze([
     opened_at TIMESTAMPTZ NOT NULL,
     resolved_at TIMESTAMPTZ,
     resolution_note TEXT,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_risks (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    probability TEXT NOT NULL CHECK (probability IN ('low', 'medium', 'high')),
+    impact TEXT NOT NULL CHECK (impact IN ('low', 'medium', 'high')),
+    mitigation_plan TEXT,
+    owner TEXT,
+    status TEXT NOT NULL CHECK (status IN ('open', 'mitigated')),
+    identified_at TIMESTAMPTZ NOT NULL,
+    mitigated_at TIMESTAMPTZ,
+    mitigation_note TEXT,
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (project_request_id, id)
   )`,
@@ -262,6 +279,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_change_requests (project_request_id, status)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_issues_request_status_idx
     ON projectops_project_issues (project_request_id, status, severity)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_risks_request_status_idx
+    ON projectops_project_risks (project_request_id, status, impact, probability)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_feedback_request_status_idx
     ON projectops_project_feedback (project_request_id, status, sentiment)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_documents_request_status_idx
@@ -724,6 +743,81 @@ export function resolveProjectIssueSql(issue: ProjectIssue): SqlStatement {
       issue.resolvedAtIso ?? null,
       issue.resolutionNote ?? null,
       issue.updatedAtIso,
+    ]),
+  });
+}
+
+export function insertProjectRiskSql(risk: ProjectRisk): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_risks (
+      id,
+      project_request_id,
+      title,
+      description,
+      probability,
+      impact,
+      mitigation_plan,
+      owner,
+      status,
+      identified_at,
+      mitigated_at,
+      mitigation_note,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    RETURNING *`,
+    params: Object.freeze([
+      risk.id,
+      risk.projectRequestId,
+      risk.title,
+      risk.description,
+      risk.probability,
+      risk.impact,
+      risk.mitigationPlan ?? null,
+      risk.owner ?? null,
+      risk.status,
+      risk.identifiedAtIso,
+      risk.mitigatedAtIso ?? null,
+      risk.mitigationNote ?? null,
+      risk.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectRisksSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_risks
+      WHERE project_request_id = $1
+      ORDER BY identified_at DESC, updated_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectRiskByIdSql(
+  projectRequestId: string,
+  riskId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_risks
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, riskId]),
+  });
+}
+
+export function mitigateProjectRiskSql(risk: ProjectRisk): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_risks
+      SET status = $3, mitigated_at = $4, mitigation_note = $5, updated_at = $6
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      risk.projectRequestId,
+      risk.id,
+      risk.status,
+      risk.mitigatedAtIso ?? null,
+      risk.mitigationNote ?? null,
+      risk.updatedAtIso,
     ]),
   });
 }
@@ -1272,6 +1366,9 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(iss.open_issues, 0) AS open_issue_count,
       COALESCE(iss.high_open_issues, 0) AS high_open_issue_count,
       COALESCE(iss.resolved_issues, 0) AS resolved_issue_count,
+      COALESCE(rsk.open_risks, 0) AS open_risk_count,
+      COALESCE(rsk.high_open_risks, 0) AS high_open_risk_count,
+      COALESCE(rsk.mitigated_risks, 0) AS mitigated_risk_count,
       COALESCE(fb.open_feedback, 0) AS open_feedback_count,
       COALESCE(fb.addressed_feedback, 0) AS addressed_feedback_count,
       COALESCE(fb.negative_open_feedback, 0) AS negative_open_feedback_count,
@@ -1342,6 +1439,17 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_issues
       GROUP BY project_request_id
     ) iss ON iss.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'open') AS open_risks,
+        COUNT(*) FILTER (
+          WHERE status = 'open' AND (impact = 'high' OR probability = 'high')
+        ) AS high_open_risks,
+        COUNT(*) FILTER (WHERE status = 'mitigated') AS mitigated_risks
+      FROM projectops_project_risks
+      GROUP BY project_request_id
+    ) rsk ON rsk.project_request_id = pr.id
     LEFT JOIN (
       SELECT
         project_request_id,
