@@ -16,6 +16,7 @@ import type {
   EstimateProjectRequestInput,
   MitigateProjectRiskInput,
   NewClientInput,
+  EditProjectInput,
   EditClientInput,
   ClientFilter,
   NewProjectActivityInput,
@@ -62,6 +63,7 @@ export interface ProjectOpsApiService {
   listClientProjects(id: string): Promise<readonly ProjectRequest[]>;
   listProjectRequests(): Promise<readonly ProjectRequest[]>;
   getProjectRequest(id: string): Promise<ProjectRequest | undefined>;
+  editProject(id: string, input: EditProjectInput, nowIso: string): Promise<ProjectRequest>;
   createProjectMilestone(
     projectRequestId: string,
     input: NewProjectMilestoneInput
@@ -259,6 +261,15 @@ export function createProjectOpsRoutes(
       method: 'GET',
       path: '/projectops/project-requests',
       handler: async () => await service.listProjectRequests(),
+    },
+    {
+      method: 'PUT', path: '/projectops/project-requests/:id',
+      handler: async (request, _context, params) => await runProjectOpsRequest(() => {
+        const value = readRecord(request.body);
+        return service.editProject(params.id, { title: readString(value.title, 'title'), brief: readString(value.brief, 'brief'),
+          budgetRange: readOptionalString(value.budgetRange, 'budgetRange'), deadlineIso: readOptionalString(value.deadlineIso, 'deadlineIso'),
+          priority: readOptionalPriority(value.priority) ?? missingProjectPriority(), expectedRevision: readPositiveInteger(value.expectedRevision, 'expectedRevision') }, clock());
+      }),
     },
     {
       method: 'GET',
@@ -715,6 +726,9 @@ function readClientInput(body: unknown, clock: () => string): NewClientInput {
 function readClientRevision(value: unknown): number {
   if (typeof value !== 'number') throw new HttpError(400, 'INVALID_CLIENT_REVISION', 'A valid client revision is required.');
   return value;
+}
+function missingProjectPriority(): never {
+  throw new HttpError(400, 'INVALID_PROJECT_PRIORITY', 'Project priority is required.');
 }
 
 function readProjectRequestInput(body: unknown, clock: () => string): NewProjectRequestInput {

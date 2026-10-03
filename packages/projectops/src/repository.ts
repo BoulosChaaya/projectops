@@ -12,6 +12,8 @@ import {
   createProjectChangeRequest,
   createProjectActivity,
   createClient,
+  editProject,
+  type EditProjectInput,
   editClient,
   validateClientFilter,
   validateClientRevision,
@@ -88,6 +90,7 @@ import {
   completeProjectMilestoneSql,
   estimateProjectRequestSql,
   insertClientSql,
+  editProjectSql,
   editClientSql,
   archiveClientSql,
   selectClientProjectsSql,
@@ -247,6 +250,15 @@ export class ProjectOpsRepository {
 
   public async getProjectRequest(id: string): Promise<ProjectRequest | undefined> {
     const rows = await this.sql.query<ProjectRequest>(selectProjectRequestByIdSql(id));
+    return rows[0];
+  }
+
+  public async editProject(id: string, input: EditProjectInput, nowIso: string): Promise<ProjectRequest> {
+    const request = await this.getProjectRequest(id);
+    if (!request) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_REQUEST_NOT_FOUND', 'Project not found.');
+    const prepared = editProject(request, input, nowIso);
+    const rows = await this.sql.query<ProjectRequest>(editProjectSql(prepared, input.expectedRevision));
+    if (!rows[0]) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed or is archived. Reload before trying again.');
     return rows[0];
   }
 

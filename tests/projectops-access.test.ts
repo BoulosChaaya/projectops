@@ -35,7 +35,7 @@ test('All product routes require a session and writes enforce Origin, JSON and C
     for (const route of app.routes.filter(r => !r.path.includes('/access/') && r.path !== '/projectops/login')) {
       const method = typeof route.method === 'string' ? route.method : route.method[0];
       const response = await fetch(origin + route.path.replaceAll(/:[^/]+/g, 'probe'), { method, redirect: 'manual', ...(method !== 'GET' ? { headers: { 'content-type': 'application/json' }, body: '{}' } : {}) });
-      assert.equal(response.status, (['/projectops', '/projectops/settings'].includes(route.path) || route.path.startsWith('/projectops/client-management')) ? 302 : 401, route.path);
+      assert.equal(response.status, (['/projectops', '/projectops/settings'].includes(route.path) || route.path.startsWith('/projectops/client-management') || route.path.startsWith('/projectops/projects/')) ? 302 : 401, route.path);
     }
     const headers = { cookie: 'projectops_session=valid', origin, 'content-type': 'application/json', 'x-csrf-token': 'csrf' };
     const write = (extra: Record<string, string>) => fetch(origin + '/projectops/clients', { method: 'POST', headers: { ...headers, ...extra }, body: JSON.stringify({ id: 'c', name: 'Client' }) });

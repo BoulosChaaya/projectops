@@ -133,7 +133,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
 function renderRequestRow(row: ProjectOpsDashboardRow): string {
   return `<tr>
     <td>
-      <strong>${escapeHtml(row.title)}</strong>
+      <strong><a href="/projectops/projects/${encodeURIComponent(row.id)}">${escapeHtml(row.title)}</a></strong>
       <span class="muted">${escapeHtml(row.id)}</span>
     </td>
     <td>${escapeHtml(row.clientName)}</td>
