@@ -13,5 +13,6 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
+      - run: pnpm install --frozen-lockfile
       - run: pnpm verify
       - run: echo "Ready for the deployment system selected by the consuming project."

@@ -12,5 +12,6 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
+      - run: pnpm install --frozen-lockfile
       - run: pnpm verify
       - run: echo "Deployment is intentionally environment-owned."

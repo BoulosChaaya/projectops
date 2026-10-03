@@ -14,6 +14,8 @@ It uses Uruk's dependency-light TypeScript structure to prove real product behav
 
 ## Project Definition
 
+The approved product map is [ProjectOps roadmap](docs/projectops/roadmap.md). Read [current status](docs/projectops/status.md) before continuing work. For database configuration, startup and acceptance commands, see [runtime instructions](docs/projectops/runtime.md).
+
 Start with [What Uruk Is](docs/what-uruk-is.md) for the foundation rules. Product behavior belongs in clearly named ProjectOps application and package boundaries instead of leaking into reusable Uruk primitives.
 
 ## Repository Layout
