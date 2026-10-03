@@ -53,6 +53,7 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('Outstanding invoices', formatMoney(summary.outstandingInvoiceAmountCents, 'USD'))}
       ${renderMetric('Proposed changes', String(summary.proposedChangeRequests))}
       ${renderMetric('Open issues', String(summary.openIssues))}
+      ${renderMetric('Open risks', String(summary.openRisks))}
       ${renderMetric('Open feedback', String(summary.openFeedback))}
       ${renderMetric('Active documents', String(summary.activeDocuments))}
       ${renderMetric('Active notes', String(summary.activeNotes))}
@@ -108,6 +109,7 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
           <th scope="col">Invoices</th>
           <th scope="col">Changes</th>
           <th scope="col">Issues</th>
+          <th scope="col">Risks</th>
           <th scope="col">Feedback</th>
           <th scope="col">Documents</th>
           <th scope="col">Notes</th>
@@ -140,6 +142,7 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatInvoices(row))}</td>
     <td>${escapeHtml(formatChangeRequests(row))}</td>
     <td>${escapeHtml(formatIssues(row))}</td>
+    <td>${escapeHtml(formatRisks(row))}</td>
     <td>${escapeHtml(formatFeedback(row))}</td>
     <td>${escapeHtml(formatDocuments(row))}</td>
     <td>${escapeHtml(formatNotes(row))}</td>
@@ -207,6 +210,10 @@ function formatChangeRequests(row: ProjectOpsDashboardRow): string {
 
 function formatIssues(row: ProjectOpsDashboardRow): string {
   return `${row.openIssueCount ?? 0} open / ${row.highOpenIssueCount ?? 0} high`;
+}
+
+function formatRisks(row: ProjectOpsDashboardRow): string {
+  return `${row.openRiskCount ?? 0} open / ${row.highOpenRiskCount ?? 0} high`;
 }
 
 function formatFeedback(row: ProjectOpsDashboardRow): string {
