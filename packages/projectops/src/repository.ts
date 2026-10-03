@@ -4,6 +4,7 @@ import {
   addressProjectFeedback,
   archiveProjectDocument,
   archiveProjectNote,
+  approveProjectExpense,
   approveProjectChangeRequest,
   approveProjectRequest,
   completeProjectTask,
@@ -13,6 +14,7 @@ import {
   createClient,
   createProjectDeliverable,
   createProjectDocument,
+  createProjectExpense,
   createProjectFeedback,
   createProjectInvoice,
   createProjectIssue,
@@ -24,6 +26,7 @@ import {
   estimateProjectRequest,
   markProjectInvoicePaid,
   rejectProjectChangeRequest,
+  rejectProjectExpense,
   resolveProjectIssue,
   transitionProjectRequest,
   type AddressProjectFeedbackInput,
@@ -31,12 +34,14 @@ import {
   type ArchiveProjectNoteInput,
   type ApproveProjectRequestInput,
   type CompleteProjectTaskInput,
+  type DecideProjectExpenseInput,
   type DecideProjectChangeRequestInput,
   type EstimateProjectRequestInput,
   type NewProjectActivityInput,
   type NewProjectChangeRequestInput,
   type NewProjectDeliverableInput,
   type NewProjectDocumentInput,
+  type NewProjectExpenseInput,
   type NewProjectFeedbackInput,
   type NewProjectInvoiceInput,
   type NewProjectIssueInput,
@@ -50,6 +55,7 @@ import {
   type ProjectChangeRequest,
   type ProjectDeliverable,
   type ProjectDocument,
+  type ProjectExpense,
   type ProjectFeedback,
   type ProjectInvoice,
   type ProjectIssue,
@@ -76,6 +82,7 @@ import {
   insertProjectChangeRequestSql,
   insertProjectDeliverableSql,
   insertProjectDocumentSql,
+  insertProjectExpenseSql,
   insertProjectFeedbackSql,
   insertProjectInvoiceSql,
   insertProjectIssueSql,
@@ -96,6 +103,8 @@ import {
   selectProjectDeliverablesSql,
   selectProjectDocumentByIdSql,
   selectProjectDocumentsSql,
+  selectProjectExpenseByIdSql,
+  selectProjectExpensesSql,
   selectProjectFeedbackByIdSql,
   selectProjectFeedbackSql,
   selectProjectInvoiceByIdSql,
@@ -114,6 +123,7 @@ import {
   selectProjectWorkLogsSql,
   resolveProjectIssueSql,
   updateProjectChangeRequestDecisionSql,
+  updateProjectExpenseDecisionSql,
   updateProjectRequestStatusSql,
   type SqlStatement,
 } from './sql.ts';
@@ -744,6 +754,68 @@ export class ProjectOpsRepository {
     return rows[0];
   }
 
+  public async createProjectExpense(
+    projectRequestId: string,
+    input: NewProjectExpenseInput
+  ): Promise<ProjectExpense> {
+    const request = await this.requireProjectRequest(projectRequestId);
+    const expense = createProjectExpense(request, input);
+    const existing = await this.getProjectExpense(projectRequestId, expense.id);
+    if (existing) {
+      throw new ProjectOpsOperationError(
+        'conflict',
+        'PROJECTOPS_EXPENSE_ALREADY_EXISTS',
+        `ProjectOps project expense already exists: ${expense.id}.`
+      );
+    }
+
+    const rows = await this.sql.query<ProjectExpense>(insertProjectExpenseSql(expense));
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new Error('ProjectOps project expense insert did not return a row.');
+    }
+    return persisted;
+  }
+
+  public async listProjectExpenses(projectRequestId: string): Promise<readonly ProjectExpense[]> {
+    await this.requireProjectRequest(projectRequestId);
+    return await this.sql.query<ProjectExpense>(selectProjectExpensesSql(projectRequestId));
+  }
+
+  public async getProjectExpense(
+    projectRequestId: string,
+    expenseId: string
+  ): Promise<ProjectExpense | undefined> {
+    const rows = await this.sql.query<ProjectExpense>(
+      selectProjectExpenseByIdSql(projectRequestId, expenseId)
+    );
+    return rows[0];
+  }
+
+  public async approveProjectExpense(
+    projectRequestId: string,
+    expenseId: string,
+    input: DecideProjectExpenseInput
+  ): Promise<ProjectExpense> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectExpense(projectRequestId, expenseId);
+    const approved = approveProjectExpense(current, input);
+    const rows = await this.sql.query<ProjectExpense>(updateProjectExpenseDecisionSql(approved));
+    return this.requirePersistedProjectExpense(rows, projectRequestId, expenseId);
+  }
+
+  public async rejectProjectExpense(
+    projectRequestId: string,
+    expenseId: string,
+    input: DecideProjectExpenseInput
+  ): Promise<ProjectExpense> {
+    await this.requireProjectRequest(projectRequestId);
+    const current = await this.requireProjectExpense(projectRequestId, expenseId);
+    const rejected = rejectProjectExpense(current, input);
+    const rows = await this.sql.query<ProjectExpense>(updateProjectExpenseDecisionSql(rejected));
+    return this.requirePersistedProjectExpense(rows, projectRequestId, expenseId);
+  }
+
   public async createProjectActivity(
     projectRequestId: string,
     input: NewProjectActivityInput
@@ -971,6 +1043,21 @@ export class ProjectOpsRepository {
     return task;
   }
 
+  private async requireProjectExpense(
+    projectRequestId: string,
+    expenseId: string
+  ): Promise<ProjectExpense> {
+    const expense = await this.getProjectExpense(projectRequestId, expenseId);
+    if (!expense) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_EXPENSE_NOT_FOUND',
+        `Project expense not found: ${expenseId}.`
+      );
+    }
+    return expense;
+  }
+
   private requirePersistedProjectRequest(
     rows: readonly ProjectRequest[],
     id: string
@@ -1125,6 +1212,22 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_TASK_NOT_FOUND',
         `Project task not found: ${projectRequestId}/${taskId}.`
+      );
+    }
+    return persisted;
+  }
+
+  private requirePersistedProjectExpense(
+    rows: readonly ProjectExpense[],
+    projectRequestId: string,
+    expenseId: string
+  ): ProjectExpense {
+    const persisted = rows[0];
+    if (!persisted) {
+      throw new ProjectOpsOperationError(
+        'not_found',
+        'PROJECTOPS_EXPENSE_NOT_FOUND',
+        `Project expense not found: ${projectRequestId}/${expenseId}.`
       );
     }
     return persisted;
