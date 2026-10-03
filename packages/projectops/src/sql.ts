@@ -3,6 +3,7 @@ import type {
   ProjectChangeRequest,
   ProjectDeliverable,
   ProjectDocument,
+  ProjectExpense,
   ProjectFeedback,
   ProjectInvoice,
   ProjectIssue,
@@ -205,6 +206,24 @@ export const projectOpsSchemaSql = Object.freeze([
       REFERENCES projectops_project_tasks(project_request_id, id)
       ON DELETE SET NULL (task_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS projectops_project_expenses (
+    id TEXT NOT NULL,
+    project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
+    category TEXT NOT NULL CHECK (category IN ('software', 'asset', 'service', 'travel', 'other')),
+    description TEXT NOT NULL,
+    vendor TEXT,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    currency TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+    reimbursable BOOLEAN NOT NULL,
+    receipt_url TEXT CHECK (receipt_url IS NULL OR receipt_url ~ '^https?://'),
+    status TEXT NOT NULL CHECK (status IN ('submitted', 'approved', 'rejected')),
+    incurred_at TIMESTAMPTZ NOT NULL,
+    decided_at TIMESTAMPTZ,
+    decided_by TEXT,
+    decision_note TEXT,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (project_request_id, id)
+  )`,
   `CREATE TABLE IF NOT EXISTS projectops_project_activities (
     id TEXT NOT NULL,
     project_request_id TEXT NOT NULL REFERENCES projectops_project_requests(id) ON DELETE CASCADE,
@@ -253,6 +272,8 @@ export const projectOpsSchemaSql = Object.freeze([
     ON projectops_project_tasks (project_request_id, status, priority, due_at)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_work_logs_request_time_idx
     ON projectops_project_work_logs (project_request_id, logged_at DESC, billable)`,
+  `CREATE INDEX IF NOT EXISTS projectops_project_expenses_request_status_idx
+    ON projectops_project_expenses (project_request_id, status, category, incurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS projectops_project_activities_request_time_idx
     ON projectops_project_activities (project_request_id, happened_at DESC)`,
 ] as const);
@@ -1046,6 +1067,86 @@ export function selectProjectWorkLogByIdSql(
   });
 }
 
+export function insertProjectExpenseSql(expense: ProjectExpense): SqlStatement {
+  return Object.freeze({
+    sql: `INSERT INTO projectops_project_expenses (
+      id,
+      project_request_id,
+      category,
+      description,
+      vendor,
+      amount_cents,
+      currency,
+      reimbursable,
+      receipt_url,
+      status,
+      incurred_at,
+      decided_at,
+      decided_by,
+      decision_note,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    RETURNING *`,
+    params: Object.freeze([
+      expense.id,
+      expense.projectRequestId,
+      expense.category,
+      expense.description,
+      expense.vendor ?? null,
+      expense.amountCents,
+      expense.currency,
+      expense.reimbursable,
+      expense.receiptUrl ?? null,
+      expense.status,
+      expense.incurredAtIso,
+      expense.decidedAtIso ?? null,
+      expense.decidedBy ?? null,
+      expense.decisionNote ?? null,
+      expense.updatedAtIso,
+    ]),
+  });
+}
+
+export function selectProjectExpensesSql(projectRequestId: string): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_expenses
+      WHERE project_request_id = $1
+      ORDER BY incurred_at DESC, updated_at DESC, id ASC`,
+    params: Object.freeze([projectRequestId]),
+  });
+}
+
+export function selectProjectExpenseByIdSql(
+  projectRequestId: string,
+  expenseId: string
+): SqlStatement {
+  return Object.freeze({
+    sql: `SELECT *
+      FROM projectops_project_expenses
+      WHERE project_request_id = $1 AND id = $2`,
+    params: Object.freeze([projectRequestId, expenseId]),
+  });
+}
+
+export function updateProjectExpenseDecisionSql(expense: ProjectExpense): SqlStatement {
+  return Object.freeze({
+    sql: `UPDATE projectops_project_expenses
+      SET status = $3, decided_at = $4, decided_by = $5, decision_note = $6, updated_at = $7
+      WHERE project_request_id = $1 AND id = $2
+      RETURNING *`,
+    params: Object.freeze([
+      expense.projectRequestId,
+      expense.id,
+      expense.status,
+      expense.decidedAtIso ?? null,
+      expense.decidedBy ?? null,
+      expense.decisionNote ?? null,
+      expense.updatedAtIso,
+    ]),
+  });
+}
+
 export function insertProjectActivitySql(activity: ProjectActivity): SqlStatement {
   return Object.freeze({
     sql: `INSERT INTO projectops_project_activities (
@@ -1187,6 +1288,11 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(wl.billable_minutes, 0) AS billable_work_minutes,
       COALESCE(wl.non_billable_minutes, 0) AS non_billable_work_minutes,
       wl.latest_work_logged_at,
+      COALESCE(ex.submitted_expenses, 0) AS submitted_expense_count,
+      COALESCE(ex.approved_expenses, 0) AS approved_expense_count,
+      COALESCE(ex.rejected_expenses, 0) AS rejected_expense_count,
+      COALESCE(ex.submitted_amount_cents, 0) AS submitted_expense_amount_cents,
+      COALESCE(ex.approved_amount_cents, 0) AS approved_expense_amount_cents,
       act.latest_activity_at,
       act.latest_activity_summary,
       pr.updated_at
@@ -1282,6 +1388,17 @@ export function selectDashboardRowsSql(): SqlStatement {
       FROM projectops_project_work_logs
       GROUP BY project_request_id
     ) wl ON wl.project_request_id = pr.id
+    LEFT JOIN (
+      SELECT
+        project_request_id,
+        COUNT(*) FILTER (WHERE status = 'submitted') AS submitted_expenses,
+        COUNT(*) FILTER (WHERE status = 'approved') AS approved_expenses,
+        COUNT(*) FILTER (WHERE status = 'rejected') AS rejected_expenses,
+        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'submitted'), 0) AS submitted_amount_cents,
+        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'approved'), 0) AS approved_amount_cents
+      FROM projectops_project_expenses
+      GROUP BY project_request_id
+    ) ex ON ex.project_request_id = pr.id
     LEFT JOIN (
       SELECT DISTINCT ON (project_request_id)
         project_request_id,
