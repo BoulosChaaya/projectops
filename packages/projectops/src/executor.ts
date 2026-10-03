@@ -1,5 +1,6 @@
+import { totalProjectFinances, type ProjectFinanceTotalsByCurrency } from './finances.ts';
 import type { RawQueryResult } from '../../db/src/connection/connect.ts';
-import { ProjectOpsOperationError } from './domain.ts';
+import { financeParentStates, ProjectOpsOperationError } from './domain.ts';
 import type { ProjectOpsSqlExecutor } from './repository.ts';
 import type { SqlStatement } from './sql.ts';
 
@@ -227,7 +228,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_INVOICES')) {
       const row = this.insertProjectInvoice(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_CHANGE_REQUESTS')) {
@@ -272,7 +273,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_EXPENSES')) {
       const row = this.insertProjectExpense(statement.params);
-      return Object.freeze([row as T]);
+      return Object.freeze(row ? [row as T] : []);
     }
 
     if (upper.startsWith('INSERT INTO PROJECTOPS_PROJECT_ACTIVITIES')) {
@@ -750,16 +751,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectInvoice(params: readonly unknown[]): ProjectOpsInvoiceRow {
+  private insertProjectInvoice(params: readonly unknown[]): ProjectOpsInvoiceRow | undefined {
     const projectRequestId = asString(params[1], 'projectInvoice.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
-      throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
-    }
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent || !(financeParentStates.issue as readonly string[]).includes(parent.status)) return undefined;
 
     const deliverableId = asOptionalString(params[2]);
-    if (deliverableId && !this.projectDeliverables.has(deliverableKey(projectRequestId, deliverableId))) {
-      throw new Error(`ProjectOps project deliverable not found: ${projectRequestId}/${deliverableId}`);
-    }
+    if (deliverableId && this.projectDeliverables.get(deliverableKey(projectRequestId, deliverableId))?.status !== 'accepted') return undefined;
 
     const row = Object.freeze({
       id: asString(params[0], 'projectInvoice.id'),
@@ -777,11 +775,11 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     const key = invoiceKey(projectRequestId, row.id);
     if (this.projectInvoices.has(key)) {
-      throw new Error(`Duplicate ProjectOps project invoice id: ${projectRequestId}/${row.id}`);
+      throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_INVOICE_ALREADY_EXISTS', `Duplicate ProjectOps project invoice id: ${projectRequestId}/${row.id}`);
     }
     for (const invoice of this.projectInvoices.values()) {
       if (invoice.projectRequestId === projectRequestId && invoice.invoiceNumber === row.invoiceNumber) {
-        throw new Error(`Duplicate ProjectOps project invoice number: ${projectRequestId}/${row.invoiceNumber}`);
+        throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_INVOICE_ALREADY_EXISTS', `Duplicate ProjectOps project invoice number: ${projectRequestId}/${row.invoiceNumber}`);
       }
     }
     this.projectInvoices.set(key, row);
@@ -1045,11 +1043,10 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return row;
   }
 
-  private insertProjectExpense(params: readonly unknown[]): ProjectOpsExpenseRow {
+  private insertProjectExpense(params: readonly unknown[]): ProjectOpsExpenseRow | undefined {
     const projectRequestId = asString(params[1], 'projectExpense.projectRequestId');
-    if (!this.projectRequests.has(projectRequestId)) {
-      throw new Error(`ProjectOps project request not found: ${projectRequestId}`);
-    }
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!parent || !(financeParentStates.submit as readonly string[]).includes(parent.status)) return undefined;
 
     const row = Object.freeze({
       id: asString(params[0], 'projectExpense.id'),
@@ -1071,7 +1068,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
 
     const key = expenseKey(projectRequestId, row.id);
     if (this.projectExpenses.has(key)) {
-      throw new Error(`Duplicate ProjectOps project expense id: ${projectRequestId}/${row.id}`);
+      throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_EXPENSE_ALREADY_EXISTS', `Duplicate ProjectOps project expense id: ${projectRequestId}/${row.id}`);
     }
     this.projectExpenses.set(key, row);
     return row;
@@ -1212,7 +1209,8 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     const projectRequestId = asString(params[0], 'projectInvoice.projectRequestId');
     const id = asString(params[1], 'projectInvoice.id');
     const current = this.projectInvoices.get(invoiceKey(projectRequestId, id));
-    if (!current) return undefined;
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!current || current.status !== 'issued' || !parent || !(financeParentStates.action as readonly string[]).includes(parent.status)) return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1376,7 +1374,8 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     const projectRequestId = asString(params[0], 'projectExpense.projectRequestId');
     const id = asString(params[1], 'projectExpense.id');
     const current = this.projectExpenses.get(expenseKey(projectRequestId, id));
-    if (!current) return undefined;
+    const parent = this.projectRequests.get(projectRequestId);
+    if (!current || current.status !== 'submitted' || !parent || !(financeParentStates.action as readonly string[]).includes(parent.status)) return undefined;
 
     const next = Object.freeze({
       ...current,
@@ -1581,8 +1580,6 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
             acceptedDeliverableCount: this.countDeliverables(request.id, 'accepted'),
             issuedInvoiceCount: this.countInvoices(request.id, 'issued'),
             paidInvoiceCount: this.countInvoices(request.id, 'paid'),
-            outstandingInvoiceAmountCents: this.sumInvoices(request.id, 'issued'),
-            paidInvoiceAmountCents: this.sumInvoices(request.id, 'paid'),
             proposedChangeRequestCount: this.countChangeRequests(request.id, 'proposed'),
             approvedChangeRequestCount: this.countChangeRequests(request.id, 'approved'),
             rejectedChangeRequestCount: this.countChangeRequests(request.id, 'rejected'),
@@ -1611,8 +1608,9 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
             submittedExpenseCount: this.countExpenses(request.id, 'submitted'),
             approvedExpenseCount: this.countExpenses(request.id, 'approved'),
             rejectedExpenseCount: this.countExpenses(request.id, 'rejected'),
-            submittedExpenseAmountCents: this.sumExpenses(request.id, 'submitted'),
-            approvedExpenseAmountCents: this.sumExpenses(request.id, 'approved'),
+            financeTotalsByCurrency: totalProjectFinances(
+              [...this.projectInvoices.values()].filter(row => row.projectRequestId === request.id),
+              [...this.projectExpenses.values()].filter(row => row.projectRequestId === request.id)),
             latestActivityAtIso: this.latestActivity(request.id)?.happenedAtIso,
             latestActivitySummary: this.latestActivity(request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -1637,12 +1635,6 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return [...this.projectInvoices.values()].filter(
       (invoice) => invoice.projectRequestId === projectRequestId && invoice.status === status
     ).length;
-  }
-
-  private sumInvoices(projectRequestId: string, status: string): number {
-    return [...this.projectInvoices.values()]
-      .filter((invoice) => invoice.projectRequestId === projectRequestId && invoice.status === status)
-      .reduce((total, invoice) => total + invoice.amountCents, 0);
   }
 
   private countChangeRequests(projectRequestId: string, status: string): number {
@@ -1755,12 +1747,6 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return [...this.projectExpenses.values()].filter(
       (expense) => expense.projectRequestId === projectRequestId && expense.status === status
     ).length;
-  }
-
-  private sumExpenses(projectRequestId: string, status: string): number {
-    return [...this.projectExpenses.values()]
-      .filter((expense) => expense.projectRequestId === projectRequestId && expense.status === status)
-      .reduce((total, expense) => total + expense.amountCents, 0);
   }
 
   private latestActivity(projectRequestId: string): ProjectOpsActivityRow | undefined {
@@ -1896,6 +1882,7 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
   const source = row as Record<string, unknown>;
   return Object.freeze({
     ...source,
+    ...(source.finance_totals_by_currency !== undefined ? { financeTotalsByCurrency: source.finance_totals_by_currency } : {}),
     ...(source.client_id !== undefined ? { clientId: source.client_id } : {}),
     ...(source.client_name !== undefined ? { clientName: source.client_name } : {}),
     ...(source.budget_range !== undefined ? { budgetRange: normalizeOptionalValue(source.budget_range) } : {}),
@@ -1994,12 +1981,6 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
     ...(source.paid_invoice_count !== undefined
       ? { paidInvoiceCount: normalizeOptionalNumberValue(source.paid_invoice_count) }
       : {}),
-    ...(source.outstanding_invoice_amount_cents !== undefined
-      ? { outstandingInvoiceAmountCents: normalizeOptionalNumberValue(source.outstanding_invoice_amount_cents) }
-      : {}),
-    ...(source.paid_invoice_amount_cents !== undefined
-      ? { paidInvoiceAmountCents: normalizeOptionalNumberValue(source.paid_invoice_amount_cents) }
-      : {}),
     ...(source.proposed_change_request_count !== undefined
       ? { proposedChangeRequestCount: normalizeOptionalNumberValue(source.proposed_change_request_count) }
       : {}),
@@ -2084,12 +2065,6 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
       : {}),
     ...(source.rejected_expense_count !== undefined
       ? { rejectedExpenseCount: normalizeOptionalNumberValue(source.rejected_expense_count) }
-      : {}),
-    ...(source.submitted_expense_amount_cents !== undefined
-      ? { submittedExpenseAmountCents: normalizeOptionalNumberValue(source.submitted_expense_amount_cents) }
-      : {}),
-    ...(source.approved_expense_amount_cents !== undefined
-      ? { approvedExpenseAmountCents: normalizeOptionalNumberValue(source.approved_expense_amount_cents) }
       : {}),
     ...(source.latest_activity_at !== undefined
       ? { latestActivityAtIso: normalizeOptionalIsoValue(source.latest_activity_at) }
@@ -2597,8 +2572,6 @@ interface ProjectOpsDashboardStorageRow {
   readonly acceptedDeliverableCount?: number;
   readonly issuedInvoiceCount?: number;
   readonly paidInvoiceCount?: number;
-  readonly outstandingInvoiceAmountCents?: number;
-  readonly paidInvoiceAmountCents?: number;
   readonly proposedChangeRequestCount?: number;
   readonly approvedChangeRequestCount?: number;
   readonly rejectedChangeRequestCount?: number;
@@ -2627,9 +2600,8 @@ interface ProjectOpsDashboardStorageRow {
   readonly submittedExpenseCount?: number;
   readonly approvedExpenseCount?: number;
   readonly rejectedExpenseCount?: number;
-  readonly submittedExpenseAmountCents?: number;
-  readonly approvedExpenseAmountCents?: number;
   readonly latestActivityAtIso?: string;
   readonly latestActivitySummary?: string;
+  readonly financeTotalsByCurrency?: ProjectFinanceTotalsByCurrency;
   readonly updatedAtIso: string;
 }

@@ -1,5 +1,7 @@
 import {
   ProjectOpsOperationError,
+  requireFinanceParentState,
+  validateFinanceIdentifier,
   acceptProjectDeliverable,
   addressProjectFeedback,
   archiveProjectDocument,
@@ -432,34 +434,22 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectInvoiceInput
   ): Promise<ProjectInvoice> {
-    const request = await this.requireProjectRequest(projectRequestId);
-    const invoice = createProjectInvoice(request, input);
-    if (invoice.deliverableId) {
-      const deliverable = await this.requireProjectDeliverable(projectRequestId, invoice.deliverableId);
-      if (deliverable.status !== 'accepted') {
-        throw new ProjectOpsOperationError(
-          'invalid_state',
-          'PROJECTOPS_DELIVERABLE_NOT_ACCEPTED',
-          'Project deliverable must be accepted before issuing an attached invoice.'
-        );
+    validateFinanceIdentifier(projectRequestId);
+    if (!this.sql.transaction) throw new Error('Invoice issuance requires a transaction-scoped ProjectOps executor.');
+    return await this.sql.transaction(async sql => {
+      const scoped = new ProjectOpsRepository(sql);
+      const rows = await sql.query<ProjectRequest>(lockProjectRequestSql(projectRequestId));
+      const request = rows[0];
+      if (!request) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_REQUEST_NOT_FOUND', `Project request not found: ${projectRequestId}.`);
+      const invoice = createProjectInvoice(request, input);
+      // Read the relationship after the parent lock, with a fresh READ COMMITTED snapshot.
+      if (invoice.deliverableId) {
+        const deliverable = await scoped.requireProjectDeliverable(projectRequestId, invoice.deliverableId);
+        if (deliverable.status !== 'accepted') throw new ProjectOpsOperationError('conflict',
+          'PROJECTOPS_DELIVERABLE_NOT_ACCEPTED', 'Project deliverable must be accepted before issuing an attached invoice.');
       }
-    }
-
-    const existing = await this.getProjectInvoice(projectRequestId, invoice.id);
-    if (existing) {
-      throw new ProjectOpsOperationError(
-        'conflict',
-        'PROJECTOPS_INVOICE_ALREADY_EXISTS',
-        `ProjectOps project invoice already exists: ${invoice.id}.`
-      );
-    }
-
-    const rows = await this.sql.query<ProjectInvoice>(insertProjectInvoiceSql(invoice));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project invoice insert did not return a row.');
-    }
-    return persisted;
+      return scoped.requireFinanceWrite(await sql.query<ProjectInvoice>(insertProjectInvoiceSql(invoice)), projectRequestId);
+    });
   }
 
   public async listProjectInvoices(
@@ -484,11 +474,12 @@ export class ProjectOpsRepository {
     invoiceId: string,
     paidAtIso: string
   ): Promise<ProjectInvoice> {
-    await this.requireProjectRequest(projectRequestId);
+    validateFinanceIdentifier(projectRequestId); validateFinanceIdentifier(invoiceId);
+    const parent = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectInvoice(projectRequestId, invoiceId);
+    requireFinanceParentState(parent, 'action');
     const paid = markProjectInvoicePaid(current, paidAtIso);
-    const rows = await this.sql.query<ProjectInvoice>(markProjectInvoicePaidSql(paid));
-    return this.requirePersistedProjectInvoice(rows, projectRequestId, invoiceId);
+    return this.requireFinanceWrite(await this.sql.query<ProjectInvoice>(markProjectInvoicePaidSql(paid)), projectRequestId, 'invoice', invoiceId);
   }
 
   public async createProjectChangeRequest(
@@ -937,23 +928,10 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectExpenseInput
   ): Promise<ProjectExpense> {
+    validateFinanceIdentifier(projectRequestId);
     const request = await this.requireProjectRequest(projectRequestId);
     const expense = createProjectExpense(request, input);
-    const existing = await this.getProjectExpense(projectRequestId, expense.id);
-    if (existing) {
-      throw new ProjectOpsOperationError(
-        'conflict',
-        'PROJECTOPS_EXPENSE_ALREADY_EXISTS',
-        `ProjectOps project expense already exists: ${expense.id}.`
-      );
-    }
-
-    const rows = await this.sql.query<ProjectExpense>(insertProjectExpenseSql(expense));
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new Error('ProjectOps project expense insert did not return a row.');
-    }
-    return persisted;
+    return this.requireFinanceWrite(await this.sql.query<ProjectExpense>(insertProjectExpenseSql(expense)), projectRequestId);
   }
 
   public async listProjectExpenses(projectRequestId: string): Promise<readonly ProjectExpense[]> {
@@ -976,11 +954,12 @@ export class ProjectOpsRepository {
     expenseId: string,
     input: DecideProjectExpenseInput
   ): Promise<ProjectExpense> {
-    await this.requireProjectRequest(projectRequestId);
+    validateFinanceIdentifier(projectRequestId); validateFinanceIdentifier(expenseId);
+    const parent = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectExpense(projectRequestId, expenseId);
-    const approved = approveProjectExpense(current, input);
-    const rows = await this.sql.query<ProjectExpense>(updateProjectExpenseDecisionSql(approved));
-    return this.requirePersistedProjectExpense(rows, projectRequestId, expenseId);
+    requireFinanceParentState(parent, 'action');
+    const decided = approveProjectExpense(current, input);
+    return this.requireFinanceWrite(await this.sql.query<ProjectExpense>(updateProjectExpenseDecisionSql(decided)), projectRequestId, 'expense', expenseId);
   }
 
   public async rejectProjectExpense(
@@ -988,11 +967,12 @@ export class ProjectOpsRepository {
     expenseId: string,
     input: DecideProjectExpenseInput
   ): Promise<ProjectExpense> {
-    await this.requireProjectRequest(projectRequestId);
+    validateFinanceIdentifier(projectRequestId); validateFinanceIdentifier(expenseId);
+    const parent = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectExpense(projectRequestId, expenseId);
-    const rejected = rejectProjectExpense(current, input);
-    const rows = await this.sql.query<ProjectExpense>(updateProjectExpenseDecisionSql(rejected));
-    return this.requirePersistedProjectExpense(rows, projectRequestId, expenseId);
+    requireFinanceParentState(parent, 'action');
+    const decided = rejectProjectExpense(current, input);
+    return this.requireFinanceWrite(await this.sql.query<ProjectExpense>(updateProjectExpenseDecisionSql(decided)), projectRequestId, 'expense', expenseId);
   }
 
   public async createProjectActivity(
@@ -1098,6 +1078,15 @@ export class ProjectOpsRepository {
       throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_CHANGED', 'Project changed. Reload before trying again.');
     }
     return revision;
+  }
+
+  private async requireFinanceWrite<T>(rows: readonly T[], parentId: string, kind?: 'invoice' | 'expense', childId?: string): Promise<T> {
+    if (rows[0]) return rows[0];
+    // Classification only: the guarded write remains the concurrency authority.
+    await this.requireProjectRequest(parentId);
+    if (kind === 'invoice') await this.requireProjectInvoice(parentId, childId!);
+    if (kind === 'expense') await this.requireProjectExpense(parentId, childId!);
+    throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_FINANCE_CHANGED', 'Finance record or project state changed. Reload before trying again.');
   }
 
   private async requireDeliveryWrite<T>(rows: readonly T[], parentId: string, kind?: 'deliverable' | 'feedback', childId?: string): Promise<T> {
@@ -1395,22 +1384,6 @@ export class ProjectOpsRepository {
   }
 
 
-  private requirePersistedProjectInvoice(
-    rows: readonly ProjectInvoice[],
-    projectRequestId: string,
-    invoiceId: string
-  ): ProjectInvoice {
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new ProjectOpsOperationError(
-        'not_found',
-        'PROJECTOPS_INVOICE_NOT_FOUND',
-        `Project invoice not found: ${projectRequestId}/${invoiceId}.`
-      );
-    }
-    return persisted;
-  }
-
   private requirePersistedProjectChangeRequest(
     rows: readonly ProjectChangeRequest[],
     projectRequestId: string,
@@ -1459,7 +1432,6 @@ export class ProjectOpsRepository {
     return persisted;
   }
 
-
   private requirePersistedProjectDocument(
     rows: readonly ProjectDocument[],
     projectRequestId: string,
@@ -1503,22 +1475,6 @@ export class ProjectOpsRepository {
         'not_found',
         'PROJECTOPS_TASK_NOT_FOUND',
         `Project task not found: ${projectRequestId}/${taskId}.`
-      );
-    }
-    return persisted;
-  }
-
-  private requirePersistedProjectExpense(
-    rows: readonly ProjectExpense[],
-    projectRequestId: string,
-    expenseId: string
-  ): ProjectExpense {
-    const persisted = rows[0];
-    if (!persisted) {
-      throw new ProjectOpsOperationError(
-        'not_found',
-        'PROJECTOPS_EXPENSE_NOT_FOUND',
-        `Project expense not found: ${projectRequestId}/${expenseId}.`
       );
     }
     return persisted;

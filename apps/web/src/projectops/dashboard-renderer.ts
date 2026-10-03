@@ -1,3 +1,4 @@
+import { formatFinanceCents, formatFinanceTotal } from '../../../../packages/projectops/src/finances.ts';
 import type { ProjectOpsDashboardRow, ProjectRequestStatus } from '../../../../packages/projectops/src/index.ts';
 import type { ProjectOpsDashboardPage } from './dashboard-view.ts';
 
@@ -52,7 +53,9 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('High priority open', String(summary.highPriorityOpen))}
       ${renderMetric('Open milestones', String(summary.openMilestones))}
       ${renderMetric('Submitted deliverables', String(summary.submittedDeliverables))}
-      ${renderMetric('Outstanding invoices', formatMoney(summary.outstandingInvoiceAmountCents, 'USD'))}
+      ${renderMetric('Outstanding invoices', formatFinanceTotal(summary.financeTotalsByCurrency, 'outstandingInvoiceAmountCents'))}
+      ${renderMetric('Paid invoices', formatFinanceTotal(summary.financeTotalsByCurrency, 'paidInvoiceAmountCents'))}
+      ${renderMetric('Submitted expenses', formatFinanceTotal(summary.financeTotalsByCurrency, 'submittedExpenseAmountCents'))}
       ${renderMetric('Proposed changes', String(summary.proposedChangeRequests))}
       ${renderMetric('Open issues', String(summary.openIssues))}
       ${renderMetric('Open risks', String(summary.openRisks))}
@@ -61,7 +64,7 @@ export function renderProjectOpsDashboardPage(
       ${renderMetric('Active notes', String(summary.activeNotes))}
       ${renderMetric('Open tasks', String(summary.openTasks))}
       ${renderMetric('Billable hours', formatHours(summary.billableWorkMinutes))}
-      ${renderMetric('Approved expenses', formatMoney(summary.approvedExpenseAmountCents, 'USD'))}
+      ${renderMetric('Approved expenses', formatFinanceTotal(summary.financeTotalsByCurrency, 'approvedExpenseAmountCents'))}
       ${renderMetric('In progress', String(summary.byStatus.in_progress))}
       ${renderMetric('Delivered', String(summary.byStatus.delivered))}
     </section>
@@ -186,11 +189,7 @@ function formatEstimate(row: ProjectOpsDashboardRow): string {
   if (row.estimateAmountCents === undefined || !row.estimateCurrency) {
     return 'Not estimated';
   }
-  const amount = (row.estimateAmountCents / 100).toLocaleString('en', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `${row.estimateCurrency} ${amount}`;
+  return formatFinanceCents(row.estimateAmountCents, row.estimateCurrency);
 }
 
 function formatMilestones(row: ProjectOpsDashboardRow): string {
@@ -202,7 +201,7 @@ function formatDeliverables(row: ProjectOpsDashboardRow): string {
 }
 
 function formatInvoices(row: ProjectOpsDashboardRow): string {
-  const outstanding = formatMoney(row.outstandingInvoiceAmountCents ?? 0, row.estimateCurrency ?? 'USD');
+  const outstanding = formatFinanceTotal(row.financeTotalsByCurrency ?? {}, 'outstandingInvoiceAmountCents');
   return `${row.paidInvoiceCount ?? 0} paid / ${row.issuedInvoiceCount ?? 0} open (${outstanding})`;
 }
 
@@ -239,7 +238,7 @@ function formatWork(row: ProjectOpsDashboardRow): string {
 }
 
 function formatExpenses(row: ProjectOpsDashboardRow): string {
-  const approved = formatMoney(row.approvedExpenseAmountCents ?? 0, row.estimateCurrency ?? 'USD');
+  const approved = formatFinanceTotal(row.financeTotalsByCurrency ?? {}, 'approvedExpenseAmountCents');
   return `${row.submittedExpenseCount ?? 0} submitted / ${row.approvedExpenseCount ?? 0} approved (${approved})`;
 }
 
@@ -248,14 +247,6 @@ function formatLatestActivity(row: ProjectOpsDashboardRow): string {
     return 'No activity yet';
   }
   return `${row.latestActivitySummary} (${formatDate(row.latestActivityAtIso)})`;
-}
-
-function formatMoney(amountCents: number, currency: string): string {
-  const amount = (amountCents / 100).toLocaleString('en', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `${currency} ${amount}`;
 }
 
 function formatHours(minutes: number): string {

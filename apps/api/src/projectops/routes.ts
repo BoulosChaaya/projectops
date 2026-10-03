@@ -369,7 +369,7 @@ export function createProjectOpsRoutes(
       path: '/projectops/project-requests/:id/invoices',
       handler: async (request, _context, params) =>
         await runProjectOpsRequest(() =>
-          service.createProjectInvoice(params.id, readInvoiceInput(params.id, request.body, clock))
+          service.createProjectInvoice(params.id, readInvoiceInput(params.id, request.body, clock, !!_context.get('projectops.operator')))
         ),
     },
     {
@@ -380,7 +380,7 @@ export function createProjectOpsRoutes(
           service.markProjectInvoicePaid(
             params.id,
             params.invoiceId,
-            readPaidAtIso(request.body, clock)
+            readPaidAtIso(request.body, clock, !!_context.get('projectops.operator'))
           )
         ),
     },
@@ -633,7 +633,7 @@ export function createProjectOpsRoutes(
           service.approveProjectExpense(
             params.id,
             params.expenseId,
-            readExpenseDecisionInput(request.body, clock)
+            readExpenseDecisionInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
           )
         ),
     },
@@ -645,7 +645,7 @@ export function createProjectOpsRoutes(
           service.rejectProjectExpense(
             params.id,
             params.expenseId,
-            readExpenseDecisionInput(request.body, clock)
+            readExpenseDecisionInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
           )
         ),
     },
@@ -719,8 +719,8 @@ export function createProjectOpsRoutes(
     },
   ];
   return Object.freeze(routes.map(route => {
-    // Delivery commands classify missing children before conflicts and enforce terminal parents atomically.
-    if (/\/:id\/(deliverables|feedback)(\/|$)/.test(route.path)) return route;
+    // Guarded resource commands classify missing children before conflicts and enforce terminal parents atomically.
+    if (/\/:id\/(deliverables|feedback|invoices|expenses)(\/|$)/.test(route.path)) return route;
     if (route.method === 'GET' || !route.path.startsWith('/projectops/project-requests/:id') || ['/status','/control'].some(suffix => route.path.endsWith(suffix))) return route;
     return { ...route, handler: async (request, context, params) => {
       const project = await requireFound(service.getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND');
@@ -913,7 +913,8 @@ function readAcceptedAtIso(body: unknown, clock: () => string, serverControlled 
 function readInvoiceInput(
   projectRequestId: string,
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  serverControlled = false
 ): NewProjectInvoiceInput {
   const value = readRecord(body);
   return Object.freeze({
@@ -923,14 +924,14 @@ function readInvoiceInput(
     invoiceNumber: readString(value.invoiceNumber, 'invoiceNumber'),
     amountCents: readPositiveInteger(value.amountCents, 'amountCents'),
     currency: readString(value.currency, 'currency'),
-    issuedAtIso: readOptionalString(value.issuedAtIso, 'issuedAtIso') ?? clock(),
+    issuedAtIso: serverControlled ? clock() : readOptionalString(value.issuedAtIso, 'issuedAtIso') ?? clock(),
     dueAtIso: readOptionalString(value.dueAtIso, 'dueAtIso'),
   });
 }
 
-function readPaidAtIso(body: unknown, clock: () => string): string {
+function readPaidAtIso(body: unknown, clock: () => string, serverControlled = false): string {
   const value = readRecord(body);
-  return readOptionalString(value.paidAtIso, 'paidAtIso') ?? clock();
+  return serverControlled ? clock() : readOptionalString(value.paidAtIso, 'paidAtIso') ?? clock();
 }
 
 function readChangeRequestInput(
@@ -1195,12 +1196,13 @@ function readExpenseInput(
 
 function readExpenseDecisionInput(
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  operator?: string
 ): DecideProjectExpenseInput {
   const value = readRecord(body);
   return Object.freeze({
-    decidedBy: readString(value.decidedBy, 'decidedBy'),
-    decidedAtIso: readOptionalString(value.decidedAtIso, 'decidedAtIso') ?? clock(),
+    decidedBy: operator ?? readString(value.decidedBy, 'decidedBy'),
+    decidedAtIso: operator ? clock() : readOptionalString(value.decidedAtIso, 'decidedAtIso') ?? clock(),
     decisionNote: readOptionalString(value.decisionNote, 'decisionNote'),
   });
 }

@@ -355,7 +355,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.acceptedDeliverables, 1);
   assert.equal(dashboard.issuedInvoices, 0);
   assert.equal(dashboard.paidInvoices, 1);
-  assert.equal(dashboard.paidInvoiceAmountCents, 320000);
+  assert.equal(dashboard.financeTotalsByCurrency?.USD.paidInvoiceAmountCents, '320000');
   assert.equal(dashboard.proposedChangeRequests, 0);
   assert.equal(dashboard.approvedChangeRequests, 1);
   assert.equal(dashboard.openIssues, 0);
@@ -377,12 +377,12 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.billableWorkMinutes, 120);
   assert.equal(dashboard.nonBillableWorkMinutes, 0);
   assert.equal(dashboard.approvedExpenses, 1);
-  assert.equal(dashboard.approvedExpenseAmountCents, 4500);
+  assert.equal(dashboard.financeTotalsByCurrency?.USD.approvedExpenseAmountCents, '4500');
   assert.equal(dashboard.rows[0]?.clientName, 'Zad Studio');
   assert.equal(dashboard.rows[0]?.estimateAmountCents, 320000);
   assert.equal(dashboard.rows[0]?.completedMilestoneCount, 1);
   assert.equal(dashboard.rows[0]?.acceptedDeliverableCount, 1);
-  assert.equal(dashboard.rows[0]?.paidInvoiceAmountCents, 320000);
+  assert.equal(dashboard.rows[0]?.financeTotalsByCurrency?.USD.paidInvoiceAmountCents, '320000');
   assert.equal(dashboard.rows[0]?.approvedChangeRequestCount, 1);
   assert.equal(dashboard.rows[0]?.resolvedIssueCount, 1);
   assert.equal(dashboard.rows[0]?.mitigatedRiskCount, 1);
@@ -391,7 +391,7 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   assert.equal(dashboard.rows[0]?.archivedNoteCount, 1);
   assert.equal(dashboard.rows[0]?.completedTaskCount, 1);
   assert.equal(dashboard.rows[0]?.billableWorkMinutes, 120);
-  assert.equal(dashboard.rows[0]?.approvedExpenseAmountCents, 4500);
+  assert.equal(dashboard.rows[0]?.financeTotalsByCurrency?.USD.approvedExpenseAmountCents, '4500');
   assert.equal(dashboard.rows[0]?.latestActivitySummary, 'Client approved paid invoice and handoff.');
 });
 
@@ -868,7 +868,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.completedMilestones, 1);
     assert.equal(dashboard.acceptedDeliverables, 1);
     assert.equal(dashboard.paidInvoices, 1);
-    assert.equal(dashboard.paidInvoiceAmountCents, 240000);
+    assert.equal(dashboard.financeTotalsByCurrency?.USD.paidInvoiceAmountCents, '240000');
     assert.equal(dashboard.addressedFeedback, 1);
     assert.equal(dashboard.archivedDocuments, 1);
     assert.equal(dashboard.archivedNotes, 1);
@@ -876,7 +876,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
     assert.equal(dashboard.workLogs, 1);
     assert.equal(dashboard.billableWorkMinutes, 120);
     assert.equal(dashboard.approvedExpenses, 1);
-    assert.equal(dashboard.approvedExpenseAmountCents, 4500);
+    assert.equal(dashboard.financeTotalsByCurrency?.USD.approvedExpenseAmountCents, '4500');
     assert.equal(dashboard.mitigatedRisks, 1);
     assert.equal(sql.snapshot().projectRequests[0]?.status, 'approved');
     assert.equal(sql.snapshot().projectMilestones[0]?.status, 'completed');
@@ -958,7 +958,7 @@ unitTest('PROJECTOPS-PERSIST-006: API exposes stable write-side error contracts'
       invoiceNumber: 'INV-NOT-READY',
       amountCents: 100000,
       currency: 'USD',
-    }, 400, 'PROJECTOPS_REQUEST_NOT_READY_FOR_INVOICES');
+    }, 409, 'PROJECTOPS_FINANCE_STATE_CONFLICT');
   } finally {
     await server.close();
   }

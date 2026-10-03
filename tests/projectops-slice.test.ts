@@ -1,3 +1,4 @@
+import { totalProjectFinances } from '../packages/projectops/src/finances.ts';
 import { unitTest, assert } from '../packages/testing-kit/src/unit/index.ts';
 import {
   ProjectOpsRepository,
@@ -992,7 +993,7 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.acceptedDeliverables, 1);
     assert.equal(dashboard.issuedInvoices, 0);
     assert.equal(dashboard.paidInvoices, 1);
-    assert.equal(dashboard.paidInvoiceAmountCents, 180000);
+    assert.equal(dashboard.financeTotalsByCurrency?.USD.paidInvoiceAmountCents, '180000');
     assert.equal(dashboard.proposedChangeRequests, 0);
     assert.equal(dashboard.approvedChangeRequests, 1);
     assert.equal(dashboard.openIssues, 0);
@@ -1015,7 +1016,7 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
     assert.equal(dashboard.nonBillableWorkMinutes, 0);
     assert.equal(dashboard.submittedExpenses, 0);
     assert.equal(dashboard.approvedExpenses, 1);
-    assert.equal(dashboard.approvedExpenseAmountCents, 4500);
+    assert.equal(dashboard.financeTotalsByCurrency?.USD.approvedExpenseAmountCents, '4500');
     assert.equal(
       dashboard.rows.find((row) => row.id === 'req-2')?.latestActivitySummary,
       'Client confirmed invoice payment.'
@@ -1046,8 +1047,7 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       acceptedDeliverableCount: 3,
       issuedInvoiceCount: 1,
       paidInvoiceCount: 2,
-      outstandingInvoiceAmountCents: 120000,
-      paidInvoiceAmountCents: 240000,
+      financeTotalsByCurrency: { USD: { outstandingInvoiceAmountCents: '120000', paidInvoiceAmountCents: '240000', submittedExpenseAmountCents: '4500', approvedExpenseAmountCents: '9000' } },
       proposedChangeRequestCount: 1,
       approvedChangeRequestCount: 2,
       rejectedChangeRequestCount: 0,
@@ -1073,8 +1073,6 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
       submittedExpenseCount: 1,
       approvedExpenseCount: 2,
       rejectedExpenseCount: 0,
-      submittedExpenseAmountCents: 4500,
-      approvedExpenseAmountCents: 9000,
       latestActivityAtIso: T3,
       latestActivitySummary: 'Client accepted final delivery.',
       updatedAtIso: T1,
@@ -1719,10 +1717,9 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             completedMilestoneCount: countMilestones(milestones, request.id, 'completed'),
             submittedDeliverableCount: countDeliverables(deliverables, request.id, 'submitted'),
             acceptedDeliverableCount: countDeliverables(deliverables, request.id, 'accepted'),
+            financeTotalsByCurrency: totalProjectFinances([...invoices.values()].filter(row => row.projectRequestId === request.id), [...expenses.values()].filter(row => row.projectRequestId === request.id)),
             issuedInvoiceCount: countInvoices(invoices, request.id, 'issued'),
             paidInvoiceCount: countInvoices(invoices, request.id, 'paid'),
-            outstandingInvoiceAmountCents: sumInvoices(invoices, request.id, 'issued'),
-            paidInvoiceAmountCents: sumInvoices(invoices, request.id, 'paid'),
             proposedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'proposed'),
             approvedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'approved'),
             rejectedChangeRequestCount: countChangeRequests(changeRequests, request.id, 'rejected'),
@@ -1751,8 +1748,6 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
             submittedExpenseCount: countExpenses(expenses, request.id, 'submitted'),
             approvedExpenseCount: countExpenses(expenses, request.id, 'approved'),
             rejectedExpenseCount: countExpenses(expenses, request.id, 'rejected'),
-            submittedExpenseAmountCents: sumExpenses(expenses, request.id, 'submitted'),
-            approvedExpenseAmountCents: sumExpenses(expenses, request.id, 'approved'),
             latestActivityAtIso: latestActivity(activities, request.id)?.happenedAtIso,
             latestActivitySummary: latestActivity(activities, request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
@@ -1845,15 +1840,6 @@ function countInvoices(
   ).length;
 }
 
-function sumInvoices(
-  invoices: ReadonlyMap<string, ProjectInvoice>,
-  projectRequestId: string,
-  status: ProjectInvoice['status']
-): number {
-  return [...invoices.values()]
-    .filter((invoice) => invoice.projectRequestId === projectRequestId && invoice.status === status)
-    .reduce((total, invoice) => total + invoice.amountCents, 0);
-}
 
 function countChangeRequests(
   changeRequests: ReadonlyMap<string, ProjectChangeRequest>,
@@ -2033,15 +2019,6 @@ function countExpenses(
   ).length;
 }
 
-function sumExpenses(
-  expenses: ReadonlyMap<string, ProjectExpense>,
-  projectRequestId: string,
-  status: ProjectExpense['status']
-): number {
-  return [...expenses.values()]
-    .filter((expense) => expense.projectRequestId === projectRequestId && expense.status === status)
-    .reduce((total, expense) => total + expense.amountCents, 0);
-}
 
 function latestActivity(
   activities: ReadonlyMap<string, ProjectActivity>,
