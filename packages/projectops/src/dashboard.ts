@@ -1,5 +1,38 @@
 import { mergeFinanceTotals, type ProjectFinanceTotalsByCurrency } from './finances.ts';
-import type { ProjectPriority, ProjectRequestStatus } from './domain.ts';
+import { ProjectOpsValidationError, type ProjectPriority, type ProjectRequestStatus } from './domain.ts';
+
+export const dashboardStatuses = Object.freeze(['new', 'estimated', 'approved', 'in_progress', 'on_hold', 'delivered'] as const);
+export interface DashboardFilter {
+  readonly q?: string;
+  readonly status?: 'all' | typeof dashboardStatuses[number];
+}
+/** Match PostgreSQL's C.utf8 simple lowercase, independent of the database locale. */
+export function dashboardSearchText(value: string): string {
+  return Array.from(value, character => Array.from(character.toLowerCase())[0]).join('');
+}
+export function validateDashboardFilter(filter: DashboardFilter = {}): Required<DashboardFilter> {
+  const q = filter.q ?? '', status = filter.status ?? 'all';
+  if (typeof q !== 'string' || q.length > 120 || (status !== 'all' && !dashboardStatuses.includes(status as any))) {
+    throw new ProjectOpsValidationError('INVALID_DASHBOARD_FILTER', 'Search must be at most 120 characters and status must be an eligible dashboard state.');
+  }
+  return Object.freeze({ q: dashboardSearchText(q.trim()), status });
+}
+export interface DashboardDueItem {
+  readonly id: string;
+  readonly title: string;
+  readonly dueAtIso: string;
+}
+export interface DashboardOperationalItem extends DashboardDueItem {
+  readonly projectRequestId: string;
+  readonly projectTitle: string;
+  readonly kind: 'project' | 'task' | 'milestone';
+  readonly count: number;
+}
+export function compareOperationalItems(a: DashboardOperationalItem, b: DashboardOperationalItem): number {
+  return Date.parse(a.dueAtIso) - Date.parse(b.dueAtIso) || compareIdentity(a.projectRequestId, b.projectRequestId)
+    || compareIdentity(a.kind, b.kind) || compareIdentity(a.id, b.id);
+}
+export function compareIdentity(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
 
 export interface ProjectOpsDashboardRow {
   readonly id: string;
@@ -41,6 +74,13 @@ export interface ProjectOpsDashboardRow {
   readonly highOpenTaskCount?: number;
   readonly completedTaskCount?: number;
   readonly nextTaskDueAtIso?: string;
+  readonly overdueTaskCount?: number;
+  readonly overdueMilestoneCount?: number;
+  readonly nextOverdueTask?: DashboardDueItem;
+  readonly nextOverdueMilestone?: DashboardDueItem;
+  readonly nextUpcomingTask?: DashboardDueItem;
+  readonly nextUpcomingMilestone?: DashboardDueItem;
+  readonly createdAtIso?: string;
   readonly workLogCount?: number;
   readonly billableWorkMinutes?: number;
   readonly nonBillableWorkMinutes?: number;
@@ -55,6 +95,13 @@ export interface ProjectOpsDashboardRow {
 }
 
 export interface ProjectOpsDashboardView {
+  readonly filter: Required<DashboardFilter>;
+  readonly evaluationNow: string;
+  readonly hasEligibleProjects: boolean;
+  readonly overdueWorkCount: number;
+  readonly overdueWork: readonly DashboardOperationalItem[];
+  /** Nearest future operational deadline per matching project. */
+  readonly upcomingDeadlines: readonly DashboardOperationalItem[];
   readonly totalActiveRequests: number;
   readonly byStatus: Readonly<Record<ProjectRequestStatus, number>>;
   readonly highPriorityOpen: number;
@@ -96,8 +143,33 @@ export interface ProjectOpsDashboardView {
 }
 
 export function composeProjectOpsDashboard(
-  rows: readonly ProjectOpsDashboardRow[]
+  rows: readonly ProjectOpsDashboardRow[],
+  options: { filter?: DashboardFilter; evaluationNow?: string; hasEligibleProjects?: boolean } = {}
 ): ProjectOpsDashboardView {
+  const filter = validateDashboardFilter(options.filter);
+  const evaluationNow = options.evaluationNow ?? new Date().toISOString();
+  const now = Date.parse(evaluationNow);
+  if (!Number.isFinite(now)) throw new Error('Invalid dashboard evaluation instant.');
+  const eligible = rows.filter(row => dashboardStatuses.includes(row.status as any));
+  rows = eligible.filter(row => (filter.status === 'all' || row.status === filter.status)
+    && (dashboardSearchText(row.title).includes(filter.q) || dashboardSearchText(row.clientName).includes(filter.q)));
+  const overdueWork: DashboardOperationalItem[] = [], upcomingDeadlines: DashboardOperationalItem[] = [];
+  for (const row of rows) {
+    const item = (kind: DashboardOperationalItem['kind'], due: DashboardDueItem, count = 1): DashboardOperationalItem =>
+      Object.freeze({ ...due, dueAtIso: new Date(due.dueAtIso).toISOString(), kind, count, projectRequestId: row.id, projectTitle: row.title });
+    for (const [kind, due, count] of [
+      ['task', row.nextOverdueTask, row.overdueTaskCount],
+      ['milestone', row.nextOverdueMilestone, row.overdueMilestoneCount],
+    ] as const) if (due && Date.parse(due.dueAtIso) < now) overdueWork.push(item(kind, due, count ?? 1));
+    const candidates: DashboardOperationalItem[] = [];
+    if (row.deadlineIso && row.status !== 'delivered' && Date.parse(row.deadlineIso) > now)
+      candidates.push(item('project', { id: row.id, title: row.title, dueAtIso: row.deadlineIso }));
+    for (const [kind, due] of [['task', row.nextUpcomingTask], ['milestone', row.nextUpcomingMilestone]] as const)
+      if (due && Date.parse(due.dueAtIso) > now) candidates.push(item(kind, due));
+    candidates.sort(compareOperationalItems);
+    if (candidates[0]) upcomingDeadlines.push(candidates[0]);
+  }
+  overdueWork.sort(compareOperationalItems); upcomingDeadlines.sort(compareOperationalItems);
   const byStatus: Record<ProjectRequestStatus, number> = {
     new: 0,
     estimated: 0,
@@ -181,12 +253,15 @@ export function composeProjectOpsDashboard(
     submittedExpenses += row.submittedExpenseCount ?? 0;
     approvedExpenses += row.approvedExpenseCount ?? 0;
     rejectedExpenses += row.rejectedExpenseCount ?? 0;
-    if (row.deadlineIso && !['cancelled','archived','delivered'].includes(row.status) && (!nextDeadline || row.deadlineIso < (nextDeadline.deadlineIso ?? ''))) {
+    if (row.deadlineIso && !['cancelled','archived','delivered'].includes(row.status) && (!nextDeadline || Date.parse(row.deadlineIso) < Date.parse(nextDeadline.deadlineIso!))) {
       nextDeadline = row;
     }
   }
 
   return Object.freeze({
+    filter, evaluationNow: new Date(now).toISOString(), hasEligibleProjects: options.hasEligibleProjects ?? (eligible.length > 0),
+    overdueWorkCount: rows.reduce((n, row) => n + (row.overdueTaskCount ?? 0) + (row.overdueMilestoneCount ?? 0), 0),
+    overdueWork: Object.freeze(overdueWork), upcomingDeadlines: Object.freeze(upcomingDeadlines),
     financeTotalsByCurrency: mergeFinanceTotals(rows.map(row => row.financeTotalsByCurrency ?? {})),
     totalActiveRequests: rows.filter((row) => !['archived', 'cancelled'].includes(row.status)).length,
     byStatus: Object.freeze(byStatus),

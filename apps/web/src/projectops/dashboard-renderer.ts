@@ -1,5 +1,5 @@
 import { formatFinanceCents, formatFinanceTotal } from '../../../../packages/projectops/src/finances.ts';
-import type { ProjectOpsDashboardRow, ProjectRequestStatus } from '../../../../packages/projectops/src/index.ts';
+import type { DashboardFilter, DashboardOperationalItem, ProjectOpsDashboardRow, ProjectRequestStatus } from '../../../../packages/projectops/src/index.ts';
 import type { ProjectOpsDashboardPage } from './dashboard-view.ts';
 
 export interface RenderedProjectOpsDashboard {
@@ -13,6 +13,7 @@ const visibleStatuses = Object.freeze([
   'estimated',
   'approved',
   'in_progress',
+  'on_hold',
   'delivered',
 ] satisfies readonly ProjectRequestStatus[]);
 
@@ -21,6 +22,7 @@ export function renderProjectOpsDashboardPage(
 ): RenderedProjectOpsDashboard {
   const summary = page.summary;
   const rows = summary.rows;
+  const timezone = page.timezone;
 
   return Object.freeze({
     status: 200,
@@ -45,8 +47,18 @@ export function renderProjectOpsDashboardPage(
         <p class="eyebrow">ProjectOps</p>
         <h1 id="projectops-title">${escapeHtml(page.title)}</h1>
       </div>
-      <p class="header-note">${renderHeaderNote(summary.nextDeadline)}</p>
+      <p class="header-note">${renderHeaderNote(summary.upcomingDeadlines[0], timezone)}</p>
     </header>
+
+    <section class="requests" aria-label="Find projects">
+      <form class="dashboard-filters" action="/projectops" method="get">
+        <label>Search projects<input name="q" maxlength="120" value="${escapeHtml(summary.filter.q)}" placeholder="Project title or client name"></label>
+        <div><label for="dashboard-status">Status</label><select id="dashboard-status" name="status"><option value="all"${summary.filter.status === 'all' ? ' selected' : ''}>All eligible states</option>${visibleStatuses.map(status => `<option value="${status}"${summary.filter.status === status ? ' selected' : ''}>${formatStatus(status)}</option>`).join('')}</select></div>
+        <button type="submit">Apply</button><a href="/projectops">Reset</a>
+      </form>
+      <p class="result-scope">${escapeHtml(scopeLabel(summary.filter))} · ${rows.length} matching projects. <a href="${escapeHtml(dashboardUrl(summary.filter))}">Refresh dashboard</a></p>
+      <p class="result-scope">Evaluated ${escapeHtml(formatDate(summary.evaluationNow, timezone))} (${escapeHtml(timezone)}).</p>
+    </section>
 
     <section class="metrics" aria-label="Project request summary">
       ${renderMetric('Active requests', String(summary.totalActiveRequests))}
@@ -73,12 +85,25 @@ export function renderProjectOpsDashboardPage(
       ${visibleStatuses.map((status) => renderWorkflowColumn(status, summary.byStatus[status])).join('')}
     </section>
 
+    <section class="requests operational" aria-labelledby="overdue-title"><h2 id="overdue-title">Overdue work</h2>
+      <p>${summary.overdueWorkCount} open tasks/milestones overdue.</p>
+      ${renderOperational(summary.overdueWork, timezone, 'No overdue work.')}
+    </section>
+    <section class="requests operational" aria-labelledby="upcoming-title"><h2 id="upcoming-title">Upcoming deadlines</h2>
+      <p>Nearest future operational deadline per matching project.</p>
+      ${renderOperational(summary.upcomingDeadlines, timezone, 'No upcoming deadlines.')}
+    </section>
+    <section class="requests operational" aria-labelledby="outstanding-title"><h2 id="outstanding-title">Outstanding invoices</h2>
+      <p>${summary.issuedInvoices} issued invoices · ${escapeHtml(formatFinanceTotal(summary.financeTotalsByCurrency, 'outstandingInvoiceAmountCents'))}</p>
+      ${rows.some(row => (row.issuedInvoiceCount ?? 0) > 0) ? `<ul>${rows.filter(row => (row.issuedInvoiceCount ?? 0) > 0).map(row => `<li><a href="/projectops/projects/${encodeURIComponent(row.id)}#invoices">Invoices for ${escapeHtml(row.title)}</a> · ${row.issuedInvoiceCount} issued · ${escapeHtml(formatFinanceTotal(row.financeTotalsByCurrency ?? {}, 'outstandingInvoiceAmountCents'))}</li>`).join('')}</ul>` : '<p>No outstanding invoices.</p>'}
+    </section>
+
     <section class="requests" aria-labelledby="active-requests-title">
       <div class="section-heading">
         <h2 id="active-requests-title">Active Requests</h2>
         <span>${rows.length} shown</span>
       </div>
-      ${rows.length > 0 ? renderRequestsTable(rows) : renderEmptyState()}
+      ${rows.length > 0 ? renderRequestsTable(rows, timezone) : renderEmptyState(summary.hasEligibleProjects)}
     </section>
   </main>
 </body>
@@ -100,7 +125,7 @@ function renderWorkflowColumn(status: ProjectRequestStatus, count: number): stri
   </article>`;
 }
 
-function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
+function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[], timezone: string): string {
   return `<div class="table-wrap">
     <table>
       <thead>
@@ -127,13 +152,13 @@ function renderRequestsTable(rows: readonly ProjectOpsDashboardRow[]): string {
         </tr>
       </thead>
       <tbody>
-        ${rows.map(renderRequestRow).join('')}
+        ${rows.map(row => renderRequestRow(row, timezone)).join('')}
       </tbody>
     </table>
   </div>`;
 }
 
-function renderRequestRow(row: ProjectOpsDashboardRow): string {
+function renderRequestRow(row: ProjectOpsDashboardRow, timezone: string): string {
   return `<tr>
     <td>
       <strong><a href="/projectops/projects/${encodeURIComponent(row.id)}">${escapeHtml(row.title)}</a></strong>
@@ -154,24 +179,37 @@ function renderRequestRow(row: ProjectOpsDashboardRow): string {
     <td>${escapeHtml(formatTasks(row))}</td>
     <td>${escapeHtml(formatWork(row))}</td>
     <td>${escapeHtml(formatExpenses(row))}</td>
-    <td>${escapeHtml(formatLatestActivity(row))}</td>
+    <td>${escapeHtml(formatLatestActivity(row, timezone))}</td>
     <td>${escapeHtml(formatPriority(row.priority))}</td>
-    <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso) : 'Not set')}</td>
+    <td>${escapeHtml(row.deadlineIso ? formatDate(row.deadlineIso, timezone) : 'Not set')}</td>
   </tr>`;
 }
 
-function renderEmptyState(): string {
+function renderEmptyState(hasEligibleProjects: boolean): string {
+  if (hasEligibleProjects) return '<div class="empty-state"><h3>No matching projects</h3><p>Change the search or status filter, or reset to all eligible projects.</p></div>';
   return `<div class="empty-state">
     <h3>No active project requests yet</h3>
     <p>Create a client and project request to start tracking delivery.</p>
   </div>`;
 }
 
-function renderHeaderNote(nextDeadline: ProjectOpsDashboardRow | undefined): string {
-  if (!nextDeadline?.deadlineIso) {
-    return 'No upcoming deadlines yet.';
-  }
-  return `Next deadline: ${escapeHtml(nextDeadline.title)} on ${escapeHtml(formatDate(nextDeadline.deadlineIso))}`;
+function renderHeaderNote(next: DashboardOperationalItem | undefined, timezone: string): string {
+  return next ? `Next deadline: ${escapeHtml(next.projectTitle)} · ${escapeHtml(next.kind)} on ${escapeHtml(formatDate(next.dueAtIso, timezone))}` : 'No upcoming deadlines yet.';
+}
+function scopeLabel(filter: DashboardFilter): string {
+  return `Scope: ${filter.status === 'all' ? 'all eligible states' : formatStatus(filter.status!)}${filter.q ? ' · search “' + filter.q + '”' : ''}`;
+}
+function dashboardUrl(filter: DashboardFilter): string {
+  const query = new URLSearchParams({ q: filter.q ?? '', status: filter.status ?? 'all' });
+  return '/projectops?' + query;
+}
+function renderOperational(items: readonly DashboardOperationalItem[], timezone: string, empty: string): string {
+  if (!items.length) return `<p>${empty}</p>`;
+  return `<ul>${items.map(item => `<li><a href="/projectops/projects/${encodeURIComponent(item.projectRequestId)}${item.kind === 'project' ? '' : '#' + item.kind + 's'}">${escapeHtml(item.projectTitle)} · ${escapeHtml(item.kind)}: ${escapeHtml(item.title)}</a> · ${escapeHtml(formatDate(item.dueAtIso, timezone))}${item.count > 1 ? ' · ' + item.count + ' overdue in this section' : ''}</li>`).join('')}</ul>`;
+}
+export function renderDashboardUnavailable(filter: DashboardFilter, status: 400 | 500) {
+  return Object.freeze({ status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+    body: `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>ProjectOps Dashboard</title><style>${dashboardCss()}</style></head><body><main class="projectops-shell"><h1>ProjectOps Dashboard</h1>${status === 400 ? '<p>Invalid dashboard filters. Search must be at most 120 characters; choose an eligible status.</p><a href="/projectops">Reset filters</a>' : `<p role="alert">Dashboard unavailable. No current metrics could be loaded.</p><a href="${escapeHtml(dashboardUrl(filter))}">Retry dashboard</a>`}</main></body></html>` });
 }
 
 function formatStatus(status: ProjectRequestStatus): string {
@@ -242,11 +280,11 @@ function formatExpenses(row: ProjectOpsDashboardRow): string {
   return `${row.submittedExpenseCount ?? 0} submitted / ${row.approvedExpenseCount ?? 0} approved (${approved})`;
 }
 
-function formatLatestActivity(row: ProjectOpsDashboardRow): string {
+function formatLatestActivity(row: ProjectOpsDashboardRow, timezone: string): string {
   if (!row.latestActivitySummary || !row.latestActivityAtIso) {
     return 'No activity yet';
   }
-  return `${row.latestActivitySummary} (${formatDate(row.latestActivityAtIso)})`;
+  return `${row.latestActivitySummary} (${formatDate(row.latestActivityAtIso, timezone)})`;
 }
 
 function formatHours(minutes: number): string {
@@ -256,12 +294,8 @@ function formatHours(minutes: number): string {
   })}h`;
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('en', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  }).format(new Date(value));
+function formatDate(value: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone }).format(new Date(value));
 }
 
 function escapeHtml(value: string): string {
@@ -334,7 +368,7 @@ function dashboardCss(): string {
     }
 
     .workflow {
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
     }
 
     .metric, .workflow-column, .requests {
@@ -365,6 +399,12 @@ function dashboardCss(): string {
       font-size: 1.35rem;
     }
 
+    .dashboard-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding: 18px; }
+    .dashboard-filters label { display: flex; flex-direction: column; gap: 6px; }
+    input, select, button { font: inherit; padding: 8px; max-width: 100%; }
+    .result-scope { padding: 0 18px; overflow-wrap: anywhere; }
+    .operational { padding: 18px; margin-bottom: 20px; overflow-wrap: anywhere; }
+    .operational li { margin: 10px 0; }
     .requests {
       overflow: hidden;
     }

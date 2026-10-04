@@ -1,3 +1,4 @@
+import { compareIdentity, dashboardSearchText, type DashboardDueItem } from './dashboard.ts';
 import { totalProjectFinances, type ProjectFinanceTotalsByCurrency } from './finances.ts';
 import type { RawQueryResult } from '../../db/src/connection/connect.ts';
 import { financeParentStates, ProjectOpsOperationError } from './domain.ts';
@@ -554,7 +555,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     }
 
     if (upper.includes('FROM PROJECTOPS_PROJECT_REQUESTS PR JOIN PROJECTOPS_CLIENTS C')) {
-      return Object.freeze(this.selectDashboardRows() as T[]);
+      return Object.freeze(this.selectDashboardRows(statement.params) as T[]);
     }
 
     throw new Error(`Unsupported ProjectOps SQL statement: ${statement.sql}`);
@@ -1558,11 +1559,21 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     );
   }
 
-  private selectDashboardRows(): readonly ProjectOpsDashboardStorageRow[] {
-    return Object.freeze(
+  private selectDashboardRows(params: readonly unknown[]): readonly (ProjectOpsDashboardStorageRow | { id: null; hasEligibleProjects: boolean })[] {
+    const status = String(params[0]), q = String(params[1]), now = Date.parse(String(params[2]));
+    const hasEligibleProjects = [...this.projectRequests.values()].some(row => !['archived', 'cancelled'].includes(row.status));
+    const attention = (rows: Iterable<{ id: string; projectRequestId: string; status: string; title: string; dueAtIso?: string }>, id: string, future: boolean) =>
+      [...rows].filter(row => row.projectRequestId === id && row.status === 'open' && row.dueAtIso
+        && (future ? Date.parse(row.dueAtIso) > now : Date.parse(row.dueAtIso) < now))
+        .sort((a, b) => Date.parse(a.dueAtIso!) - Date.parse(b.dueAtIso!) || compareIdentity(a.id, b.id));
+    const due = (row: { id: string; title: string; dueAtIso?: string } | undefined): DashboardDueItem | undefined =>
+      row ? { id: row.id, title: row.title, dueAtIso: new Date(row.dueAtIso!).toISOString() } : undefined;
+    const results =
       [...this.projectRequests.values()]
         .filter((request) => !['archived', 'cancelled'].includes(request.status))
-        .sort((a, b) => b.updatedAtIso.localeCompare(a.updatedAtIso) || b.createdAtIso.localeCompare(a.createdAtIso))
+        .filter(request => (status === 'all' || request.status === status)
+          && (dashboardSearchText(request.title).includes(q) || dashboardSearchText(this.clients.get(request.clientId)!.name).includes(q)))
+        .sort((a, b) => Date.parse(b.updatedAtIso) - Date.parse(a.updatedAtIso) || Date.parse(b.createdAtIso) - Date.parse(a.createdAtIso) || compareIdentity(a.id, b.id))
         .map((request) => {
           const client = this.clients.get(request.clientId);
           if (!client) {
@@ -1609,6 +1620,13 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
             highOpenTaskCount: this.countHighOpenTasks(request.id),
             completedTaskCount: this.countTasks(request.id, 'completed'),
             nextTaskDueAtIso: this.nextOpenTaskDueAt(request.id),
+            hasEligibleProjects, createdAtIso: request.createdAtIso,
+            overdueTaskCount: attention(this.projectTasks.values(), request.id, false).length,
+            overdueMilestoneCount: attention(this.projectMilestones.values(), request.id, false).length,
+            nextOverdueTask: due(attention(this.projectTasks.values(), request.id, false)[0]),
+            nextOverdueMilestone: due(attention(this.projectMilestones.values(), request.id, false)[0]),
+            nextUpcomingTask: due(attention(this.projectTasks.values(), request.id, true)[0]),
+            nextUpcomingMilestone: due(attention(this.projectMilestones.values(), request.id, true)[0]),
             workLogCount: this.countWorkLogs(request.id),
             billableWorkMinutes: this.sumWorkMinutes(request.id, true),
             nonBillableWorkMinutes: this.sumWorkMinutes(request.id, false),
@@ -1623,8 +1641,8 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
             latestActivitySummary: this.latestActivity(request.id)?.summary,
             updatedAtIso: request.updatedAtIso,
           });
-        })
-    );
+        });
+    return Object.freeze(results.length ? results : [{ id: null, hasEligibleProjects }]);
   }
 
   private countMilestones(projectRequestId: string, status: string): number {
@@ -1729,7 +1747,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     return [...this.projectTasks.values()]
       .filter((task) => task.projectRequestId === projectRequestId && task.status === 'open' && task.dueAtIso)
       .sort((a, b) => (
-        compareOptionalIso(a.dueAtIso, b.dueAtIso) ||
+        Date.parse(a.dueAtIso!) - Date.parse(b.dueAtIso!) ||
         b.createdAtIso.localeCompare(a.createdAtIso) ||
         a.id.localeCompare(b.id)
       ))[0]?.dueAtIso;
@@ -1890,6 +1908,11 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
   const source = row as Record<string, unknown>;
   return Object.freeze({
     ...source,
+    ...(source.has_eligible_projects !== undefined ? { hasEligibleProjects: source.has_eligible_projects } : {}),
+    ...(source.overdue_task_count !== undefined ? { overdueTaskCount: normalizeOptionalNumberValue(source.overdue_task_count) } : {}),
+    ...(source.overdue_milestone_count !== undefined ? { overdueMilestoneCount: normalizeOptionalNumberValue(source.overdue_milestone_count) } : {}),
+    ...Object.fromEntries(['next_overdue_task', 'next_overdue_milestone', 'next_upcoming_task', 'next_upcoming_milestone'].filter(key => source[key] !== undefined)
+      .map(key => [key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), source[key] ? { ...(source[key] as DashboardDueItem), dueAtIso: new Date((source[key] as DashboardDueItem).dueAtIso).toISOString() } : undefined])),
     ...(source.finance_totals_by_currency !== undefined ? { financeTotalsByCurrency: source.finance_totals_by_currency } : {}),
     ...(source.client_id !== undefined ? { clientId: source.client_id } : {}),
     ...(source.client_name !== undefined ? { clientName: source.client_name } : {}),
