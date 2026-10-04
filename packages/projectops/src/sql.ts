@@ -1,3 +1,4 @@
+import { validateDashboardFilter, type DashboardFilter } from './dashboard.ts';
 import type {
   ProjectActivity,
   ProjectChangeRequest,
@@ -1562,9 +1563,12 @@ export function selectProjectRequestByIdSql(id: string): SqlStatement {
   });
 }
 
-export function selectDashboardRowsSql(): SqlStatement {
+export function selectDashboardRowsSql(filter: DashboardFilter = {}, evaluationNow = new Date().toISOString()): SqlStatement {
+  const validated = validateDashboardFilter(filter);
   return Object.freeze({
-    sql: `SELECT
+    sql: `WITH dashboard_scope AS (
+      SELECT EXISTS(SELECT 1 FROM projectops_project_requests WHERE status NOT IN ('archived', 'cancelled')) AS has_eligible_projects
+    ), dashboard_rows AS (SELECT
       pr.id,
       pr.client_id,
       c.name AS client_name,
@@ -1572,6 +1576,7 @@ export function selectDashboardRowsSql(): SqlStatement {
       pr.priority,
       pr.status,
       pr.deadline_at,
+      pr.created_at,
       pr.estimate_amount_cents,
       pr.estimate_currency,
       pr.estimated_at,
@@ -1604,6 +1609,10 @@ export function selectDashboardRowsSql(): SqlStatement {
       COALESCE(ts.high_open_tasks, 0) AS high_open_task_count,
       COALESCE(ts.completed_tasks, 0) AS completed_task_count,
       ts.next_task_due_at,
+      COALESCE(ts.overdue_tasks, 0) AS overdue_task_count,
+      COALESCE(ms.overdue_milestones, 0) AS overdue_milestone_count,
+      ts.next_overdue_task, ts.next_upcoming_task,
+      ms.next_overdue_milestone, ms.next_upcoming_milestone,
       COALESCE(wl.work_log_count, 0) AS work_log_count,
       COALESCE(wl.billable_minutes, 0) AS billable_work_minutes,
       COALESCE(wl.non_billable_minutes, 0) AS non_billable_work_minutes,
@@ -1621,7 +1630,12 @@ export function selectDashboardRowsSql(): SqlStatement {
       SELECT
         project_request_id,
         COUNT(*) FILTER (WHERE status = 'open') AS open_milestones,
-        COUNT(*) FILTER (WHERE status = 'completed') AS completed_milestones
+        COUNT(*) FILTER (WHERE status = 'completed') AS completed_milestones,
+        COUNT(*) FILTER (WHERE status = 'open' AND due_at < $3::timestamptz) AS overdue_milestones,
+        (jsonb_agg(jsonb_build_object('id', id, 'title', title, 'dueAtIso', due_at) ORDER BY due_at, id COLLATE "C")
+          FILTER (WHERE status = 'open' AND due_at < $3::timestamptz))->0 AS next_overdue_milestone,
+        (jsonb_agg(jsonb_build_object('id', id, 'title', title, 'dueAtIso', due_at) ORDER BY due_at, id COLLATE "C")
+          FILTER (WHERE status = 'open' AND due_at > $3::timestamptz))->0 AS next_upcoming_milestone
       FROM projectops_project_milestones
       GROUP BY project_request_id
     ) ms ON ms.project_request_id = pr.id
@@ -1702,6 +1716,11 @@ export function selectDashboardRowsSql(): SqlStatement {
         COUNT(*) FILTER (WHERE status = 'open') AS open_tasks,
         COUNT(*) FILTER (WHERE status = 'open' AND priority = 'high') AS high_open_tasks,
         COUNT(*) FILTER (WHERE status = 'completed') AS completed_tasks,
+        COUNT(*) FILTER (WHERE status = 'open' AND due_at < $3::timestamptz) AS overdue_tasks,
+        (jsonb_agg(jsonb_build_object('id', id, 'title', title, 'dueAtIso', due_at) ORDER BY due_at, id COLLATE "C")
+          FILTER (WHERE status = 'open' AND due_at < $3::timestamptz))->0 AS next_overdue_task,
+        (jsonb_agg(jsonb_build_object('id', id, 'title', title, 'dueAtIso', due_at) ORDER BY due_at, id COLLATE "C")
+          FILTER (WHERE status = 'open' AND due_at > $3::timestamptz))->0 AS next_upcoming_task,
         MIN(due_at) FILTER (WHERE status = 'open') AS next_task_due_at
       FROM projectops_project_tasks
       GROUP BY project_request_id
@@ -1756,7 +1775,11 @@ export function selectDashboardRowsSql(): SqlStatement {
       ORDER BY project_request_id, happened_at DESC, created_at DESC, id ASC
     ) act ON act.project_request_id = pr.id
     WHERE pr.status NOT IN ('archived', 'cancelled')
-    ORDER BY pr.updated_at DESC, pr.created_at DESC`,
-    params: Object.freeze([]),
+      AND ($1 = 'all' OR pr.status = $1)
+      AND (strpos(lower(pr.title COLLATE "C.utf8"), $2) > 0 OR strpos(lower(c.name COLLATE "C.utf8"), $2) > 0)
+    ) SELECT dashboard_rows.*, dashboard_scope.has_eligible_projects
+      FROM dashboard_scope LEFT JOIN dashboard_rows ON TRUE
+      ORDER BY dashboard_rows.updated_at DESC, dashboard_rows.created_at DESC, dashboard_rows.id COLLATE "C" ASC`,
+    params: Object.freeze([validated.status, validated.q, evaluationNow]),
   });
 }

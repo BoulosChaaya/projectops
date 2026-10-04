@@ -33,7 +33,7 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
   const service = createProjectOpsRepositoryService(config.sql);
   const productRoutes = [
     ...createProjectOpsRoutes(service, config.clock),
-    createProjectOpsDashboardWebRoute(service),
+    createProjectOpsDashboardWebRoute(service, config.clock),
     ...createClientWebRoutes(),
   ];
   const routes = Object.freeze(config.access ? [

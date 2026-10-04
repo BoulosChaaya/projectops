@@ -175,6 +175,7 @@ import {
   type SqlStatement,
 } from './sql.ts';
 import {
+  type DashboardFilter,
   composeProjectOpsDashboard,
   type ProjectOpsDashboardRow,
   type ProjectOpsDashboardView,
@@ -1260,9 +1261,11 @@ export class ProjectOpsRepository {
     );
   }
 
-  public async getDashboard(): Promise<ProjectOpsDashboardView> {
-    const rows = await this.sql.query<ProjectOpsDashboardRow>(selectDashboardRowsSql());
-    return composeProjectOpsDashboard(rows);
+  public async getDashboard(filter: DashboardFilter = {}, evaluationNow = new Date().toISOString()): Promise<ProjectOpsDashboardView> {
+    const rows = await this.sql.query<ProjectOpsDashboardRow & { hasEligibleProjects?: boolean }>(selectDashboardRowsSql(filter, evaluationNow));
+    return composeProjectOpsDashboard(rows.filter(row => row.id != null), {
+      filter, evaluationNow, hasEligibleProjects: rows[0]?.hasEligibleProjects,
+    });
   }
 
   private async requireProjectRequest(id: string): Promise<ProjectRequest> {

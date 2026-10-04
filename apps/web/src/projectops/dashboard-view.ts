@@ -6,14 +6,15 @@ import {
 
 export interface ProjectOpsDashboardPage {
   readonly title: 'ProjectOps Dashboard';
+  readonly timezone: string;
   readonly summary: ProjectOpsDashboardView;
 }
 
 export function composeProjectOpsDashboardPageFromSummary(
-  summary: ProjectOpsDashboardView
+  summary: ProjectOpsDashboardView, timezone = 'UTC'
 ): ProjectOpsDashboardPage {
   return Object.freeze({
-    title: 'ProjectOps Dashboard',
+    title: 'ProjectOps Dashboard', timezone,
     summary,
   });
 }

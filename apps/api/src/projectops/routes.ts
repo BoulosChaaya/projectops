@@ -1,3 +1,4 @@
+import { validateDashboardFilter, type DashboardFilter } from '../../../../packages/projectops/src/dashboard.ts';
 import { randomUUID } from 'node:crypto';
 import type { RequestContext } from '../http/request-context/context.ts';
 import type { ProjectHistoryContext } from '../../../../packages/projectops/src/history.ts';
@@ -221,7 +222,7 @@ export interface ProjectOpsApiService {
     nowIso: string,
     expectedRevision?: number
   ): Promise<ProjectRequest>;
-  getDashboard(): Promise<ProjectOpsDashboardView>;
+  getDashboard(filter?: DashboardFilter, evaluationNow?: string): Promise<ProjectOpsDashboardView>;
 }
 
 export function createProjectOpsRoutes(
@@ -725,7 +726,9 @@ export function createProjectOpsRoutes(
     {
       method: 'GET',
       path: '/projectops/dashboard',
-      handler: async (_request, _context) => await requestService(_context).getDashboard(),
+      handler: async (request, context) => await runProjectOpsRequest(() => requestService(context).getDashboard(
+        validateDashboardFilter({ q: request.query.q, status: request.query.status as DashboardFilter['status'] }), clock()
+      )),
     },
   ];
   return Object.freeze(routes.map(route => {
