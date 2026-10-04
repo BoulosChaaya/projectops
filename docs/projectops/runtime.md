@@ -217,7 +217,7 @@ Slice 10 is merged; Slice 11 completion is recorded below. No invoice/expense ed
 
 ## Automatic history (Slice 11)
 
-Slice 11 implements “Successful actions record events with actor and timestamp; project timeline displays them.” Implementation commits `e80e20c6fc57697162c96761a409805c2ddd4f6e` and identity guard `51f69307da07bc28fc8f30ec64482b58902ebccd` are on `slice-11-automatic-history`, based on independently reviewed Slice 10 merge `7c341250b6b8ef74b836aeac0dbfac6b88307f99` (PR #7). This documentation is the following commit. The completion gate passed locally; Slice 11 remains subject to independent PR review/merge. Slice 12 is next and has not begun.
+Slice 11 implements “Successful actions record events with actor and timestamp; project timeline displays them.” Implementation commits `e80e20c6fc57697162c96761a409805c2ddd4f6e` and identity guard `51f69307da07bc28fc8f30ec64482b58902ebccd` are on `slice-11-automatic-history`, based on independently reviewed Slice 10 merge `7c341250b6b8ef74b836aeac0dbfac6b88307f99` (PR #7). Documentation commit `acacf3471e6b7ffcefac2d57629800fa8afb9eae`; PR #8 independently reviewed and merged Slice 11 at `8aff0138ea5857eacbb5f71c2e829c5bfa3c9496`. Slice 12 completion is recorded below.
 
 ### Coverage and event contract
 
@@ -267,4 +267,51 @@ Chromium exercises completed project controls, Planning, Execution, Delivery/Fee
 
 No final failure, skip or environment blocker remains. Initial PostgreSQL failures were migration-count/version assertions still expecting six migrations; these were updated to include 0007 and the full suite rerun. Earlier focused test corrections addressed legacy NULL actor expectations, real runtime clock assertions and multiline SELECT matching in the controlled barrier. All final suites passed after lifecycle source-state summaries were strengthened.
 
-Bounded limitations: no automatic change-request history or concurrency redesign, history editing/deletion/backfill, strict sequence ledger, cryptographic audit ledger, general request idempotency, pagination, notifications/queues/integrations, new dashboard features, deferred finance features, export or deployment/backup/final-production acceptance. Single-operator access remains unchanged; distinct trusted contexts test attribution isolation without adding team accounts. Slice 12 has not begun.
+Bounded limitations: no automatic change-request history or concurrency redesign, history editing/deletion/backfill, strict sequence ledger, cryptographic audit ledger, general request idempotency, pagination, notifications/queues/integrations, new dashboard features, deferred finance features, export or deployment/backup/final-production acceptance. Single-operator access remains unchanged; distinct trusted contexts test attribution isolation without adding team accounts. Slice 11 is merged; the completed Slice 12 contract is recorded below.
+
+
+## Operational dashboard (Slice 12)
+
+Open /projectops. Apply project-title/client-name search and an eligible-state filter; Reset returns to all eligible projects. Forms use GET q/status parameters, preserving bookmark/reload/back-forward behavior. Every displayed count, money aggregate and operational section follows the selected scope. q is trimmed, limited to 120 characters and matched as a case-insensitive literal substring in exactly title or client name. SQL uses lower with C.utf8 collation and native/memory normalization mirrors simple lowercase, making matching independent of the database's default locale. Wildcards/quotes/backslashes are ordinary data. status is omitted/all, new, estimated, approved, in_progress, on_hold or delivered. Invalid filters produce 400; valid no matches produce 200.
+
+Dashboard scope excludes only cancelled/archived projects. Archived clients' eligible existing projects remain included. All six states, including On Hold, have coherent presentation. Cancelled/archived records remain accessible through existing client/workspace navigation.
+
+### Operational dates
+
+One server evaluationNow is sampled per request and passed to SQL/composition. The protected route ignores caller evaluationNow. Overdue work is only OPEN tasks/milestones with dueAtIso < evaluationNow. Equal instants, future dates, absent dates and completed children are excluded. No local-calendar-day rule, stored flag or date repair is added. Existing valid open work remains derived from source; no planning children are invented for new projects.
+
+Upcoming means strictly > evaluationNow, with no 7/14/30-day horizon. Sources are project deadlineIso and OPEN milestone/task dueAtIso. Delivered project deadlines are excluded, while delivered open planning deadlines and overdue work remain relevant. Invoice due dates, history, expenses and execution/delivery audit timestamps are not planning attention dates.
+
+Each project contributes its nearest future operational item. Overdue work exposes complete counts and the earliest overdue task/milestone per project/type. Date ordering compares actual instants and uses stable project ID/kind/resource ID ties. PostgreSQL nearest-resource ID ties use C collation; memory mirrors that order. Source rows retain updated_at DESC, created_at DESC and add ID ASC. Offset-bearing equivalent instants classify/order equivalently. Displayed deadlines, evaluation and latest activity dates use the authenticated operator's saved IANA timezone, including when browser/server timezones differ. No business timestamp ownership changes.
+
+### Money and consistency
+
+Outstanding invoices are ISSUED, whether due-dated or not; paid invoices are excluded. The section shows counts and amounts by actual invoice currency and links to #invoices. Financial dates remain financial information rather than overdue work/upcoming deadlines. Existing four financeTotalsByCurrency categories remain decimal-cent strings; SQL groups invoice/expense sources before joining and native formatting/composition uses BigInt. No Number precision loss, FX, combined unlike-currency total or estimate-currency substitution.
+
+The repository performs one parameterized SELECT statement: a scope-existence CTE plus filtered project/client rows and independently grouped child/finance aggregates, nearest-date metadata and latest activity. The existence boolean distinguishes no eligible projects from filtered-empty results without exposing unfiltered metrics. There is no N+1 workspace collection fetching and no dashboard row lock. A PostgreSQL statement snapshot sees committed business/history together. During an uncommitted mutation it may show the prior state; refresh after commit sees the winner. Completion removes planning attention, reopen/reschedule recalculates it, payment/expense decisions update finance categories, cancellation/archive removes projects and delivery retains eligible child/financial information while excluding the delivered project deadline. Legacy nextDeadline remains a compatibility field for the earliest unfinished project deadline; upcomingDeadlines is the explicit future-only projection.
+
+Reads/search/filter/refresh produce no activity, change no revisions and authorize no actions. Slice 9 delivery/archival readiness remains only at least one deliverable, all accepted, no open feedback; cancelled archival bypass is unchanged. Finance/attention/history remain irrelevant to readiness. Slice 11 successful mutation/history atomicity, request-local actors, annotations, failed-command exclusions and change-request exclusion are untouched.
+
+### Browser and access
+
+The dashboard remains protected request-time SSR, with no polling or client-data islands. Query/storage failure renders an unavailable 500 page with Retry dashboard preserving q/status and no authoritative-looking zero metrics. Empty eligible scope, filtered-empty results and empty overdue/upcoming/invoice sections have distinct messages. Text is escaped, internal links encoded and sections navigate the established planning/finance workspace. Existing responsive table/card layout is retained. Invoices for … labels distinguish financial navigation from overview links.
+
+Existing GET /projectops and GET /projectops/dashboard are sufficient. They share filter validation, retain no-store/session boundaries and page login redirects/API 401 behavior. No new read 409 contract or GET mutation-CSRF requirement is added. Existing write Origin/JSON/CSRF guards remain enabled.
+
+### Verification and checkpoint
+
+Implementation commit `7aed95e2039f4b7a3a8531bab0b2952f45eb9af1` on slice-12-operational-dashboard, based on merged main `8aff0138ea5857eacbb5f71c2e829c5bfa3c9496` (PR #8). This documentation is the following commit. Slice 12 passed its local completion gate and awaits independent PR review/merge; Slice 13 is next and has not begun.
+
+| Command | Pass | Fail | Skip | Hygiene |
+| --- | --- | --- | --- | --- |
+| pnpm verify | 89/89 native | 0 | 0 | 591 files |
+| PROJECTOPS_TEST_DATABASE_URL=<configured-test-database> pnpm test:postgres | 34/34 real PostgreSQL | 0 | 0 | — |
+| PROJECTOPS_TEST_DATABASE_URL=<configured-test-database> pnpm test:browser | 11/11 Chromium | 0 | 0 | — |
+
+Actual commands also used CI=true XDG_DATA_HOME=/tmp/projectops-xdg PNPM_HOME=/tmp/projectops-pnpm; browser used PLAYWRIGHT_BROWSERS_PATH=/tmp/projectops-playwright. Node 24.19.0, pnpm 11.19.0, PostgreSQL 17.11 and Chromium 153.0.8010.12. The restored cloud image lacked PostgreSQL binaries, so signed Debian package metadata/checksum-verified PostgreSQL 17 packages were extracted outside the checkout and a dedicated loopback test instance initialized. Existing data was untouched; all acceptance schemas were isolated and cleaned. PostgreSQL 17 meets the runtime's PostgreSQL 16+ requirement. No dependency, lockfile, frozen migration 0001–0007, index or database-schema change.
+
+Four dedicated native tests plus dashboard-fixture.ts cover memory/domain/repository/API contracts, strict boundaries and offset/identity ordering, read-only behavior, full filtered scope, exact currencies, protected clock/timezone, invalid queries and failure rendering. Two real PostgreSQL tests cover query/persistence/refresh behavior and controlled snapshots during business/history transactions, with restart through a fresh pool. Chromium exercises realistic complete source workflows with automatically generated history, search/title/client/status combinations, URL/apply/reset/back-forward, all six states, delivered planning rules, separate currencies, workspace navigation, timezone, three empty-state classes, unavailable/retry filters, responsive safe rendering, unchanged projects/history, no business requests and zero page errors. Prior Slice 1–11 suites remain enabled.
+
+Controlled PostgreSQL pauses task/milestone completion, payment and cancellation before required history insertion. Unlocked dashboard reads see the previous committed state; commit exposes the winner and its latest activity together. Injected required-history failure rolls back business/history and preserves the previous dashboard. Existing complete Slice 9 readiness/concurrency, Slice 10 exact totals above Number.MAX_SAFE_INTEGER and Slice 11 rollback/concurrency acceptance also passed.
+
+Initial failures were corrected and full suites rerun: direct SQL finance acceptance supplies statement parameters, status markup has an explicit label, invoice navigation has a distinct destination label and case matching no longer depends on default database locale. No test was skipped or weakened. No final runtime blocker remains. Limitations: manual refresh/statement snapshots, bounded nearest operational metadata, PostgreSQL C.utf8 availability, no speculative indexing/live notifications/export/deployment/backup/production-acceptance claim. Slice 13 has not begun.
