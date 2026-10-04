@@ -17,6 +17,7 @@ export async function privateLibpqEnvironment(env = process.env) {
   const serviceFile = env.PGSERVICEFILE;
   if (!serviceFile || !path.isAbsolute(serviceFile)) throw Error('An explicit private PGSERVICEFILE is required.');
   for (const file of [serviceFile, env.PGPASSFILE].filter(Boolean)) {
+    if (!path.isAbsolute(file)) throw Error('Libpq configuration paths must be explicit and absolute.');
     const info = await lstat(file);
     if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077)) throw Error('Libpq configuration must be a private regular file.');
   }
@@ -25,12 +26,12 @@ export async function privateLibpqEnvironment(env = process.env) {
 async function serviceConnection(service, env, database) {
   safeName(service);
   const contents = await readFile(env.PGSERVICEFILE, 'utf8');
-  let selected = false, fields = {};
+  let selected = false, sections = 0, fields = {};
   for (const line of contents.split(/\r?\n/)) {
     const section = /^\s*\[([^\]]+)\]\s*$/.exec(line);
-    if (section) { selected = section[1] === service; continue; }
+    if (section) { selected = section[1] === service; if (selected && ++sections > 1) throw Error('Service configuration must be unambiguous.'); continue; }
     const pair = /^\s*([a-z_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (selected && pair) fields[pair[1]] = pair[2];
+    if (selected && pair) { if (Object.hasOwn(fields,pair[1])) throw Error('Service configuration must be unambiguous.'); fields[pair[1]] = pair[2]; }
   }
   if (!fields.host || !fields.dbname || !fields.user) throw Error('Service must explicitly identify host, database and user.');
   return 'service=' + service + (database ? ' dbname=' + validateRestoreDatabase(database) : '');

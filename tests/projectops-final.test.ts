@@ -25,12 +25,12 @@ test('Private response policy covers Origin/JSON/CSRF, business and early parser
       const r=await fetch(origin+'/projectops/clients',{method:'POST',headers:{...headers,...extra},body:'null'});assert.equal(r.status,status);const data=await r.json();assert.equal(data.code,code);assert.equal(r.headers.get('cache-control'),'no-store');assert.equal(r.headers.get('x-content-type-options'),'nosniff');
     }
     const missing=await fetch(origin+'/projectops/project-requests/missing',{headers});assert.equal(missing.status,404);assert.equal(missing.headers.get('cache-control'),'no-store');
-    const malformed=await fetch(origin+'/projectops/clients',{method:'POST',headers,body:'{'});assert.ok(malformed.status>=400);assert.equal(malformed.headers.get('cache-control'),'no-store');
+    const malformed=await fetch(origin+'/projectops/clients',{method:'POST',headers,body:'{'});assert.equal(malformed.status,400);assert.equal((await malformed.json()).code,'MALFORMED_JSON_BODY');assert.equal(malformed.headers.get('cache-control'),'no-store');
     const unauth=await fetch(origin+'/projectops/dashboard');assert.equal(unauth.status,401);assert.equal(unauth.headers.get('cache-control'),'no-store');
     const post=(url:string,data:unknown)=>fetch(origin+url,{method:'POST',headers,body:JSON.stringify(data)});
     assert.equal((await post('/projectops/clients',{id:'c',name:'Header fixture'})).status,200);
     assert.equal((await post('/projectops/project-requests',{id:'p',clientId:'c',title:'Header fixture',brief:'Fixture'})).status,200);
-    const conflict=await post('/projectops/project-requests/p/control',{action:'cancel',expectedRevision:2});assert.equal(conflict.status,409);assert.equal(conflict.headers.get('cache-control'),'no-store');assert.equal(conflict.headers.get('x-content-type-options'),'nosniff');
+    const conflict=await post('/projectops/project-requests/p/control',{action:'cancel',expectedRevision:2});assert.equal(conflict.status,409);assert.equal((await conflict.json()).code,'PROJECTOPS_PROJECT_CHANGED');assert.equal(conflict.headers.get('cache-control'),'no-store');assert.equal(conflict.headers.get('x-content-type-options'),'nosniff');
     failAuth=true;const internal=await fetch(origin+'/projectops/dashboard',{headers});assert.equal(internal.status,500);assert.equal(internal.headers.get('cache-control'),'no-store');assert.equal(internal.headers.get('x-content-type-options'),'nosniff');assert.doesNotMatch(await internal.text(),/Injected/);
   }finally{await app.close();}
 });
@@ -53,6 +53,10 @@ test('Recovery refuses unsafe target identities and insecure/implicit credential
     await assert.rejects(()=>createRuntimeRelease({root:process.cwd(),destination:path.join(directory,'checkout-link','unsafe-release'),checkpoint:'a'.repeat(40)}),/outside/);
     await chmod(file,0o600);const unsafe=path.join(process.cwd(),'unsafe-backups');
     await assert.rejects(()=>backupProjectOps({sourceService:'source',sourceIdentity:'guard-fixture',directory:unsafe,env:{PGSERVICEFILE:file}}),/outside/);await assert.rejects(()=>fileAccess(unsafe));
+    for(const extra of ['[source]\nhost=other\ndbname=other\nuser=other\n','host=other\n']){
+      await writeFile(file,'[source]\nhost=localhost\ndbname=source\nuser=operator\n'+extra);
+      await assert.rejects(()=>backupProjectOps({sourceService:'source',sourceIdentity:'guard-fixture',directory:path.join(directory,'ambiguous'),env:{PGSERVICEFILE:file}}),/unambiguous/);await assert.rejects(()=>fileAccess(path.join(directory,'ambiguous')));
+    }
   }finally{await rm(directory,{recursive:true,force:true});}
 });
 
