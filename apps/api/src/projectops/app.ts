@@ -1,3 +1,4 @@
+import { createProjectHandoffRoutes } from '../../../web/src/projectops/project-handoff-routes.ts';
 import {
   applyProjectOpsMigrations,
   type ProjectOpsSqlExecutor,
@@ -35,6 +36,7 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
     ...createProjectOpsRoutes(service, config.clock),
     createProjectOpsDashboardWebRoute(service, config.clock),
     ...createClientWebRoutes(),
+    ...createProjectHandoffRoutes(service, config.clock ?? (() => new Date().toISOString())),
   ];
   const routes = Object.freeze(config.access ? [
     ...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(),

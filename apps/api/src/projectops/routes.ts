@@ -1,3 +1,4 @@
+import type { ProjectExportSnapshot } from '../../../../packages/projectops/src/project-export.ts';
 import { validateDashboardFilter, type DashboardFilter } from '../../../../packages/projectops/src/dashboard.ts';
 import { randomUUID } from 'node:crypto';
 import type { RequestContext } from '../http/request-context/context.ts';
@@ -63,6 +64,7 @@ import type {
 } from '../../../../packages/projectops/src/index.ts';
 
 export interface ProjectOpsApiService {
+  getProjectExportSnapshot(id: string): Promise<ProjectExportSnapshot>;
   withHistory?(context: ProjectHistoryContext): ProjectOpsApiService;
   createClient(input: NewClientInput): Promise<ProjectOpsClient>;
   createProjectRequest(input: NewProjectRequestInput): Promise<ProjectRequest>;

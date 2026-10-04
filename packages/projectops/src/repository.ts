@@ -1,3 +1,5 @@
+import { composeProjectExportSnapshot, validateExportIdentifier, type ProjectExportSnapshot } from './project-export.ts';
+import { selectProjectExportSnapshotSql } from './sql.ts';
 import { randomUUID } from 'node:crypto';
 import { projectHistorySummary, type ProjectHistoryContext } from './history.ts';
 import {
@@ -1259,6 +1261,13 @@ export class ProjectOpsRepository {
       `PROJECTOPS_${resource.toUpperCase()}_CHANGED`,
       `${resource[0]?.toUpperCase()}${resource.slice(1)} changed. Reload before trying again.`
     );
+  }
+
+  public async getProjectExportSnapshot(id: string): Promise<ProjectExportSnapshot> {
+    validateExportIdentifier(id);
+    const rows = await this.sql.query<{ project_export_snapshot: unknown }>(selectProjectExportSnapshotSql(id));
+    if (!rows[0]) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_REQUEST_NOT_FOUND', 'Project not found.');
+    return composeProjectExportSnapshot(rows[0].project_export_snapshot);
   }
 
   public async getDashboard(filter: DashboardFilter = {}, evaluationNow = new Date().toISOString()): Promise<ProjectOpsDashboardView> {
