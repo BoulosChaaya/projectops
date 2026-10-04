@@ -23,6 +23,8 @@ export type KernelRouteHandler = (
 ) => unknown | Promise<unknown>;
 
 export interface HttpListenerConfig {
+  /** Application-owned policy, applied at serialization for success and early errors alike. */
+  readonly responseHeaders?: Readonly<Record<string, string>>;
   readonly host?: string;
   readonly port?: number;
   readonly maxConcurrentRequests?: number;
@@ -89,7 +91,7 @@ export async function startHttpListener(config: HttpListenerConfig = {}): Promis
           new HttpError(503, 'SERVER_BUSY', 'Maximum concurrent request limit reached.')
         );
         const serialized = serializeResponse(errBody, { status: 503 });
-        res.writeHead(serialized.status, serialized.headers);
+        res.writeHead(serialized.status, { ...serialized.headers, ...config.responseHeaders });
         res.end(serialized.body);
         return;
       }
@@ -134,7 +136,7 @@ export async function startHttpListener(config: HttpListenerConfig = {}): Promis
           });
         });
 
-        res.writeHead(serialized.status, serialized.headers);
+        res.writeHead(serialized.status, { ...serialized.headers, ...config.responseHeaders });
         res.end(serialized.body);
       } catch (error) {
         const normalized = normalizeError(error, correlationId);
@@ -148,7 +150,7 @@ export async function startHttpListener(config: HttpListenerConfig = {}): Promis
           status: normalized.status,
           correlationId: normalized.correlationId,
         });
-        res.writeHead(serializedErr.status, serializedErr.headers);
+        res.writeHead(serializedErr.status, { ...serializedErr.headers, ...config.responseHeaders });
         res.end(serializedErr.body);
       } finally {
         concurrency.release();
