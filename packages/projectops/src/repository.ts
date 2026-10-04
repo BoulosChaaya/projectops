@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { projectHistorySummary, type ProjectHistoryContext } from './history.ts';
 import {
   ProjectOpsOperationError,
   requireFinanceParentState,
@@ -79,6 +81,7 @@ import {
   type NewProjectTaskInput,
   type NewProjectWorkLogInput,
   type ProjectActivity,
+  type ProjectActivityEventType,
   type ProjectChangeRequest,
   type ProjectDeliverable,
   type ProjectDocument,
@@ -184,9 +187,65 @@ export interface ProjectOpsSqlExecutor {
 
 export class ProjectOpsRepository {
   private readonly sql: ProjectOpsSqlExecutor;
+  private readonly history?: ProjectHistoryContext;
 
-  constructor(sql: ProjectOpsSqlExecutor) {
+  constructor(sql: ProjectOpsSqlExecutor, history?: ProjectHistoryContext) {
     this.sql = sql;
+    this.history = history;
+  }
+
+  /** A fresh repository avoids shared mutable operator identity between requests. */
+  public withHistory(context: ProjectHistoryContext): ProjectOpsRepository {
+    // The legacy activity model permits NULL actors; new automatic records must not inherit that option.
+    if (typeof context.actor !== 'string' || !context.actor.trim() || context.actor.length > 120) {
+      throw new Error('Automatic history requires a valid authenticated operator identity.');
+    }
+    return new ProjectOpsRepository(this.sql, Object.freeze({ ...context }));
+  }
+
+  private async recordCommand<T extends { readonly id: string; readonly status?: string }>(
+    eventType: ProjectActivityEventType,
+    projectRequestId: string,
+    command: (repository: ProjectOpsRepository) => Promise<T>
+  ): Promise<T> {
+    if (!this.sql.transaction) throw new Error('Automatic history requires a transaction-scoped ProjectOps executor.');
+    const context = this.history!;
+    return await this.sql.transaction(async sql => {
+      const scoped = new ProjectOpsRepository(sql);
+      // Preserve the exact lifecycle source state, including start versus resume, under its lock.
+      const previous = eventType === 'status_changed'
+        ? (await sql.query<ProjectRequest>(lockProjectRequestSql(projectRequestId)))[0]
+        : undefined;
+      const result = await command(scoped);
+      // Sample audit time after the winning guarded write, never from business dates or payload actors.
+      const now = context.clock();
+      const parent = await scoped.requireProjectRequest(projectRequestId);
+      const activity = createProjectActivity(parent, {
+        id: context.activityId?.() ?? randomUUID(), projectRequestId, eventType,
+        summary: projectHistorySummary(eventType, result, previous?.status), actor: context.actor, happenedAtIso: now,
+      });
+      // Internal append intentionally permits the winning cancellation/archive's terminal parent.
+      const rows = await sql.query<ProjectActivity>(insertProjectActivitySql(activity));
+      if (!rows[0]) throw new Error('Required automatic history insert did not return a row.');
+      return result;
+    });
+  }
+
+  private async annotateProject(projectRequestId: string, summary: string): Promise<ProjectActivity> {
+    if (!this.sql.transaction) throw new Error('Operator annotations require a transaction-scoped ProjectOps executor.');
+    const context = this.history!;
+    return await this.sql.transaction(async sql => {
+      const parent = (await sql.query<ProjectRequest>(lockProjectRequestSql(projectRequestId)))[0];
+      if (!parent) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_REQUEST_NOT_FOUND', 'Project not found.');
+      if (['cancelled', 'archived'].includes(parent.status)) throw new ProjectOpsOperationError('conflict', 'PROJECTOPS_PROJECT_READ_ONLY', 'Cancelled and archived projects are read-only.');
+      const activity = createProjectActivity(parent, {
+        id: context.activityId?.() ?? randomUUID(), projectRequestId, eventType: 'operator_annotation',
+        summary, actor: context.actor, happenedAtIso: context.clock(),
+      });
+      const rows = await sql.query<ProjectActivity>(insertProjectActivitySql(activity));
+      if (!rows[0]) throw new Error('Operator annotation insert did not return a row.');
+      return rows[0];
+    });
   }
 
   public async createClient(input: NewClientInput): Promise<ProjectOpsClient> {
@@ -209,6 +268,7 @@ export class ProjectOpsRepository {
   }
 
   public async createProjectRequest(input: NewProjectRequestInput): Promise<ProjectRequest> {
+    if (this.history) return await this.recordCommand('request_created', input.id, scoped => scoped.createProjectRequest(input));
     const request = createProjectRequest(input);
     const client = await this.getClient(request.clientId);
     if (!client) {
@@ -279,6 +339,7 @@ export class ProjectOpsRepository {
   }
 
   public async editProject(id: string, input: EditProjectInput, nowIso: string): Promise<ProjectRequest> {
+    if (this.history) return await this.recordCommand('request_edited', id, scoped => scoped.editProject(id, input, nowIso));
     const request = await this.getProjectRequest(id);
     if (!request) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_REQUEST_NOT_FOUND', 'Project not found.');
     const prepared = editProject(request, input, nowIso);
@@ -291,6 +352,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectMilestoneInput
   ): Promise<ProjectMilestone> {
+    if (this.history) return await this.recordCommand('milestone_created', projectRequestId, scoped => scoped.createProjectMilestone(projectRequestId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const milestone = createProjectMilestone(request, input);
     const existing = await this.getProjectMilestone(projectRequestId, milestone.id);
@@ -336,6 +398,7 @@ export class ProjectOpsRepository {
     milestoneId: string,
     input: string | CompleteProjectMilestoneInput
   ): Promise<ProjectMilestone> {
+    if (this.history) return await this.recordCommand('milestone_completed', projectRequestId, scoped => scoped.completeProjectMilestone(projectRequestId, milestoneId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectMilestone(projectRequestId, milestoneId);
     const normalized = typeof input === 'string' ? { completedAtIso: input } : input;
@@ -352,6 +415,7 @@ export class ProjectOpsRepository {
     input: EditProjectMilestoneInput,
     nowIso: string
   ): Promise<ProjectMilestone> {
+    if (this.history) return await this.recordCommand('milestone_edited', projectRequestId, scoped => scoped.editProjectMilestone(projectRequestId, milestoneId, input, nowIso));
     const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectMilestone(projectRequestId, milestoneId);
     const revision = this.planningRevision(current.revision, input.expectedRevision, 'milestone');
@@ -365,6 +429,7 @@ export class ProjectOpsRepository {
     milestoneId: string,
     input: ReopenProjectMilestoneInput
   ): Promise<ProjectMilestone> {
+    if (this.history) return await this.recordCommand('milestone_reopened', projectRequestId, scoped => scoped.reopenProjectMilestone(projectRequestId, milestoneId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectMilestone(projectRequestId, milestoneId);
     const revision = this.planningRevision(current.revision, input.expectedRevision, 'milestone');
@@ -377,6 +442,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectDeliverableInput
   ): Promise<ProjectDeliverable> {
+    if (this.history) return await this.recordCommand('deliverable_submitted', projectRequestId, scoped => scoped.createProjectDeliverable(projectRequestId, input));
     validateDeliveryIdentifier(projectRequestId);
     const request = await this.requireProjectRequest(projectRequestId);
     const deliverable = createProjectDeliverable(request, input);
@@ -420,6 +486,7 @@ export class ProjectOpsRepository {
     deliverableId: string,
     acceptedAtIso: string
   ): Promise<ProjectDeliverable> {
+    if (this.history) return await this.recordCommand('deliverable_accepted', projectRequestId, scoped => scoped.acceptProjectDeliverable(projectRequestId, deliverableId, acceptedAtIso));
     validateDeliveryIdentifier(projectRequestId);
     validateDeliveryIdentifier(deliverableId);
     const request = await this.requireProjectRequest(projectRequestId);
@@ -434,6 +501,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectInvoiceInput
   ): Promise<ProjectInvoice> {
+    if (this.history) return await this.recordCommand('invoice_issued', projectRequestId, scoped => scoped.createProjectInvoice(projectRequestId, input));
     validateFinanceIdentifier(projectRequestId);
     if (!this.sql.transaction) throw new Error('Invoice issuance requires a transaction-scoped ProjectOps executor.');
     return await this.sql.transaction(async sql => {
@@ -474,6 +542,7 @@ export class ProjectOpsRepository {
     invoiceId: string,
     paidAtIso: string
   ): Promise<ProjectInvoice> {
+    if (this.history) return await this.recordCommand('invoice_paid', projectRequestId, scoped => scoped.markProjectInvoicePaid(projectRequestId, invoiceId, paidAtIso));
     validateFinanceIdentifier(projectRequestId); validateFinanceIdentifier(invoiceId);
     const parent = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectInvoice(projectRequestId, invoiceId);
@@ -556,6 +625,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectIssueInput
   ): Promise<ProjectIssue> {
+    if (this.history) return await this.recordCommand('issue_created', projectRequestId, scoped => scoped.createProjectIssue(projectRequestId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const issue = createProjectIssue(request, input);
     const existing = await this.getProjectIssue(projectRequestId, issue.id);
@@ -591,6 +661,7 @@ export class ProjectOpsRepository {
     issueId: string,
     input: ResolveProjectIssueInput
   ): Promise<ProjectIssue> {
+    if (this.history) return await this.recordCommand('issue_resolved', projectRequestId, scoped => scoped.resolveProjectIssue(projectRequestId, issueId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     requireExecutionActionParentState(request);
     const current = await this.requireProjectIssue(projectRequestId, issueId);
@@ -603,6 +674,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectRiskInput
   ): Promise<ProjectRisk> {
+    if (this.history) return await this.recordCommand('risk_created', projectRequestId, scoped => scoped.createProjectRisk(projectRequestId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const risk = createProjectRisk(request, input);
     const existing = await this.getProjectRisk(projectRequestId, risk.id);
@@ -638,6 +710,7 @@ export class ProjectOpsRepository {
     riskId: string,
     input: MitigateProjectRiskInput
   ): Promise<ProjectRisk> {
+    if (this.history) return await this.recordCommand('risk_mitigated', projectRequestId, scoped => scoped.mitigateProjectRisk(projectRequestId, riskId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     requireExecutionActionParentState(request);
     const current = await this.requireProjectRisk(projectRequestId, riskId);
@@ -650,6 +723,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectFeedbackInput
   ): Promise<ProjectFeedback> {
+    if (this.history) return await this.recordCommand('feedback_added', projectRequestId, scoped => scoped.createProjectFeedback(projectRequestId, input));
     validateDeliveryIdentifier(projectRequestId);
     const request = await this.requireProjectRequest(projectRequestId);
     const feedback = createProjectFeedback(request, input);
@@ -693,6 +767,7 @@ export class ProjectOpsRepository {
     feedbackId: string,
     input: AddressProjectFeedbackInput
   ): Promise<ProjectFeedback> {
+    if (this.history) return await this.recordCommand('feedback_addressed', projectRequestId, scoped => scoped.addressProjectFeedback(projectRequestId, feedbackId, input));
     validateDeliveryIdentifier(projectRequestId);
     validateDeliveryIdentifier(feedbackId);
     const request = await this.requireProjectRequest(projectRequestId);
@@ -707,6 +782,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectDocumentInput
   ): Promise<ProjectDocument> {
+    if (this.history) return await this.recordCommand('document_added', projectRequestId, scoped => scoped.createProjectDocument(projectRequestId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const document = createProjectDocument(request, input);
     if (document.deliverableId) {
@@ -748,6 +824,7 @@ export class ProjectOpsRepository {
     documentId: string,
     input: ArchiveProjectDocumentInput
   ): Promise<ProjectDocument> {
+    if (this.history) return await this.recordCommand('document_archived', projectRequestId, scoped => scoped.archiveProjectDocument(projectRequestId, documentId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     requireExecutionActionParentState(request);
     const current = await this.requireProjectDocument(projectRequestId, documentId);
@@ -760,6 +837,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectNoteInput
   ): Promise<ProjectNote> {
+    if (this.history) return await this.recordCommand('note_added', projectRequestId, scoped => scoped.createProjectNote(projectRequestId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const note = createProjectNote(request, input);
     const existing = await this.getProjectNote(projectRequestId, note.id);
@@ -795,6 +873,7 @@ export class ProjectOpsRepository {
     noteId: string,
     input: ArchiveProjectNoteInput
   ): Promise<ProjectNote> {
+    if (this.history) return await this.recordCommand('note_archived', projectRequestId, scoped => scoped.archiveProjectNote(projectRequestId, noteId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     requireExecutionActionParentState(request);
     const current = await this.requireProjectNote(projectRequestId, noteId);
@@ -807,6 +886,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectTaskInput
   ): Promise<ProjectTask> {
+    if (this.history) return await this.recordCommand('task_created', projectRequestId, scoped => scoped.createProjectTask(projectRequestId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const task = createProjectTask(request, input);
     const existing = await this.getProjectTask(projectRequestId, task.id);
@@ -850,6 +930,7 @@ export class ProjectOpsRepository {
     taskId: string,
     input: CompleteProjectTaskInput
   ): Promise<ProjectTask> {
+    if (this.history) return await this.recordCommand('task_completed', projectRequestId, scoped => scoped.completeProjectTask(projectRequestId, taskId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectTask(projectRequestId, taskId);
     const revision = this.planningRevision(current.revision, input.expectedRevision, 'task');
@@ -865,6 +946,7 @@ export class ProjectOpsRepository {
     input: EditProjectTaskInput,
     nowIso: string
   ): Promise<ProjectTask> {
+    if (this.history) return await this.recordCommand('task_edited', projectRequestId, scoped => scoped.editProjectTask(projectRequestId, taskId, input, nowIso));
     const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectTask(projectRequestId, taskId);
     const revision = this.planningRevision(current.revision, input.expectedRevision, 'task');
@@ -878,6 +960,7 @@ export class ProjectOpsRepository {
     taskId: string,
     input: ReopenProjectTaskInput
   ): Promise<ProjectTask> {
+    if (this.history) return await this.recordCommand('task_reopened', projectRequestId, scoped => scoped.reopenProjectTask(projectRequestId, taskId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectTask(projectRequestId, taskId);
     const revision = this.planningRevision(current.revision, input.expectedRevision, 'task');
@@ -890,6 +973,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectWorkLogInput
   ): Promise<ProjectWorkLog> {
+    if (this.history) return await this.recordCommand('work_log_added', projectRequestId, scoped => scoped.createProjectWorkLog(projectRequestId, input));
     const request = await this.requireProjectRequest(projectRequestId);
     if (input.taskId) {
       await this.requireProjectTask(projectRequestId, input.taskId);
@@ -928,6 +1012,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectExpenseInput
   ): Promise<ProjectExpense> {
+    if (this.history) return await this.recordCommand('expense_submitted', projectRequestId, scoped => scoped.createProjectExpense(projectRequestId, input));
     validateFinanceIdentifier(projectRequestId);
     const request = await this.requireProjectRequest(projectRequestId);
     const expense = createProjectExpense(request, input);
@@ -954,6 +1039,7 @@ export class ProjectOpsRepository {
     expenseId: string,
     input: DecideProjectExpenseInput
   ): Promise<ProjectExpense> {
+    if (this.history) return await this.recordCommand('expense_approved', projectRequestId, scoped => scoped.approveProjectExpense(projectRequestId, expenseId, input));
     validateFinanceIdentifier(projectRequestId); validateFinanceIdentifier(expenseId);
     const parent = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectExpense(projectRequestId, expenseId);
@@ -967,6 +1053,7 @@ export class ProjectOpsRepository {
     expenseId: string,
     input: DecideProjectExpenseInput
   ): Promise<ProjectExpense> {
+    if (this.history) return await this.recordCommand('expense_rejected', projectRequestId, scoped => scoped.rejectProjectExpense(projectRequestId, expenseId, input));
     validateFinanceIdentifier(projectRequestId); validateFinanceIdentifier(expenseId);
     const parent = await this.requireProjectRequest(projectRequestId);
     const current = await this.requireProjectExpense(projectRequestId, expenseId);
@@ -979,6 +1066,7 @@ export class ProjectOpsRepository {
     projectRequestId: string,
     input: NewProjectActivityInput
   ): Promise<ProjectActivity> {
+    if (this.history) return await this.annotateProject(projectRequestId, input.summary);
     const request = await this.requireProjectRequest(projectRequestId);
     const activity = createProjectActivity(request, input);
     const existing = await this.getProjectActivity(projectRequestId, activity.id);
@@ -1019,6 +1107,7 @@ export class ProjectOpsRepository {
     id: string,
     input: EstimateProjectRequestInput
   ): Promise<ProjectRequest> {
+    if (this.history) return await this.recordCommand('request_estimated', id, scoped => scoped.estimateProjectRequest(id, input));
     const current = await this.requireProjectRequest(id);
     const revision = this.projectRevision(current, input.expectedRevision);
     const estimated = estimateProjectRequest(current, input);
@@ -1030,6 +1119,7 @@ export class ProjectOpsRepository {
     id: string,
     input: ApproveProjectRequestInput
   ): Promise<ProjectRequest> {
+    if (this.history) return await this.recordCommand('request_approved', id, scoped => scoped.approveProjectRequest(id, input));
     const current = await this.requireProjectRequest(id);
     const revision = this.projectRevision(current, input.expectedRevision);
     const approved = approveProjectRequest(current, input);
@@ -1043,6 +1133,7 @@ export class ProjectOpsRepository {
     nowIso: string,
     expectedRevision?: number
   ): Promise<ProjectRequest> {
+    if (this.history) return await this.recordCommand('status_changed', id, scoped => scoped.transitionProjectRequest(id, nextStatus, nowIso, expectedRevision));
     if (nextStatus === 'delivered' || nextStatus === 'archived') {
       if (!this.sql.transaction) throw new Error('Delivery and archival require a transaction-scoped ProjectOps executor.');
       return await this.sql.transaction(async sql => {

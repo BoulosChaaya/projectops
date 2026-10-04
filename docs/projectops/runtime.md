@@ -59,7 +59,7 @@ The workspace displays overview/estimate/approval details and all existing colle
 
 PUT /projectops/project-requests/:id updates title, brief, budgetRange, priority and deadlineIso using expectedRevision. Optional budget/deadline fields can be cleared. Identity, client, creation date, workflow state, estimate and approval metadata are preserved. Cancelled and archived projects are read-only. Migration 0004 initializes revisions; project edits and estimate/approval/control writes increment them, so a stale editor also detects workflow changes. Parent estimate, approval and status writes check the expected revision and current state atomically.
 
-Deadline inputs explicitly use UTC; displayed dates use the operator's saved IANA timezone. API deadlines remain ISO instants and cannot precede project creation. Forms reject invalid input and offer a deliberate reload on 409 conflicts. Planning, execution and delivery controls are described below. Finance commands and automatic history remain their later approved slices; this workspace connects their current records.
+Deadline inputs explicitly use UTC; displayed dates use the operator's saved IANA timezone. API deadlines remain ISO instants and cannot precede project creation. Forms reject invalid input and offer a deliberate reload on 409 conflicts. Planning, execution and delivery controls are described below. Finance commands and automatic history are completed in Slices 10 and 11 as described below.
 
 ## Estimates and project controls
 
@@ -69,7 +69,7 @@ Available actions follow the project state: approved → start; in progress → 
 
 POST /projectops/project-requests/:id/control accepts action (start, hold, resume, cancel, deliver, archive) and expectedRevision. Estimate and approval commands accept expectedRevision; browser requests always send it. The older status/estimate/approval API payloads may omit a revision for compatibility, but the repository still checks the revision/state read by that command when writing. Stale commands return 409 and the browser offers Reload project. Generic status writes cannot create estimated/approved states; use the explicit commands that record their metadata. Starting, holding, resuming and delivering require recorded estimate/approval metadata.
 
-Migration 0005 adds on_hold/cancelled to the status constraint without rewriting existing records. Legacy estimated records missing an estimate can be estimated again; legacy approved records missing required metadata cannot start and can be cancelled/archived. Child routes reject ordinary writes to cancelled/archived projects. Planning, execution and delivery commands now enforce their atomic parent guards as described below. Finance child guards and mixed-currency totals remain Slice 10, and automatic activity records remain Slice 11.
+Migration 0005 adds on_hold/cancelled to the status constraint without rewriting existing records. Legacy estimated records missing an estimate can be estimated again; legacy approved records missing required metadata cannot start and can be cancelled/archived. Child routes reject ordinary writes to cancelled/archived projects. Planning, execution and delivery commands now enforce their atomic parent guards as described below. Finance child guards/currency-separated totals and automatic history are described in the completed Slice 10 and 11 sections below.
 
 ## Planning
 
@@ -196,7 +196,7 @@ Finances do not participate in Slice 9 readiness: delivery and delivered archiva
 
 ### Slice 10 verification and review checkpoint
 
-Implementation: `9d93bb1ebdf061304434068caff62314569b7c01` on `slice-10-finances`, from authoritative merged main `4f17a71f2f844e72a6c3cf87bd5c82e87a2442b8`. Documentation is committed next on this branch. Completion gate passed; the branch awaits independent PR review and is not merged.
+Implementation: `9d93bb1ebdf061304434068caff62314569b7c01` on `slice-10-finances`, from authoritative merged main `4f17a71f2f844e72a6c3cf87bd5c82e87a2442b8`. Documentation commit: `d438667199980a26e21be30cdddcbfdb6ca41dac`. Completion gate passed; PR #7 was independently reviewed and merged at `7c341250b6b8ef74b836aeac0dbfac6b88307f99`.
 
 | Command | Pass | Fail | Skip | Hygiene |
 | --- | --- | --- | --- | --- |
@@ -212,4 +212,59 @@ Controlled database races hold parent locks or synchronize child preflight reads
 
 Chromium proves invoice creation with/without accepted deliverables, missing/unaccepted relationship errors, payment, expense defaults/fields/business date/receipt/decisions, metadata, persistence/reload, validation and stale-tab conflicts, multiple actual currencies differing from the project estimate in both workspace and dashboard, no fake combined total, all eight state controls, retained read-only records, safe text/link rendering, independent retry/unavailable totals and zero page errors. Delivery/archival succeeds with unpaid invoices and submitted expenses when Slice 9 readiness passes.
 
-Slice 11 is next after Slice 10 review/merge approval and has not begun. No invoice/expense editing, deletion, reversal, reopening, partial payments, payment ledger/providers, tax/discounts/refunds, FX, new reimbursement workflow, receipt uploads, generated invoices, finance completion prerequisites or automatic history/notifications were added. No deployment/production-readiness claim is made.
+Slice 10 is merged; Slice 11 completion is recorded below. No invoice/expense editing, deletion, reversal, reopening, partial payments, payment ledger/providers, tax/discounts/refunds, FX, new reimbursement workflow, receipt uploads, generated invoices, finance completion prerequisites or automatic history/notifications were added. No deployment/production-readiness claim is made.
+
+
+## Automatic history (Slice 11)
+
+Slice 11 implements “Successful actions record events with actor and timestamp; project timeline displays them.” Implementation commits `e80e20c6fc57697162c96761a409805c2ddd4f6e` and identity guard `51f69307da07bc28fc8f30ec64482b58902ebccd` are on `slice-11-automatic-history`, based on independently reviewed Slice 10 merge `7c341250b6b8ef74b836aeac0dbfac6b88307f99` (PR #7). This documentation is the following commit. The completion gate passed locally; Slice 11 remains subject to independent PR review/merge. Slice 12 is next and has not begun.
+
+### Coverage and event contract
+
+The protected completed workflows automatically record exactly one activity for project creation/editing/estimation/approval, start/hold/resume/cancel/deliver/archive, milestone/task creation/editing/rescheduling/completion/reopening, work-log creation, note creation/archival, issue creation/resolution, risk creation/mitigation, document creation/archival, deliverable submission/acceptance, feedback creation/addressing, invoice issuance/payment and expense submission/approval/rejection. No second generic status event is added to estimates or approvals. Rescheduling uses the corresponding edit event.
+
+The original eleven types remain valid. New types are request_edited, milestone_edited, milestone_reopened, task_created, task_edited, task_completed, task_reopened, work_log_added, note_archived, issue_created, issue_resolved, risk_created, risk_mitigated, document_added, document_archived, feedback_added, feedback_addressed, expense_submitted, expense_approved, expense_rejected and operator_annotation. Lifecycle actions use status_changed with the locked source and target states in the summary, so start and resume remain distinguishable. Summaries identify the bounded resource ID/action rather than copying raw user bodies.
+
+Change-request commands are explicitly excluded; their foundational API behavior and concurrency are unchanged. Reads, client management, access/settings and failed/denied/stale/duplicate project commands are not automatic-history triggers. Old activities, including nullable actors and caller-authored legacy metadata, are preserved as stored. No synthetic backfill is performed.
+
+### Migration, identity and time
+
+Migration 0007_automatic_history replaces the activity event_type CHECK with the expanded enumeration. It preserves existing rows/types and adds no columns, sequence, revisions, provenance ledger or resource foreign keys. The deployed 0001 artifact is unchanged. The durable loader now applies seven migrations; clean and pre-0007 upgrade tests verify preservation and invalid-type rejection.
+
+The protected API creates a fresh repository with trusted request-local operator login and clock; identity is never stored on a mutable shared service. Automatic activities use server-generated unique IDs, actual projectRequestId, the command's event type, deterministic summary and operator actor. happenedAtIso is sampled from the server after the winning mutation; createdAtIso uses that audit timestamp. Missing/blank/oversized trusted operator identities fail closed; new automatic entries cannot inherit legacy NULL actors. Business attribution (feedback source, assignee, vendor, approvedBy-like metadata) is not the history actor. Business dates such as expense incurredAtIso and invoice dueAtIso do not become audit timestamps. Existing finance audit timestamps/operators remain server-owned.
+
+### Transaction and concurrency
+
+A reusable repository composition runs the existing guarded command and required activity insert inside one transaction. PostgreSQL leases one connection and uses READ COMMITTED; scoped executor transaction calls join the existing scope without another BEGIN or a pool query. Errors propagate to the outer rollback. Memory composition joins its serialized transaction and restores business/activity maps on failure.
+
+Lifecycle commands capture their source state under the parent lock. Existing invoice/delivery/archival transactions reuse the scope and retain their fresh relationship/readiness reads after parent locking. All existing child guards/revisions remain the business concurrency authority, and parent locks are retained until the activity succeeds. History does not increment parent/child revisions. Cancellation/archive can append their required internal activity after the successful terminal state change; this does not authorize later public writes.
+
+Required history failure rolls back project creation, project/child edits, state changes and revisions. No committed business mutation can silently omit its required activity. Validation/missing/state/stale/duplicate/denied commands create no success history. Retrying a committed command retains its established revision/identity/status semantics; no general network idempotency mechanism is introduced. SQL ordering remains happened_at DESC, created_at DESC, id ASC; tied timestamps have stable ID ordering, not a strict commit sequence.
+
+Controlled tests synchronize competing reads or pause a real winning transaction immediately before history insertion while it still owns its parent lock. Project/planning/execution/delivery/feedback/finance races produce one corresponding winner/event. Concurrent independent contexts preserve different actors. Duplicate resource identities/invoice numbers and forced annotation-ID collisions insert once. Lifecycle-first blocks child mutation; child-first commits business/history before lifecycle business/history. Delivery and delivered archival observe preceding submission/acceptance/open-feedback/addressing outcomes, permit post-delivery feedback and serialize archival against it. Cancellation-versus-delivery keeps one revision winner. Lock observations are scoped to each new history fixture's application name.
+
+### Annotation API and timeline
+
+Existing GET /projectops/project-requests/:id/activities remains protected, no-store and readable in every project state. Existing protected POST now accepts only `{ "summary": "..." }`: required bounded text up to 500 characters. Server supplies ID, operator_annotation, authenticated actor and both audit timestamps. Caller ID/event/actor/time fields are rejected with 400; no new route is added. A transaction locks and validates the parent before insertion: all nonterminal states are allowed, cancelled/archived yield 409, missing parent yields 404. Duplicate identity errors map consistently in PostgreSQL/memory. Unprotected injected contract harnesses retain their old activity input contract; they are not the durable production security boundary. Protected workflow execution fails closed if transactional history support is absent.
+
+project-history.ts owns workspace History: labeled events, summary, stored actor, operator-timezone timestamp, safe text, loading/empty/unavailable states and independent Retry history. Nonterminal projects can add summary-only annotations; terminal projects retain read-only records. Every successful workspace mutation refreshes history independently, with a request generation guard against old responses. If history GET fails after business success, business success remains intact and only history becomes unavailable; retry never repeats the command. Existing latest-activity dashboard fields reflect automatic records without new dashboard features.
+
+History is not a completion prerequisite. Slice 9 still requires at least one deliverable, all accepted, and no open feedback for delivery/delivered archival; cancelled archival bypasses readiness. Unpaid invoices/submitted expenses remain irrelevant to readiness. Slice 10 actual-currency decimal-cent string totals and BigInt precision, active dashboard scope and audit/business date ownership are unchanged.
+
+### Verification and limitations
+
+| Command | Pass | Fail | Skip | Hygiene |
+| --- | --- | --- | --- | --- |
+| `pnpm verify` | 85/85 native | 0 | 0 | 587 files |
+| `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:postgres` | 32/32 real PostgreSQL | 0 | 0 | — |
+| `PROJECTOPS_TEST_DATABASE_URL=<configured test database> pnpm test:browser` | 10/10 Chromium | 0 | 0 | — |
+
+Executed in the established cloud setup with Node 24.19.0, pnpm 11.19.0 and PostgreSQL 16.15. Commands used `CI=true XDG_DATA_HOME=/tmp/projectops-xdg PNPM_HOME=/tmp/projectops-pnpm`; Chromium also used `PLAYWRIGHT_BROWSERS_PATH=/tmp/projectops-playwright`. A configured local dedicated test database was used; all fixtures isolate and remove their schemas. No dependency or lockfile change was needed.
+
+Dedicated tests/project-history.test.ts, tests/history-fixture.ts and integration/history-postgres.test.ts / history-browser.test.ts verify every trigger, failed retries, trusted identity/time, protected annotation forgery/errors, preservation of business timestamps, revisions, persistence/restart, legacy migration/ordering, latest activity, terminal reads and rollback before every covered successful command. Real PostgreSQL history-insert fault injection proves all business/history rollback paths. Native/API coverage retains protected route access/Origin/JSON/CSRF/no-store and compatibility status/control behavior. Previous Slice 1–10 suites remain enabled.
+
+Chromium exercises completed project controls, Planning, Execution, Delivery/Feedback and Finances without manually seeded workflow events; verifies annotations, safe text, actor/timezone, stable newest-first ordering, reload persistence, stale terminal conflicts without false history, independent history GET failure/retry without business resubmission, old response protection, terminal visibility and zero unexpected page errors. The complete browser suite passed.
+
+No final failure, skip or environment blocker remains. Initial PostgreSQL failures were migration-count/version assertions still expecting six migrations; these were updated to include 0007 and the full suite rerun. Earlier focused test corrections addressed legacy NULL actor expectations, real runtime clock assertions and multiline SELECT matching in the controlled barrier. All final suites passed after lifecycle source-state summaries were strengthened.
+
+Bounded limitations: no automatic change-request history or concurrency redesign, history editing/deletion/backfill, strict sequence ledger, cryptographic audit ledger, general request idempotency, pagination, notifications/queues/integrations, new dashboard features, deferred finance features, export or deployment/backup/final-production acceptance. Single-operator access remains unchanged; distinct trusted contexts test attribution isolation without adding team accounts. Slice 12 has not begun.

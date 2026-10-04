@@ -6,3 +6,4 @@ export * from './persistence.ts';
 export * from './repository.ts';
 export * from './sql.ts';
 export * from './finances.ts';
+export * from './history.ts';

@@ -47,7 +47,7 @@ test('Project browser journey creates, navigates every section, edits safely, re
         ['invoices', { id: 'inv', invoiceNumber: 'WS-001', amountCents: 2000, currency: 'EUR' }],
         ['expenses', { id: 'e', description: 'Workspace expense', amountCents: 1000, currency: 'USD' }],
         ['change-requests', { id: 'cr', title: 'Workspace change', description: 'Change details', requestedBy: 'Operator' }],
-        ['activities', { id: 'a', eventType: 'request_created', summary: 'Workspace history', actor: 'Operator' }],
+        ['activities', { summary: 'Workspace history' }],
       ] as const;
       for (const [path, data] of fixtures) await send(root + '/' + path, data);
       let failed = false;

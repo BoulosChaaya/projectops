@@ -30,7 +30,28 @@ export type ProjectActivityEventType =
   | 'deliverable_accepted'
   | 'invoice_issued'
   | 'invoice_paid'
-  | 'note_added';
+  | 'note_added'
+  | 'request_edited'
+  | 'milestone_edited'
+  | 'milestone_reopened'
+  | 'task_created'
+  | 'task_edited'
+  | 'task_completed'
+  | 'task_reopened'
+  | 'work_log_added'
+  | 'note_archived'
+  | 'issue_created'
+  | 'issue_resolved'
+  | 'risk_created'
+  | 'risk_mitigated'
+  | 'document_added'
+  | 'document_archived'
+  | 'feedback_added'
+  | 'feedback_addressed'
+  | 'expense_submitted'
+  | 'expense_approved'
+  | 'expense_rejected'
+  | 'operator_annotation';
 export type ProjectRequestStatus =
   | 'new'
   | 'estimated'
@@ -702,6 +723,27 @@ export const projectActivityEventTypes = Object.freeze([
   'invoice_issued',
   'invoice_paid',
   'note_added',
+  'request_edited',
+  'milestone_edited',
+  'milestone_reopened',
+  'task_created',
+  'task_edited',
+  'task_completed',
+  'task_reopened',
+  'work_log_added',
+  'note_archived',
+  'issue_created',
+  'issue_resolved',
+  'risk_created',
+  'risk_mitigated',
+  'document_added',
+  'document_archived',
+  'feedback_added',
+  'feedback_addressed',
+  'expense_submitted',
+  'expense_approved',
+  'expense_rejected',
+  'operator_annotation',
 ] satisfies readonly ProjectActivityEventType[]);
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;

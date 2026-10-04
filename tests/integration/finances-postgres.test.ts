@@ -41,7 +41,7 @@ test('PostgreSQL finance API persists relationships, business dates and protecte
    await ok(root+'/expenses',expense('r','submitted'));await ok(root+'/control',{action:'start',expectedRevision:3});await ok(root+'/status',{status:'delivered',expectedRevision:4});await ok(root+'/control',{action:'archive',expectedRevision:5});
    assert.equal((await read(root+'/invoices')).length,2);assert.equal((await read(root+'/expenses')).length,3);assert.equal((await send(root+'/invoices/missing/pay',{})).status,404);assert.equal((await send(root+'/expenses/missing/reject',{})).status,404);
    assert.equal((await read('dashboard')).financeTotalsByCurrency.EUR,undefined);
-   assert.equal((await pool.query('SELECT count(*)::int AS n FROM projectops_schema_migrations')).rows[0].n,6);
+   assert.equal((await pool.query('SELECT count(*)::int AS n FROM projectops_schema_migrations')).rows[0].n,7);
   }finally{await app.close();}
  });
 });
