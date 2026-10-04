@@ -1,11 +1,11 @@
 # Running ProjectOps with PostgreSQL
 
-Requires Node 22.6+ (Node 22 recommended), pnpm and PostgreSQL 16+. The runtime protects ProjectOps pages and APIs with operator sessions. It is not yet deployed.
+Requires Node 22.6+, pinned pnpm 9.12.0 and PostgreSQL 16+. The approved Render release uses Node 24.19.0. The runtime protects ProjectOps pages and APIs with operator sessions. It is not yet deployed.
 
 ```bash
 pnpm install --frozen-lockfile
-export DATABASE_URL='postgres://user:password@127.0.0.1:5432/projectops'
-pnpm operator:create < operator.json
+# Supply DATABASE_URL through private environment configuration.
+pnpm operator:create < "$PROJECTOPS_OPERATOR_INPUT"
 pnpm start
 ```
 
@@ -17,12 +17,12 @@ Startup applies the frozen migration artifacts in a transaction and records thei
 
 ```bash
 pnpm verify
-export PROJECTOPS_TEST_DATABASE_URL='postgres://user:password@127.0.0.1:5432/projectops_test'
+# Supply PROJECTOPS_TEST_DATABASE_URL for a dedicated test database privately.
 pnpm test:postgres
 pnpm test:browser
 ```
 
-The PostgreSQL acceptance command fails if its URL is missing. It creates unique test schemas and removes only those schemas afterward. Use a dedicated test database and a role allowed to create schemas. It checks API writes and dashboard reads across application restart, simultaneous migration startup, a new migration version, checksum drift, transactional rollback and unmanaged-schema refusal. GitHub Actions runs it against PostgreSQL 16.
+The PostgreSQL acceptance command fails if its URL is missing. It creates unique test schemas and removes only those schemas afterward. Use a dedicated test database and a role allowed to create schemas. Slice 14 recovery/release/final fixtures additionally create/drop only uniquely named whole disposable databases; their test role needs CREATEDB. Never point acceptance at a production database. It checks API writes and dashboard reads across application restart, simultaneous migration startup, a new migration version, checksum drift, transactional rollback and unmanaged-schema refusal. GitHub Actions runs it against PostgreSQL 16.
 
 ## Operator access
 
@@ -359,7 +359,7 @@ The isolated project-handoff.ts workspace controls keep download progress/unavai
 
 ### Verification, checkpoint and limitations
 
-Implementation commit `7f78b70f9ce54e6e621c66745f331288bb58372b` on slice-13-export-handoff from authoritative merged PR #9 checkpoint `7fa7f4b3caafbd55c63952f1328721d4ff65ed91`. This documentation is the following commit. Slice 13 passed its completion gate and awaits independent PR review/merge; Slice 14 is next and has not begun.
+Implementation commit `7f78b70f9ce54e6e621c66745f331288bb58372b` on slice-13-export-handoff from authoritative merged PR #9 checkpoint `7fa7f4b3caafbd55c63952f1328721d4ff65ed91`. This documentation is the following commit. Slice 13 passed its completion gate; PR #10 independently reviewed and merged at `3b8e33ae536fd68c6e0abf58c9603ec2906b2ab8`. Slice 14 pre-deployment evidence is recorded below.
 
 Exact executed cloud commands (dedicated non-secret local test URL; no production credentials):
 
@@ -379,4 +379,118 @@ Node 24.19.0, available pnpm 11.19.0, PostgreSQL 17.11 and exact Chromium 153.0.
 
 Five dedicated native tests cover exact all-model inclusion/strict disclosure, all states/archived clients, terminal/empty source, nulls/relationships/legacy actors, offset-equivalent/tied ordering, Unicode/quote/comma/newline/markup JSON round-trip, safe HTML/URLs/filename, exact currency totals and safe-integer encoding boundary, trusted generation context/override rejection, read-only memory parity, failure classification/partial-download rejection and 301-task completeness. Three PostgreSQL tests cover complete source/disclosure/relationships, same-project isolation and independent aggregates, 252-task completeness, source pool/application restart, terminal visibility, exact database aggregate/string boundary above Number.MAX_SAFE_INTEGER, unchanged source/history/revisions, seven-migration preservation and the controlled mutation/history/client snapshots above. Chromium downloads/parses JSON, navigates summary in all eight states, checks approved disclosure/milestone/notes/documents, safe text/legacy URL, operator timezone, draft/cancelled/delivered/archived language, empty sections, print media/button, reload, missing project, independent export and summary failure/retry, no business requests/new activity/revisions and zero page errors. Prior Slice 1–12 acceptance remains enabled and passed.
 
-No final failures/skips/environment blockers. Initial focused PostgreSQL fixture ordering attempted intake after client archival; moving its setup before archival preserved and continued testing the established archived-client intake rejection. No assertion was weakened or skipped. Limitations: complete current project artifacts are buffered in memory, not streaming/live feeds/persisted historical reports; larger project tests prove no silent truncation but do not claim unbounded resource capacity. No CSV/PDF/ZIP, remote files, public/client sharing, stored reports/jobs/notifications, automatic change-request history, new finance features, strict sequencing/idempotency, deployment/backup/restore/final real-project acceptance or production-readiness claim. Slice 14 has not begun.
+No final failures/skips/environment blockers. Initial focused PostgreSQL fixture ordering attempted intake after client archival; moving its setup before archival preserved and continued testing the established archived-client intake rejection. No assertion was weakened or skipped. Limitations: complete current project artifacts are buffered in memory, not streaming/live feeds/persisted historical reports; larger project tests prove no silent truncation but do not claim unbounded resource capacity. No CSV/PDF/ZIP, remote files, public/client sharing, stored reports/jobs/notifications, automatic change-request history, new finance features, strict sequencing/idempotency, deployment/backup/restore/final real-project acceptance or production-readiness claim. Slice 14 pre-deployment evidence is recorded below; actual deployment remains pending.
+
+
+## Slice 14 pre-deployment acceptance and Render runbook
+
+**SLICE 14 IS NOT YET COMPLETE — PRE-DEPLOYMENT READY.** No Render production resource was created or deployed. Production HTTPS and external restart acceptance remain unrun. The approved repository target is a Render native Node Web Service connected to Render managed PostgreSQL; initially use the provider-generated HTTPS hostname. No custom domain, container, frontend bundling, upload filesystem or alternative provider is required.
+
+Baseline: PR #10 / Slice 13 merged at `3b8e33ae536fd68c6e0abf58c9603ec2906b2ab8`. Implementation commit `fd8531a2951369033217f62def3156ce2aa037a6` and recovery guard follow-up `4824be77832fbb35afc23e02fc73835cb60b5166` on `slice-14-final-acceptance-deployment`; this documentation is the following commit. Production deployment requires a separate explicit PM approval even if Render credentials later become available.
+
+### Runtime and Render configuration
+
+`render.yaml` declares the bounded service/database configuration. Review the declared paid starter/basic-256mb plans, region, actual account permissions and connection/storage limits before authorizing creation; this pass has not provisioned or billed resources. `autoDeployTrigger: "off"` keeps later Git pushes from implicitly authorizing production deployment. Creating a Blueprint can itself initiate its initial deployment: do not apply it before the separate approval.
+
+| Setting | Contract |
+| --- | --- |
+| Node | 24.19.0; native TypeScript type stripping, no compiler/bundler |
+| pnpm | 9.12.0, pinned by packageManager; prepare/enable Corepack |
+| Build | `corepack enable && corepack prepare pnpm@9.12.0 --activate && pnpm install --prod --frozen-lockfile` |
+| Start | `node --experimental-strip-types scripts/projectops-render-start.mjs` |
+| HOST / PORT | 0.0.0.0; use Render-supplied PORT, not a hard-coded port |
+| DATABASE_URL | Secret reference to managed PostgreSQL; never commit, print or place its value in a request/receipt/PR |
+| PUBLIC_ORIGIN | Exact deployed HTTPS origin. Explicit secure configuration may set it; otherwise the start wrapper uses Render's trusted RENDER_EXTERNAL_URL. No forwarded header inference. Do not set an empty/HTTP/extraneous-path value |
+| Health | `/health/ready`; `/health/live` also available |
+| PostgreSQL | Blueprint major 16; runtime supports 16+. UTF-8 and available `C.utf8` collation required by existing dashboard SQL |
+| Shutdown | Existing SIGINT/SIGTERM drains HTTP and closes PostgreSQL pool |
+
+Before startup, verify actual database locale/collation (`SELECT collname FROM pg_collation WHERE collname='C.utf8'`), runtime role permissions for owned ProjectOps tables/constraints/indexes/ledger and advisory migration locks, and actual service/database private-network connectivity. Do not invent Render guarantees: private/internal versus external TLS/CA behavior must be confirmed on the selected account/database. Preserve certificate verification; no rejectUnauthorized=false, NODE_TLS_REJECT_UNAUTHORIZED=0 or test TLS bypass. Use provider-supported verified connection settings/private network. Each runtime pool has max 10 connections plus short-lived provisioning/migration/recovery connections; retain headroom against the actual database connection limit and service instance count. Recovery drills require a separately authorized maintenance role able to CREATE/DROP only drill-owned databases, or an explicitly approved isolated recovery PostgreSQL instance with compatible major/collation.
+
+Startup applies/verifies all seven frozen migrations on one leased connection with the existing transactional advisory lock before binding HTTP. Existing ledger names/checksums are verified; applied SQL is never edited/reapplied. Refuse unmanaged legacy schema or checksum drift. Record the deployed `version,name,checksum` ledger (no business rows or credentials) and compare with the tested artifacts. No migration 0008 or new revision is introduced.
+
+The private response policy is installed only by ProjectOps at HTTP serialization. Success, guard/domain errors, malformed-body/early errors and overload receive no-store/nosniff; original status/code/body and existing HTML CSP remain intact. Do not configure a Render/CDN cache for protected ProjectOps pages/APIs/downloads or override these headers. The eventual HTTPS smoke verifies real proxy-visible headers rather than assuming forwarding behavior.
+
+### Isolated source-runtime release
+
+`createRuntimeRelease` in `scripts/projectops-release.mjs` copies apps/packages, SQL artifacts, package manifests, workspace/lockfile, Render start wrapper and Blueprint into a new private directory outside the checkout. It rejects an existing destination, checkout/symlink aliases and source symlinks; it excludes node_modules, environment files, Git, coverage and tests. This is a **source-runtime release**, not a compiled or self-contained bundle. A frozen production install is still required in that directory.
+
+The CLI accepts bounded JSON on stdin with `destination` (new directory under an existing private parent) and `checkpoint` (verified 40-hex Git commit). The root is fixed to the script checkout. It writes a private release-manifest.json with sorted relative paths/content hashes, requested checkpoint and material SHA-256. No secrets belong in the copied source or manifest. Command:
+
+```bash
+node --experimental-strip-types scripts/projectops-release.mjs < "$PROJECTOPS_RELEASE_REQUEST"
+```
+
+Verified runtime-material SHA-256: `b0247d1e1c8772c31b573bab498091125dd06c9f547fd5c63af23c51b36016eb`. The fresh post-commit PostgreSQL gate packages implementation checkpoint `fd8531a2951369033217f62def3156ce2aa037a6`; its manifest records that checkpoint and this content digest identifies the tested runtime material. For actual deployment package the reviewed deploy commit and record its new manifest checkpoint; docs/test-only changes do not alter this runtime-material digest. The digest excludes the manifest itself, avoiding circular commit/digest claims.
+
+Canonical `release-postgres.test.ts` installs frozen production dependencies in this isolated directory, provisions through private stdin, runs the actual entrypoint outside the checkout, verifies health/auth/create/read, SIGTERM exit and repeated startup/restart persistence, ledger immutability and sanitized missing/invalid-config failure. It also runs the Render wrapper with configured HTTPS Origin over a **loopback HTTP transport**, proving Secure/HttpOnly/Strict/__Host-cookie and Origin configuration. That test is not an actual deployed HTTPS connection.
+
+### Private provisioning and deploy procedure — pending approval
+
+1. Review the Slice 14 PR and explicitly approve actual production deployment separately. Securely connect/bind the Render account to this GitHub repository and authorize only the intended Web Service/database. No Render API/account binding or deployed origin is configured in this cloud session; do not request credentials in chat.
+2. Select the reviewed exact commit and native service configuration; verify generated HTTPS origin, trusted Render environment, linked secret DATABASE_URL, Node/pnpm/start/health settings, database capabilities and private/TLS connectivity. Then and only then apply/deploy the reviewed Blueprint or equivalent native settings. Keep automatic deployments off.
+3. Verify migrations/readiness before provisioning. From the authorized Render shell/private operational context, run `pnpm operator:create < "$PROJECTOPS_OPERATOR_INPUT"`, where the input is an operator-only 0600 file outside Git or an equivalent approved secret-to-stdin mechanism. Supply its login/password privately; never echo literals, put passwords in argv/shell history, or publish the file. Remove the temporary input after success. Provisioning refuses to overwrite an existing operator; do not invent a public signup/team model.
+4. Verify in Render that the deployed service commit equals the approved checkpoint and record non-secret deployment metadata. Record ledger and health evidence. Never expose DATABASE_URL, credential hashes, session/CSRF tokens or private business rows in receipts/logs/PRs.
+5. Run the explicit HTTPS smoke below against that origin with private credentials and authorized representative acceptance data. Leave its terminal project archived rather than introducing deletion. Record output metadata and provider-confirmed deploy revision.
+6. Perform/verify a real Render restart or redeploy externally, then invoke the separate after-restart read phase using the prior receipt. The application does not simulate a restart or claim provider actions from local process restarts.
+7. Finalize the private production storage/retention/encryption and restore-permission approach against actual Render capabilities; the real recovery/application proof above has already passed in the cloud acceptance environment. Rerun recovery if actual configuration needs additional validation, rerun fresh canonical suites, and append deployed HTTPS/restart/ledger and operational evidence. Only then reassess the roadmap finish gate and mark Slice 14 complete.
+
+Rollback means redeploying a previous **known verified** compatible runtime commit/configuration after a new private backup, then checking readiness/ledger/protected behavior. Do not down-migrate, reset business rows or restore over the live/source database. On a first deployment there may be no previous Render release: do not claim a tested provider rollback. If the ledger/checksums/configuration are incompatible, stop service writes and investigate rather than force-starting or altering frozen artifacts. Disaster recovery restores into a separate owned database and requires explicit reviewed cutover; the drill utility never performs production cutover.
+
+### Real PostgreSQL backup and disposable restore
+
+Use `scripts/projectops-recovery.mjs` with explicit private libpq files. PGSERVICEFILE must be an absolute, non-symlink regular file inaccessible to group/others; optional PGPASSFILE has the same private-file requirement. Define named source and maintenance profiles with explicit host/dbname/user and appropriate verified TLS settings. Duplicate service sections/fields and relative password-file paths are rejected rather than resolving ambiguous configuration. Keep password values only in those private profiles/passfile or approved secret inputs, never command arguments/receipts/docs. Compatible psql/pg_dump/pg_restore must be on PATH; pg_dump cannot be older than the source server major, and the restore target/archive client versions must be compatible.
+
+Backup JSON fields: `action="backup"`, `sourceService`, safe logical `sourceIdentity`, optional new private `directory` outside a checkout, optional verified 40-hex `checkpoint`. Default directory is private outside the checkout. The command reserves a unique 0600 custom archive (no silent overwrite), validates nonempty bytes, pg_restore listing and SHA-256, and verifies the quiesced source fingerprint before/after. It writes a private non-secret receipt with creation time, logical source, server/tool versions, archive size/hash and migration/schema/source/business digests. No credentials, URLs, hashes of operator credentials themselves, session/CSRF secrets or business rows are printed. Run:
+
+```bash
+node --experimental-strip-types scripts/projectops-recovery.mjs < "$PROJECTOPS_BACKUP_REQUEST"
+node --experimental-strip-types scripts/projectops-recovery.mjs < "$PROJECTOPS_RESTORE_REQUEST"
+```
+
+Restore JSON fields: `action="restore-drill"`, `sourceService`, `maintenanceService`, `archive` and explicit `targetDatabase`. Generate a fresh identity with the exported newRestoreDatabaseName helper: only `projectops_restore_` plus 32 lowercase hex characters is accepted. Missing/default/source-equal identities are rejected. CREATE DATABASE ... TEMPLATE template0 must succeed; **even an existing empty target is never adopted or dropped**. Restore uses `--exit-on-error --single-transaction --no-owner --no-acl`; never --clean. Only after successful creation does the drill own the target and clean it in finally, including verification failures; it never FORCE-drops unrelated databases.
+
+This is a **quiesced acceptance drill**, not a general historical/live-source recovery protocol. The source must still match the recorded backup baseline. A backup taken while relevant source rows change is rejected rather than claimed consistent with separate fingerprints. The existing source is re-fingerprinted after the drill and must remain unchanged. CLI restore performs schema/ledger/all-row integrity verification and cleanup and honestly returns `applicationVerified:false`; it must not be reported as full application acceptance by itself.
+
+Full application verification uses the exported restoreDisposableBackup `verifyApplication` callback **before cleanup**, with a securely configured connection to the newly created target. It must start actual startProjectOpsPostgresApp against that target, log in with privately supplied restored operator credentials, check workspace/finances/history/export/handoff, then close browser/runtime/connections before returning. Supply only the verified target connection, never the original source connection. Canonical recovery-postgres and final-browser acceptance implement this integration with owned target connection configuration, prove applicationVerified=true and sourceUnchanged=true, and compare all records/relationships/operator/settings/statuses/exact money/history.
+
+The fingerprint includes all nineteen ProjectOps tables, expected schema columns/constraints/indexes and exact frozen 0001–0007 ledger entries/checksums. Before starting the restored application **all source rows** must match. After login/reads, business/schema/operator/defaults fingerprints still match; only operator_sessions and login_limit rows are excluded for legitimate authentication/session maintenance. The source full fingerprint has no such exclusion. Existing business dates/audit times and Slice 13 source relationships remain unchanged.
+
+**Archives contain private application data, operator credential hashes and session/security records. Custom-format compression is not encryption.** Store production archives in approved private access-controlled storage; finalize actual Render retention/encryption/location/restore privileges from the selected environment rather than asserting unverified provider backup guarantees. Never upload archives/passfiles/operator input to Git/PRs. Test archives/receipts and test-owned databases are cleaned after evidence; this is not a retained production backup policy.
+
+### Explicit deployed HTTPS smoke and separate restart check
+
+Command (run only after production deployment authorization):
+
+```bash
+node --experimental-strip-types scripts/projectops-deployed-smoke.mjs < "$PROJECTOPS_DEPLOYED_ACCEPTANCE_INPUT"
+```
+
+Its private bounded stdin JSON requires exact HTTPS `origin`, `authorizeAcceptanceWrites=true`, private login/password, expected `checkpoint` and matching `renderDeployedCheckpoint` verified independently in Render. Those credentials/config files stay outside Git with private permissions; no secret values are printed. Missing target/approval/credentials/revision fails nonzero, never silently skips. The checkpoint comparison is a **provider/operator-verified attestation**, not an invented app version endpoint or cryptographic proof. Playwright/Chromium are operational test dependencies installed in the trusted acceptance runner, not production service dependencies; normal TLS validation stays enabled.
+
+Initial phase verifies both health endpoints; private page redirect/API denial/no-store; actual login, HTTPS __Host/Secure/HttpOnly/Strict cookie; session/saved timezone; Origin/JSON/CSRF failure status/headers; authorized browser client/project creation, estimate/approve/start, submit/accept, source feedback/addressing, EUR invoice payment/USD expense approval, exact totals, delivery/archive; **14 corresponding automatic events**; CSP, dashboard/workspace, JSON download metadata/source and handoff; no unexpected console/page errors. Output contains only safe acceptance IDs/checkpoint/source digest/saved defaults, not passwords or cookies.
+
+After the operator has actually performed and verified a Render restart/redeploy, invoke the same command with `phase="after-restart"`, `renderRestartCompleted=true`, prior clientId/projectId/snapshotSha256/operatorDefaults and the private credentials/revision fields. This phase creates no new business dataset, verifies health/auth/access again, reads the archived project/export/handoff/history/dashboard and compares the prior business snapshot and saved operator defaults. Ordinary authenticated session/login-limit maintenance is expected. The initial result sets restartVerified=false; a later true result means application persistence verified **after the separately attested external action**. Neither invocation controls or fabricates a Render restart.
+
+Only fail-closed configuration/CLI behavior and equivalent local product/runtime workflows have been tested in this pass. **Actual HTTPS smoke and external restart phases have not run** because authorized Render binding/origin/deployment do not exist here. Their absence is an explicit deployment boundary, not a skipped canonical test or a claimed production pass.
+
+### Fresh verification and completion boundary
+
+Executed on 2026-10-04 with pinned Corepack pnpm 9.12.0:
+
+| Command | Passed | Failed | Skipped | Cancelled | Hygiene |
+| --- | --- | --- | --- | --- | --- |
+| pnpm install --frozen-lockfile | PASS | 0 | — | — | — |
+| pnpm verify | 97/97 native | 0 | 0 | 0 | 608 files |
+| PROJECTOPS_TEST_DATABASE_URL=<configured-test-database> pnpm test:postgres | 39/39 | 0 | 0 | 0 | — |
+| PROJECTOPS_TEST_DATABASE_URL=<configured-test-database> pnpm test:browser | 13/13 Chromium | 0 | 0 | 0 | — |
+
+Actual invocation used `corepack pnpm` for each command, `CI=true COREPACK_HOME=/tmp/projectops-corepack XDG_DATA_HOME=/tmp/projectops-xdg PNPM_HOME=/tmp/projectops-pnpm`; database suites used the privately configured dedicated test URL plus the established /tmp PostgreSQL client PATH/LD_LIBRARY_PATH, browser used `PLAYWRIGHT_BROWSERS_PATH=/tmp/projectops-playwright`. No secret values belong in this evidence. Node 24.19.0, pnpm 9.12.0, PostgreSQL/pg_dump/pg_restore 17.11 (Debian 17.11-0+deb13u1), Playwright 1.63.0 and Chromium 153.0.8010.12. CI PostgreSQL service remains 16; its acceptance jobs install PostgreSQL 16 clients and use Node 24.19.0. No dependencies/lockfile/migrations/schema/revisions changed.
+
+The final real-project test runs **one** deterministic real database + Chromium project through the approved 53-step workflow, including 44 exact workflow/annotation events, business-date/audit separation, expected failed readiness without false history, EUR 100000 paid / EUR 1200 submitted / USD 25000 outstanding / USD 5000 approved cents with GBP estimate, restart/settings/source persistence, all thirteen JSON collections, accepted milestone handoff/client note/handoff document and disclosure/safe-link/timezone/print checks, post-delivery feedback/archival gate, terminal read-only records/dashboard exclusion/client archival. It then really dumps/restores into a different owned database and signs into the restored actual application with Chromium; restored terminal export equals source and source full fingerprint remains unchanged. Existing cancellation/hold/reopen/reject/stale variants, write concurrency/history rollback, delivery predicate, exact finance aggregation and export committed-snapshot tests remain enabled and pass.
+
+New coverage is discovered by unchanged canonical scripts: tests/projectops-final.test.ts (three native regressions/guards); integration/recovery-postgres.test.ts and release-postgres.test.ts (two PostgreSQL operational cases); final-browser.test.ts (one complete browser/recovery journey), supported by a test-only final-fixture.ts. Fixtures own and drop only generated whole databases, never dump/restore the configured shared test database. No production clock override, new API or speculative feature was added. Early focused test harness failures were fixed and full suites rerun; no assertion was hidden/skipped/weakened.
+
+Frozen migration clean/upgrade/checksum/drift/advisory-lock/rollback/repeated-startup acceptance passed; restored expected schema and seven-entry ledger passed. **Deployed** ledger evidence is still pending. Formal change-request commands remain foundation/read-only, excluded from automatic history; roadmap “changes” uses completed project/planning editing. No production-readiness, provider backup guarantee, strict sequencing, general idempotency or new delivery prerequisite is claimed.
+
+Remaining finish gate: independent review, securely bind/authorize Render and separately approve deploy; actual production service/database/HTTPS/ledger/provisioning; explicit deployed smoke; external restart/redeploy and persistence check; private production backup-policy/configuration confirmation; fresh final canonical results and documented non-secret evidence. Do not mark Slice 14 or the roadmap complete until those outcomes actually pass.
