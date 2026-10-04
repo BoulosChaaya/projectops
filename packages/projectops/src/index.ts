@@ -7,3 +7,4 @@ export * from './repository.ts';
 export * from './sql.ts';
 export * from './finances.ts';
 export * from './history.ts';
+export * from './project-export.ts';

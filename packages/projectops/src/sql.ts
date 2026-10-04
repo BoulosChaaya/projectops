@@ -1,3 +1,4 @@
+import { exportFields, exportCollections, exportOrder, type ExportEntity } from './project-export.ts';
 import { validateDashboardFilter, type DashboardFilter } from './dashboard.ts';
 import type {
   ProjectActivity,
@@ -1782,4 +1783,19 @@ export function selectDashboardRowsSql(filter: DashboardFilter = {}, evaluationN
       ORDER BY dashboard_rows.updated_at DESC, dashboard_rows.created_at DESC, dashboard_rows.id COLLATE "C" ASC`,
     params: Object.freeze([validated.status, validated.q, evaluationNow]),
   });
+}
+
+/** One statement snapshot; each collection aggregates independently, with no write locks. */
+export function selectProjectExportSnapshotSql(id: string): SqlStatement {
+  const column = (key: string) => key === 'deadlineIso' ? 'deadline_at' : key.replace(/Iso$/, '').replace(/[A-Z]/g, letter => '_' + letter.toLowerCase());
+  const record = (entity: ExportEntity, alias: string) => `jsonb_build_object(${exportFields[entity].map(key => `'${key}', ${alias}.${column(key)}`).join(', ')})`;
+  const collections = exportCollections.map(kind => {
+    const table = 'projectops_project_' + kind.replace(/[A-Z]/g, letter => '_' + letter.toLowerCase());
+    const order = exportOrder[kind].map(([key,direction]) => `r.${column(key)} ${direction === 1 ? 'ASC' : 'DESC'} NULLS LAST`).concat('r.id COLLATE "C" ASC').join(', ');
+    return `'${kind}', (SELECT COALESCE(jsonb_agg(${record(kind,'r')} ORDER BY ${order}), '[]'::jsonb) FROM ${table} r WHERE r.project_request_id = p.id)`;
+  });
+  return Object.freeze({ sql: `WITH project_export AS (SELECT * FROM projectops_project_requests WHERE id = $1)
+    SELECT jsonb_build_object('project', ${record('project','p')}, 'client', ${record('client','c')},
+      'collections', jsonb_build_object(${collections.join(', ')})) AS project_export_snapshot
+    FROM project_export p JOIN projectops_clients c ON c.id = p.client_id`, params: Object.freeze([id]) });
 }

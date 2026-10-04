@@ -1,3 +1,4 @@
+import { exportFields, exportCollections, type ExportCollection } from './project-export.ts';
 import { compareIdentity, dashboardSearchText, type DashboardDueItem } from './dashboard.ts';
 import { totalProjectFinances, type ProjectFinanceTotalsByCurrency } from './finances.ts';
 import type { RawQueryResult } from '../../db/src/connection/connect.ts';
@@ -132,6 +133,24 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
   private async execute<T>(statement: SqlStatement): Promise<readonly T[]> {
     const sql = normalizeSql(statement.sql);
     const upper = sql.toUpperCase();
+
+    if (upper.startsWith('WITH PROJECT_EXPORT AS')) {
+      const project = this.projectRequests.get(String(statement.params[0]));
+      if (!project) return Object.freeze([]);
+      const client = this.clients.get(project.clientId);
+      const sources: Record<ExportCollection, Map<string, any>> = {
+        milestones: this.projectMilestones, tasks: this.projectTasks, workLogs: this.projectWorkLogs,
+        notes: this.projectNotes, issues: this.projectIssues, risks: this.projectRisks,
+        documents: this.projectDocuments, deliverables: this.projectDeliverables, feedback: this.projectFeedback,
+        invoices: this.projectInvoices, expenses: this.projectExpenses, activities: this.projectActivities,
+        changeRequests: this.projectChangeRequests,
+      };
+      const pick = (kind: keyof typeof exportFields, row: any) => Object.fromEntries(exportFields[kind].map(key => [key,row?.[key] ?? null]));
+      return Object.freeze([{ project_export_snapshot: {
+        project: pick('project', project), client: pick('client', client),
+        collections: Object.fromEntries(exportCollections.map(kind => [kind,[...sources[kind].values()].filter(row => row.projectRequestId === project.id).map(row => pick(kind,row))])),
+      } } as T]);
+    }
 
     if (upper.startsWith('CREATE TABLE IF NOT EXISTS PROJECTOPS_CLIENTS')) {
       this.migratedTables.add('projectops_clients');

@@ -300,7 +300,7 @@ Existing GET /projectops and GET /projectops/dashboard are sufficient. They shar
 
 ### Verification and checkpoint
 
-Implementation commit `7aed95e2039f4b7a3a8531bab0b2952f45eb9af1` on slice-12-operational-dashboard, based on merged main `8aff0138ea5857eacbb5f71c2e829c5bfa3c9496` (PR #8). This documentation is the following commit. Slice 12 passed its local completion gate and awaits independent PR review/merge; Slice 13 is next and has not begun.
+Implementation commit `7aed95e2039f4b7a3a8531bab0b2952f45eb9af1` on slice-12-operational-dashboard, based on merged main `8aff0138ea5857eacbb5f71c2e829c5bfa3c9496` (PR #8). Documentation commit `a507e900a0017c796d2c79fd80ad12ddd7277341`; PR #9 was independently reviewed and merged at `7fa7f4b3caafbd55c63952f1328721d4ff65ed91`. Slice 13 completion is recorded below.
 
 | Command | Pass | Fail | Skip | Hygiene |
 | --- | --- | --- | --- | --- |
@@ -314,4 +314,69 @@ Four dedicated native tests plus dashboard-fixture.ts cover memory/domain/reposi
 
 Controlled PostgreSQL pauses task/milestone completion, payment and cancellation before required history insertion. Unlocked dashboard reads see the previous committed state; commit exposes the winner and its latest activity together. Injected required-history failure rolls back business/history and preserves the previous dashboard. Existing complete Slice 9 readiness/concurrency, Slice 10 exact totals above Number.MAX_SAFE_INTEGER and Slice 11 rollback/concurrency acceptance also passed.
 
-Initial failures were corrected and full suites rerun: direct SQL finance acceptance supplies statement parameters, status markup has an explicit label, invoice navigation has a distinct destination label and case matching no longer depends on default database locale. No test was skipped or weakened. No final runtime blocker remains. Limitations: manual refresh/statement snapshots, bounded nearest operational metadata, PostgreSQL C.utf8 availability, no speculative indexing/live notifications/export/deployment/backup/production-acceptance claim. Slice 13 has not begun.
+Initial failures were corrected and full suites rerun: direct SQL finance acceptance supplies statement parameters, status markup has an explicit label, invoice navigation has a distinct destination label and case matching no longer depends on default database locale. No test was skipped or weakened. No final runtime blocker remains. Limitations: manual refresh/statement snapshots, bounded nearest operational metadata, PostgreSQL C.utf8 availability, no speculative indexing/live notifications/export/deployment/backup/production-acceptance claim was made by Slice 12. Slice 12 is merged; the completed Slice 13 contract is recorded below.
+
+
+## Export and handoff (Slice 13)
+
+Open a project workspace and choose **Export project information** or **View delivery summary** in Export and handoff. Both work in new, estimated, approved, in_progress, on_hold, delivered, cancelled and archived states, including archived clients’ existing projects. The internal export is not declared client-safe. The protected summary is deliberately narrower; it does not establish public access, client accounts, new roles or sharing links.
+
+### Internal JSON attachment
+
+GET /projectops/project-requests/:id/export returns application/json; charset=utf-8 with attachment Content-Disposition and fixed sanitized-ID filename projectops-project-<safe-id>.json. Never use the raw title in a response header. Project IDs follow the existing ASCII alphabet and 80-character bound. Format is projectops.internal-project, version 1, with server generatedAtIso/authenticated generatedBy, explicit project and client records, collections and financeTotalsByCurrency.
+
+Collections are milestones, tasks, workLogs, notes, issues, risks, documents, deliverables, feedback, invoices, expenses, activities and changeRequests. Explicit allowlisted DTOs preserve existing model fields: IDs/parent and optional child relationships, revisions where present, statuses/enums, actors/authors/business attribution, audit metadata and timestamps. This is not raw SQL-row serialization. No passwords, cookies, tokens, CSRF, environment/database configuration, infrastructure, unknown columns or unrelated projects/clients/resources. Change requests remain existing read-only records; their concurrency/automatic-history exclusion is unchanged.
+
+Dates are canonical ISO instants; optional absent fields are null; empty collections are []. Existing collection order is preserved with actual-instant comparison and stable ASCII ID ties. History stays happened_at DESC, created_at DESC, id ASC; no strict commit sequence claim. Complete collections are exported without silent truncation. URLs remain data, never fetched remotely or bundled into files.
+
+Individual money fields remain existing safe bounded integer cents. Four aggregate categories remain exact decimal-cent strings by actual currency, calculated using existing BigInt helpers from the same invoice/expense snapshot. Rejected expenses contribute to neither submitted nor approved totals; reimbursability does not change inclusion. No unsafe Number aggregation, FX, mixed-currency grand total or estimate-currency substitution. Cancelled/archived exports use their own source records rather than the active-only dashboard. JSON encoding preserves decimal-cent strings beyond Number.MAX_SAFE_INTEGER.
+
+### Protected delivery/handoff summary
+
+GET /projectops/projects/:id/delivery-summary is protected HTML with safe escaping, CSP, return navigation, print CSS and Print summary (browser print, no server PDF). It includes only:
+
+- Project ID/title, associated client name and actual current status.
+- Accepted deliverables with identity/title, safe artifact link and actual submittedAtIso/acceptedAtIso; associated milestone identity/title/status/due context only where the existing relationship resolves.
+- Active notes whose existing visibility is client, with body/identity/creation timestamp.
+- Active documents whose existing documentType is handoff, with title/link/identity/upload timestamp.
+- Server generation time and the operator’s saved IANA timezone, clearly labelled. Human dates use that timezone even when browser/server timezones differ.
+
+The approved classifications now determine the bounded handoff disclosure subset. Internal/archived notes, non-handoff/archived documents, general tasks, work logs, issues, risks, feedback narrative, invoices, expenses/totals, activities/annotations and change requests are omitted. No full project brief, budget, client contact record or estimate is disclosed. Empty selected sections show explicit messages. Only HTTP(S) URLs without username/password are links; unsafe legacy values show Link unavailable and are not exposed as clickable links or embedded credential text. Safe external links use target=_blank and rel=noopener noreferrer.
+
+Every state except delivered/archived prominently says CURRENT / DRAFT and displays actual status without certifying delivery/completion. Delivered shows its actual state without a manufactured delivery date. Archived displays archived and explicitly declines to infer whether it followed delivery or cancellation. No deliveredAtIso/acceptedBy exists or is invented; absent legacy acceptance time is Not recorded. Stored source/business/audit timestamps are not replaced by generation time. HTML does not expose internal generation operator metadata.
+
+### Snapshot, access and concurrency
+
+One parameterized SELECT returns root project/client and independently aggregated complete collections. No per-row/N+1 calls, FOR UPDATE, write locks, join multiplication, new transaction/isolation setting or database abstraction redesign. The existing memory executor takes one project-scoped serialized snapshot; common DTO composition/order/money rules provide parity. Each artifact has one committed statement snapshot; separate requests read fresh snapshots. Query/source/encoding failure rejects the artifact rather than silently filling missing collections with zeros/empty lists.
+
+During an uncommitted covered business+required-history transaction, generation can read prior committed business/history without taking its parent lock. After commit/refresh it sees both the winning mutation and event. Forced required-history failure leaves the prior source/artifact. Controlled acceptance pauses project editing, task completion, issue resolution, deliverable acceptance, feedback addressing, invoice payment, expense approval, delivery, archival and cancellation immediately before history insertion; a paused client edit is observed only after its own commit. No new concurrency authority or read locks. Existing project/child revisions and lifecycle serialization remain unchanged.
+
+Generation/view/print/retry/refresh create no workflow activity/annotation, update no project/child revision or source resource, and persist no artifact. Established session last_seen maintenance still applies. Slice 9 readiness remains only at least one deliverable, every deliverable accepted, no open feedback for delivery/delivered archival; cancelled archival bypass is unchanged. Finance, history and exports remain irrelevant to it. Slice 10 money/audit/business-date semantics and Slice 11 automatic history/actor/rollback guarantees remain unchanged. Slice 12 dashboard query/filter/scope/timezone/attention semantics are untouched.
+
+Both routes are covered by existing operator session protection/no-store, with nosniff. Unauthenticated export returns 401; summary follows the existing page login redirect. Bounded invalid identifiers/query overrides return 400, genuinely missing project 404, storage/source/encoding/render failure useful unavailable 500. Error responses are not downloadable attachments and disclose no private storage details. Caller generation identity/time/include/timezone overrides are not supported (400). No ordinary read 409 or GET mutation CSRF/JSON-body requirement; existing write Origin/JSON/CSRF protections remain enabled. No public capability URL.
+
+The isolated project-handoff.ts workspace controls keep download progress/unavailable/Retry export independent from source sections. Summary errors show unavailable/retry; 404/400 are explicit. Retry repeats only the artifact read, never a business command or history refresh. Terminal controls remain available even when other workspace commands are read-only.
+
+### Verification, checkpoint and limitations
+
+Implementation commit `7f78b70f9ce54e6e621c66745f331288bb58372b` on slice-13-export-handoff from authoritative merged PR #9 checkpoint `7fa7f4b3caafbd55c63952f1328721d4ff65ed91`. This documentation is the following commit. Slice 13 passed its completion gate and awaits independent PR review/merge; Slice 14 is next and has not begun.
+
+Exact executed cloud commands (dedicated non-secret local test URL; no production credentials):
+
+```bash
+CI=true XDG_DATA_HOME=/tmp/projectops-xdg PNPM_HOME=/tmp/projectops-pnpm pnpm verify
+PROJECTOPS_TEST_DATABASE_URL=postgresql://projectops_test@127.0.0.1:55432/projectops_test CI=true XDG_DATA_HOME=/tmp/projectops-xdg PNPM_HOME=/tmp/projectops-pnpm pnpm test:postgres
+PROJECTOPS_TEST_DATABASE_URL=postgresql://projectops_test@127.0.0.1:55432/projectops_test PLAYWRIGHT_BROWSERS_PATH=/tmp/projectops-playwright CI=true XDG_DATA_HOME=/tmp/projectops-xdg PNPM_HOME=/tmp/projectops-pnpm pnpm test:browser
+```
+
+| Command | Pass | Fail | Skip | Hygiene |
+| --- | --- | --- | --- | --- |
+| pnpm verify | 94/94 native | 0 | 0 | 598 files |
+| pnpm test:postgres | 37/37 real PostgreSQL | 0 | 0 | — |
+| pnpm test:browser | 12/12 Chromium | 0 | 0 | — |
+
+Node 24.19.0, available pnpm 11.19.0, PostgreSQL 17.11 and exact Chromium 153.0.8010.12. Reused the already verified dedicated loopback database and Playwright cache; no additional setup/configuration was needed. Fixtures create/remove isolated schemas. No migration, new revision, schema/index, dependency or lockfile changes. Frozen migrations 0001–0007 are intact.
+
+Five dedicated native tests cover exact all-model inclusion/strict disclosure, all states/archived clients, terminal/empty source, nulls/relationships/legacy actors, offset-equivalent/tied ordering, Unicode/quote/comma/newline/markup JSON round-trip, safe HTML/URLs/filename, exact currency totals and safe-integer encoding boundary, trusted generation context/override rejection, read-only memory parity, failure classification/partial-download rejection and 301-task completeness. Three PostgreSQL tests cover complete source/disclosure/relationships, same-project isolation and independent aggregates, 252-task completeness, source pool/application restart, terminal visibility, exact database aggregate/string boundary above Number.MAX_SAFE_INTEGER, unchanged source/history/revisions, seven-migration preservation and the controlled mutation/history/client snapshots above. Chromium downloads/parses JSON, navigates summary in all eight states, checks approved disclosure/milestone/notes/documents, safe text/legacy URL, operator timezone, draft/cancelled/delivered/archived language, empty sections, print media/button, reload, missing project, independent export and summary failure/retry, no business requests/new activity/revisions and zero page errors. Prior Slice 1–12 acceptance remains enabled and passed.
+
+No final failures/skips/environment blockers. Initial focused PostgreSQL fixture ordering attempted intake after client archival; moving its setup before archival preserved and continued testing the established archived-client intake rejection. No assertion was weakened or skipped. Limitations: complete current project artifacts are buffered in memory, not streaming/live feeds/persisted historical reports; larger project tests prove no silent truncation but do not claim unbounded resource capacity. No CSV/PDF/ZIP, remote files, public/client sharing, stored reports/jobs/notifications, automatic change-request history, new finance features, strict sequencing/idempotency, deployment/backup/restore/final real-project acceptance or production-readiness claim. Slice 14 has not begun.
