@@ -44,7 +44,7 @@ test('Operational dashboard PostgreSQL snapshot matches memory rules, filters, e
     assert.equal((await repo.listProjectInvoices('approved')).length,5);
     await repo.transitionProjectRequest('delivered','archived',NOW);assert.equal((await repo.getDashboard({status:'delivered'},NOW)).rows.length,0);
     assert.equal((await repo.listProjectTasks('delivered')).length,6);
-    assert.equal((await pool.query('SELECT count(*)::int AS n FROM projectops_schema_migrations')).rows[0].n,7);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM projectops_schema_migrations')).rows[0].n,(await loadProjectOpsPostgresMigrations()).length);
   });
 });
 

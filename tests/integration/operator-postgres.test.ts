@@ -12,7 +12,7 @@ test('Operator migration upgrades an existing baseline without losing client rec
     try {
       await migrateProjectOpsPostgres(client, migrations.slice(0, 1));
       await client.query("INSERT INTO projectops_clients (id, name, status, created_at) VALUES ('existing', 'Existing client', 'active', NOW())");
-      assert.deepEqual(await migrateProjectOpsPostgres(client, migrations), ['0002', '0003', '0004', '0005', '0006', '0007']);
+      assert.deepEqual(await migrateProjectOpsPostgres(client, migrations), migrations.map(m => m.version).filter(v => v >= '0002'));
       assert.equal((await client.query("SELECT name FROM projectops_clients WHERE id='existing'")).rows[0].name, 'Existing client');
     } finally { client.release(); }
   });

@@ -86,23 +86,28 @@ test('PostgreSQL application persists API data across shutdown and restart', asy
       assert.equal(summary.financeTotalsByCurrency?.USD.outstandingInvoiceAmountCents, '10000');
       const html = await fetch(`${app.server.origin}/projectops`, { headers: session }).then(r => r.text());
       assert.match(html, /Durable project/);
-      assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 7);
+      assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, (await loadProjectOpsPostgresMigrations()).length);
     } finally { await app.close(); }
   });
 });
 
+function nextVersion(migrations: readonly { version: string }[]): string {
+  return String(Math.max(...migrations.map(m => Number(m.version))) + 1).padStart(4, '0');
+}
+
 test('PostgreSQL migrations serialize startup, apply upgrades once and reject drift', async () => {
   await fixture(async (_url, pool) => {
     const baseline = await loadProjectOpsPostgresMigrations();
-    const upgrade = { version: '0008', name: 'acceptance_probe', upSql: 'CREATE TABLE upgrade_probe (id INTEGER PRIMARY KEY)' };
+    // Probe the version after the newest real migration, so adding migrations never collides with it.
+    const upgrade = { version: nextVersion(baseline), name: 'acceptance_probe', upSql: 'CREATE TABLE upgrade_probe (id INTEGER PRIMARY KEY)' };
     const run = async () => {
       const client = await pool.connect();
       try { return await migrateProjectOpsPostgres(client, [...baseline, upgrade]); }
       finally { client.release(); }
     };
     const results = await Promise.all([run(), run()]);
-    assert.deepEqual(results.flat().sort(), ['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008']);
-    assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, 8);
+    assert.deepEqual(results.flat().sort(), [...baseline.map(m => m.version), upgrade.version]);
+    assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, baseline.length + 1);
     const client = await pool.connect();
     try {
       await assert.rejects(() => migrateProjectOpsPostgres(client, [
@@ -121,11 +126,11 @@ test('Failed PostgreSQL migration rolls back schema and ledger together', async 
     try {
       await migrateProjectOpsPostgres(client, baseline);
       await assert.rejects(() => migrateProjectOpsPostgres(client, [...baseline, {
-        version: '0008', name: 'broken_probe',
+        version: nextVersion(baseline), name: 'broken_probe',
         upSql: 'CREATE TABLE rollback_probe (id INTEGER); SELECT * FROM missing_probe_table',
       }]));
       assert.equal((await client.query("SELECT to_regclass('rollback_probe') AS probe")).rows[0].probe, null);
-      assert.equal((await client.query('SELECT * FROM projectops_schema_migrations')).rows.length, 7);
+      assert.equal((await client.query('SELECT * FROM projectops_schema_migrations')).rows.length, baseline.length);
     } finally { client.release(); }
   });
 });
