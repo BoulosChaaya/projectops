@@ -1270,9 +1270,9 @@ export class ProjectOpsRepository {
 
   public async getProjectExportSnapshot(id: string): Promise<ProjectExportSnapshot> {
     validateExportIdentifier(id);
-    const rows = await this.sql.query<{ project_export_snapshot: unknown }>(selectProjectExportSnapshotSql(id));
+    const rows = await this.sql.query<{ projectExportSnapshot: unknown }>(selectProjectExportSnapshotSql(id));
     if (!rows[0]) throw new ProjectOpsOperationError('not_found', 'PROJECTOPS_REQUEST_NOT_FOUND', 'Project not found.');
-    return composeProjectExportSnapshot(rows[0].project_export_snapshot);
+    return composeProjectExportSnapshot(rows[0].projectExportSnapshot);
   }
 
   public async getDashboard(filter: DashboardFilter = {}, evaluationNow = new Date().toISOString()): Promise<ProjectOpsDashboardView> {
