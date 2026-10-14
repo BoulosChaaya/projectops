@@ -310,10 +310,16 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
     }
 
     if (upper.startsWith('SELECT * FROM PROJECTOPS_CLIENTS WHERE ($1')) {
-      const [status, query] = statement.params.map(String);
+      // Params: status, query, limit (+1), then the optional keyset (createdAtIso, id); see selectClientsSql.
+      const [status, query] = statement.params.slice(0, 2).map(String);
+      const limit = Number(statement.params[2]);
+      const after = statement.params.length >= 5
+        ? { createdAtIso: String(statement.params[3]), id: String(statement.params[4]) } : undefined;
       return Object.freeze(this.selectClients().filter(row =>
         (status === 'all' || row.status === status) && `${row.name} ${row.contactName ?? ''} ${row.email ?? ''}`.toLowerCase().includes(query)
-      ) as T[]);
+        // Same comparator as selectClients' sort, so a page boundary never skips or repeats a row.
+        && (!after || row.createdAtIso.localeCompare(after.createdAtIso) < 0 || (row.createdAtIso === after.createdAtIso && row.id.localeCompare(after.id) > 0))
+      ).slice(0, limit) as T[]);
     }
     if (upper.startsWith('UPDATE PROJECTOPS_CLIENTS SET')) {
       const id = String(statement.params[0]);
@@ -341,8 +347,18 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
       return Object.freeze(row ? [toClient(row) as T] : []);
     }
 
-    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_REQUESTS ORDER BY UPDATED_AT DESC')) {
-      return Object.freeze(this.selectProjectRequests() as T[]);
+    // Project list pages; params: limit (+1), then the optional keyset (updatedAtIso, createdAtIso, id).
+    if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_REQUESTS ORDER BY UPDATED_AT DESC')
+      || upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_REQUESTS WHERE UPDATED_AT <= $2')) {
+      const limit = Number(statement.params[0]);
+      const after = statement.params.length >= 4 ? {
+        updatedAtIso: String(statement.params[1]), createdAtIso: String(statement.params[2]), id: String(statement.params[3]),
+      } : undefined;
+      return Object.freeze(this.selectProjectRequests().filter(row => !after
+        || row.updatedAtIso.localeCompare(after.updatedAtIso) < 0
+        || (row.updatedAtIso === after.updatedAtIso && (row.createdAtIso.localeCompare(after.createdAtIso) < 0
+          || (row.createdAtIso === after.createdAtIso && row.id.localeCompare(after.id) > 0)))
+      ).slice(0, limit) as T[]);
     }
 
     if (upper.startsWith('SELECT * FROM PROJECTOPS_PROJECT_REQUESTS WHERE ID = $1')) {

@@ -40,12 +40,12 @@ test('Migration 0007 expands only event taxonomy on clean/upgrade schemas and pr
     await base.createProjectRequest({ id: 'r', clientId: 'c', title: 'Legacy', brief: 'Brief', createdAtIso: BUSINESS_TIME });
     await base.createProjectActivity('r', { id: 'legacy', projectRequestId: 'r', eventType: 'note_added', summary: 'Legacy annotation', happenedAtIso: BUSINESS_TIME });
     const before = (await pool.query('SELECT * FROM projectops_project_activities')).rows;
-    assert.deepEqual(await migrate(pool, all), ['0007']);
+    assert.deepEqual(await migrate(pool, all), all.map(m => m.version).filter(v => v >= '0007'));
     assert.deepEqual((await pool.query('SELECT * FROM projectops_project_activities')).rows, before);
     for (const eventType of projectActivityEventTypes) await base.createProjectActivity('r', { id: eventType, projectRequestId: 'r', eventType, summary: 'Constraint probe', happenedAtIso: AUDIT_TIME });
     await assert.rejects(() => pool.query("INSERT INTO projectops_project_activities VALUES ('invalid','r','invalid','Invalid',NULL,$1,$1)", [AUDIT_TIME]), (error: any) => error.code === '23514');
     assert.equal((await base.getProjectActivity('r', 'legacy'))!.actor, null);
-    assert.equal((await pool.query('SELECT count(*)::int AS n FROM projectops_schema_migrations')).rows[0].n, 7);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM projectops_schema_migrations')).rows[0].n, (await loadProjectOpsPostgresMigrations()).length);
   });
 });
 

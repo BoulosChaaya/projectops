@@ -18,6 +18,7 @@ The product scope is fixed by the [roadmap](docs/projectops/roadmap.md). It serv
 ## Engineering highlights
 
 - **Concurrency control.** Clients, projects, milestones and tasks carry revisions: an edit must send the revision it read, and a conditional SQL write rejects stale ones with `409`. Every write to a project's records locks and re-checks the parent project's state in the same statement, so a write racing a cancellation either commits first or fails cleanly. Acceptance tests force these races against real PostgreSQL and assert exactly one winner.
+- **Pagination.** Global lists use keyset cursors over matching indexes: each page is an indexed range read, stable under concurrent inserts, and cursors are tamper-checked. With 20,000 clients the list endpoint went from 208 ms and 4 MB to 7 ms and 10 KB per request.
 - **Migrations.** Startup applies frozen SQL files in a transaction under a PostgreSQL advisory lock, with a checksum ledger. Concurrent startups serialize, edited migrations are detected, and unmanaged schemas are refused.
 - **Sessions and request security.** scrypt password hashing; opaque session tokens stored only as SHA-256 hashes; 8-hour absolute and 30-minute idle expiry; persistent login rate limiting; every write requires the configured `Origin`, `application/json` and a CSRF token.
 - **Recovery and release tooling.** Scripted backup (`pg_dump`) and restore into a fresh database with integrity fingerprints, and a source-runtime release packager. See [`scripts/`](scripts).

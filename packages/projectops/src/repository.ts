@@ -1,4 +1,5 @@
 import { composeProjectExportSnapshot, validateExportIdentifier, type ProjectExportSnapshot } from './project-export.ts';
+import { clientPageCursor, projectRequestPageCursor, toPage, validateClientPage, validateProjectRequestPage, type Page, type PageRequest } from './pagination.ts';
 import { selectProjectExportSnapshotSql } from './sql.ts';
 import { randomUUID } from 'node:crypto';
 import { projectHistorySummary, type ProjectHistoryContext } from './history.ts';
@@ -299,8 +300,10 @@ export class ProjectOpsRepository {
     return persisted;
   }
 
-  public async listClients(filter: ClientFilter = {}): Promise<readonly ProjectOpsClient[]> {
-    return await this.sql.query<ProjectOpsClient>(selectClientsSql(validateClientFilter(filter)));
+  public async listClients(filter: ClientFilter = {}, page: PageRequest = {}): Promise<Page<ProjectOpsClient>> {
+    const validated = validateClientPage(page);
+    const rows = await this.sql.query<ProjectOpsClient>(selectClientsSql(validateClientFilter(filter), validated));
+    return toPage(rows, validated.limit, clientPageCursor);
   }
 
   public async editClient(id: string, input: EditClientInput): Promise<ProjectOpsClient> {
@@ -332,8 +335,10 @@ export class ProjectOpsRepository {
     return rows[0];
   }
 
-  public async listProjectRequests(): Promise<readonly ProjectRequest[]> {
-    return await this.sql.query<ProjectRequest>(selectProjectRequestsSql());
+  public async listProjectRequests(page: PageRequest = {}): Promise<Page<ProjectRequest>> {
+    const validated = validateProjectRequestPage(page);
+    const rows = await this.sql.query<ProjectRequest>(selectProjectRequestsSql(validated));
+    return toPage(rows, validated.limit, projectRequestPageCursor);
   }
 
   public async getProjectRequest(id: string): Promise<ProjectRequest | undefined> {

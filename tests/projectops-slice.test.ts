@@ -69,6 +69,7 @@ import {
   type ProjectInvoice,
   type ProjectIssue,
   type ProjectOpsClient,
+  type Page,
   type ProjectOpsDashboardView,
   type ProjectMilestone,
   type ProjectNote,
@@ -1191,14 +1192,14 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
       requests.set(request.id, request);
       return request;
     },
-    async listClients(): Promise<readonly ProjectOpsClient[]> {
-      return Object.freeze([...clients.values()]);
+    async listClients(): Promise<Page<ProjectOpsClient>> {
+      return Object.freeze({ items: Object.freeze([...clients.values()]), nextCursor: null });
     },
     async getClient(id: string): Promise<ProjectOpsClient | undefined> {
       return clients.get(id);
     },
-    async listProjectRequests(): Promise<readonly ProjectRequest[]> {
-      return Object.freeze([...requests.values()]);
+    async listProjectRequests(): Promise<Page<ProjectRequest>> {
+      return Object.freeze({ items: Object.freeze([...requests.values()]), nextCursor: null });
     },
     async getProjectRequest(id: string): Promise<ProjectRequest | undefined> {
       return requests.get(id);

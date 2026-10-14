@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { once } from 'node:events';
 import { finalDatabaseFixture } from './final-fixture.ts';
+import { loadProjectOpsPostgresMigrations } from '../../packages/projectops/src/postgres-migrations.ts';
 import { createRuntimeRelease } from '../../scripts/projectops-release.mjs';
 
 const execute=promisify(execFile);
@@ -36,7 +37,7 @@ test('Isolated source-runtime release installs frozen production dependencies, s
     assert.equal((await fetch(app.origin+'/projectops/clients',{method:'POST',headers,body:JSON.stringify({id:'release-client',name:'Isolated release client'})})).status,200);
     await app.close();app=await start();
     const read=await fetch(app.origin+'/projectops/clients/release-client',{headers});assert.equal(read.status,200);assert.equal((await read.json()).name,'Isolated release client');assert.equal(read.headers.get('cache-control'),'no-store');
-    assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM projectops_schema_migrations')).rows[0].n,7);
+    assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM projectops_schema_migrations')).rows[0].n,(await loadProjectOpsPostgresMigrations()).length);
     // Startup never re-applies migrations; compare names/checksums against a second startup ledger.
     const ledger=(await f.pool.query('SELECT * FROM projectops_schema_migrations ORDER BY version')).rows;await app.close();app=await start();assert.deepEqual((await f.pool.query('SELECT * FROM projectops_schema_migrations ORDER BY version')).rows,ledger);
   }finally{await app.close();}

@@ -47,9 +47,17 @@ Open /projectops/client-management from the dashboard to create and search clien
 
 Active clients can be edited or archived after confirmation. Archiving retains existing project records and contact information, makes the client read-only, and prevents new project intake. Existing projects can continue their own workflows. No client deletion or restore action is introduced.
 
-The client API provides GET /projectops/clients?q=...&status=active|archived|all (default all), PUT /projectops/clients/:id for full contact-field replacement, POST /projectops/clients/:id/archive, and GET /projectops/clients/:id/projects. Edits and archives require expectedRevision from the current client response. A stale revision or archived client returns 409; the browser offers a deliberate reload. Empty optional contact/email fields clear them. Search treats SQL wildcard characters literally and is case-insensitive.
+The client API provides GET /projectops/clients?q=...&status=active|archived|all (default all; paginated, see *List pagination* below), PUT /projectops/clients/:id for full contact-field replacement, POST /projectops/clients/:id/archive, and GET /projectops/clients/:id/projects. Edits and archives require expectedRevision from the current client response. A stale revision or archived client returns 409; the browser offers a deliberate reload. Empty optional contact/email fields clear them. Search treats SQL wildcard characters literally and is case-insensitive.
 
 Migration 0003 adds client revisions without changing existing records. Conditional SQL updates prevent lost edits. Project insertion locks and checks the client row, so a concurrent archive cannot be bypassed. Native, PostgreSQL and Chromium checks run through the existing verification commands.
+
+## List pagination
+
+GET /projectops/clients and GET /projectops/project-requests return one page: `{ "items": [...], "nextCursor": "..." | null }`. `limit` is an integer from 1 to 100 (default 50). To read the next page, repeat the same request with `cursor=<nextCursor>`; `nextCursor` is null on the last page. Invalid limits return 400 `INVALID_PAGE_LIMIT`; malformed, tampered or wrong-list cursors return 400 `INVALID_PAGE_CURSOR`. Cursors are opaque: do not build or edit them.
+
+Pagination is keyset-based. Clients are ordered by creation time (newest first, then id) and projects by last update (then creation time, then id); a cursor records the sort key of the last row returned, and the next page is an indexed range read that starts after it (migration 0008). Records created while someone pages appear before the cursor, so later pages never repeat or shift. A project edited during paging moves to the front and can be missed or shown once more; that is inherent to ordering by last update. Per-client and per-project collections (a client's projects, a project's tasks, notes and so on) are bounded by their parent and are not paginated.
+
+The client directory loads 50 clients and offers **Load more clients**; a new search starts again from the first page.
 
 ## Project workspace and editing
 

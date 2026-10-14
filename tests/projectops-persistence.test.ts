@@ -263,9 +263,9 @@ unitTest('PROJECTOPS-PERSIST-003: repository persists client, request, transitio
   });
   const activities = await repo.listProjectActivities('req-1');
   const milestones = await repo.listProjectMilestones('req-1');
-  const clients = await repo.listClients();
+  const clients = (await repo.listClients()).items;
   const fetchedClient = await repo.getClient('client-1');
-  const requests = await repo.listProjectRequests();
+  const requests = (await repo.listProjectRequests()).items;
   const fetchedRequest = await repo.getProjectRequest('req-1');
   const dashboard = await repo.getDashboard();
   const snapshot = sql.snapshot();
@@ -837,7 +837,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
 
     const clientsRes = await fetch(`${server.origin}/projectops/clients`);
     assert.equal(clientsRes.status, 200);
-    const clients = await clientsRes.json() as readonly { id: string }[];
+    const clients = (await clientsRes.json() as { items: readonly { id: string }[] }).items;
     assert.equal(clients[0]?.id, 'client-1');
 
     const clientRes = await fetch(`${server.origin}/projectops/clients/client-1`);
@@ -846,7 +846,7 @@ unitTest('PROJECTOPS-PERSIST-005: API can run on repository-backed persistence s
 
     const requestsRes = await fetch(`${server.origin}/projectops/project-requests`);
     assert.equal(requestsRes.status, 200);
-    const requests = await requestsRes.json() as readonly { id: string }[];
+    const requests = (await requestsRes.json() as { items: readonly { id: string }[] }).items;
     assert.equal(requests[0]?.id, 'req-1');
 
     const requestRes = await fetch(`${server.origin}/projectops/project-requests/req-1`);

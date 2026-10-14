@@ -1,5 +1,6 @@
 import { exportFields, exportCollections, exportOrder, type ExportEntity } from './project-export.ts';
 import { validateDashboardFilter, type DashboardFilter } from './dashboard.ts';
+import { DEFAULT_PAGE_LIMIT, type ClientPageKey, type ProjectRequestPageKey, type ValidatedPage } from './pagination.ts';
 import type {
   ProjectActivity,
   ProjectChangeRequest,
@@ -1488,14 +1489,26 @@ export function selectProjectActivityByIdSql(
   });
 }
 
-export function selectClientsSql(filter: Required<ClientFilter> = { q: '', status: 'all' }): SqlStatement {
+// Keyset pages: `created_at <= $k AND (created_at < $k OR id > $id)` is equivalent to
+// "after (created_at, id) in created_at DESC, id ASC order", but unlike a plain OR it gives the
+// (created_at DESC, id ASC) index a start position (migration 0008). Fetches limit + 1 rows so the
+// caller can tell whether another page exists.
+export function selectClientsSql(
+  filter: Required<ClientFilter> = { q: '', status: 'all' },
+  page: ValidatedPage<ClientPageKey> = { limit: DEFAULT_PAGE_LIMIT }
+): SqlStatement {
+  const after = page.after;
   return Object.freeze({
     sql: `SELECT *
       FROM projectops_clients
       WHERE ($1 = 'all' OR status = $1)
-        AND strpos(lower(name || ' ' || COALESCE(contact_name, '') || ' ' || COALESCE(email, '')), $2) > 0
-      ORDER BY created_at DESC, id ASC`,
-    params: Object.freeze([filter.status, filter.q]),
+        AND strpos(lower(name || ' ' || COALESCE(contact_name, '') || ' ' || COALESCE(email, '')), $2) > 0${after ? `
+        AND created_at <= $4 AND (created_at < $4 OR id > $5)` : ''}
+      ORDER BY created_at DESC, id ASC
+      LIMIT $3`,
+    params: Object.freeze(after
+      ? [filter.status, filter.q, page.limit + 1, after.createdAtIso, after.id]
+      : [filter.status, filter.q, page.limit + 1]),
   });
 }
 
@@ -1546,12 +1559,24 @@ export function editProjectSql(request: ProjectRequest, expectedRevision: number
       request.priority, request.updatedAtIso, expectedRevision] };
 }
 
-export function selectProjectRequestsSql(): SqlStatement {
+// Same keyset technique over (updated_at DESC, created_at DESC, id ASC); see selectClientsSql.
+// updated_at changes on edits, so a project edited while someone pages may move to an earlier
+// page: it can be missed or repeated once, never corrupt the order. That is inherent to sorting
+// by a mutable key and is the accepted trade-off for showing recently active projects first.
+export function selectProjectRequestsSql(
+  page: ValidatedPage<ProjectRequestPageKey> = { limit: DEFAULT_PAGE_LIMIT }
+): SqlStatement {
+  const after = page.after;
   return Object.freeze({
     sql: `SELECT *
-      FROM projectops_project_requests
-      ORDER BY updated_at DESC, created_at DESC, id ASC`,
-    params: Object.freeze([]),
+      FROM projectops_project_requests${after ? `
+      WHERE updated_at <= $2
+        AND (updated_at < $2 OR created_at < $3 OR (created_at = $3 AND id > $4))` : ''}
+      ORDER BY updated_at DESC, created_at DESC, id ASC
+      LIMIT $1`,
+    params: Object.freeze(after
+      ? [page.limit + 1, after.updatedAtIso, after.createdAtIso, after.id]
+      : [page.limit + 1]),
   });
 }
 
