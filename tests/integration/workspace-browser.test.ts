@@ -8,7 +8,8 @@ import { projectSections } from '../../apps/web/src/projectops/project-page.ts';
 
 test('Project browser journey creates, navigates every section, edits safely, retries failures and preserves archived views', async () => {
   await operatorFixture(async (databaseUrl, pool) => {
-    const app = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0 }); let browser;
+    // Pinned before the 2026-11-01/2026-12-01 deadlines entered below; the wall clock would reject them once it passes them.
+    const app = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0, clock: () => '2026-10-03T12:00:00.000Z' }); let browser;
     try {
       await new ProjectOpsOperatorStore(pool).provision('operator', 'workspace-browser-password');
       browser = await chromium.launch({ headless: true }); const context = await browser.newContext(); const page = await context.newPage();

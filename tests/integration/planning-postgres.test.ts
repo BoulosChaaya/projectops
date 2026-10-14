@@ -30,7 +30,9 @@ test('Planning migration upgrades existing children and API workflows persist ac
       assert.equal((await migrationClient.query("SELECT revision FROM projectops_project_tasks WHERE id='legacy-t'")).rows[0].revision, 1);
     } finally { migrationClient.release(); }
 
-    const config = { databaseUrl, host: '127.0.0.1', port: 0 };
+    // Pin "now" before the T2/T3 due dates so the due-date rule is evaluated against a fixed
+    // creation time, not the wall clock (which passed T2 on 2026-10-05 and broke this test).
+    const config = { databaseUrl, host: '127.0.0.1', port: 0, clock: () => T1 };
     let app = await startProjectOpsPostgresApp(config);
     try {
       await new ProjectOpsOperatorStore(pool).provision('operator', 'planning-acceptance-password');
