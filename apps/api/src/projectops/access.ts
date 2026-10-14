@@ -6,6 +6,7 @@ import type { KernelRouteHandler } from '../bootstrap/http-listener.ts';
 import type { ParsedRequest } from '../http/request.ts';
 import type { RouteDefinition } from '../http/path-matching.ts';
 import { HttpError } from '../http/errors/classify.ts';
+import { isDirectHttpResponse } from '../http/response.ts';
 
 type AccessStore = Pick<ProjectOpsOperatorStore, 'login' | 'resolve' | 'logout' | 'saveDefaults' | 'changeCredentials'>;
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => ({ status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers }, body: JSON.stringify(body) });
@@ -50,7 +51,9 @@ export class ProjectOpsAccess {
       }
       const result = await route.handler(prepared, context, params);
       // API data and dashboard pages must never be cached after signing out.
-      if (result && typeof result === 'object' && 'status' in result && 'body' in result) return { ...result, headers: { ...(result as any).headers, 'cache-control': 'no-store' } };
+      // Use the serializer's own test for a prepared HTTP response. Checking only for `status` and
+      // `body` fields misclassified notes (which have both) and wrote `headers` into their JSON.
+      if (isDirectHttpResponse(result)) return { ...result, headers: { ...result.headers, 'cache-control': 'no-store' } };
       return json(result);
     } };
   }

@@ -69,7 +69,8 @@ export function serializeResponse(
   });
 }
 
-function isDirectHttpResponse(value: unknown): value is DirectHttpResponse {
+// Shared by the serializer and route wrappers so both classify results the same way.
+export function isDirectHttpResponse(value: unknown): value is DirectHttpResponse {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<DirectHttpResponse>;
   return (
