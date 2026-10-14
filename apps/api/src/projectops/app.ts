@@ -42,6 +42,7 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
     ...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(),
   ] : productRoutes);
   const listener = await startHttpListener({
+    responseHeaders: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
     host: config.host,
     port: config.port,
     routes,
