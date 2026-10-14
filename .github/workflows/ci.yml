@@ -1,24 +1,46 @@
-name: Test
+name: CI
 
+# One workflow for every change: repository checks and native tests on the
+# supported Node range, then the real PostgreSQL and Chromium acceptance suites.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR supersedes the running check.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  verify:
+    name: verify (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22: lowest major allowed by package.json engines (>=22.6.0).
+        # 24.19.0: the production runtime version.
+        node: ['22', '24.19.0']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24.19.0
+          node-version: ${{ matrix.node }}
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      # Repository hygiene + every native test suite.
+      - run: pnpm verify
 
-  postgres:
+  acceptance:
+    name: acceptance (postgres + chromium)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -33,6 +55,9 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+    env:
+      # Disposable CI-only database; not a secret.
+      PROJECTOPS_TEST_DATABASE_URL: postgres://projectops:acceptance-only@localhost:5432/projectops_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,12 +65,9 @@ jobs:
           node-version: 24.19.0
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      # pg_dump/pg_restore matching the server, for the backup/restore drill.
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
       - run: pnpm test:postgres
-        env:
-          PROJECTOPS_TEST_DATABASE_URL: postgres://projectops:acceptance-only@localhost:5432/projectops_test
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:browser
-        env:
-          PROJECTOPS_TEST_DATABASE_URL: postgres://projectops:acceptance-only@localhost:5432/projectops_test
