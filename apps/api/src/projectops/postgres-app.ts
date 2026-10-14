@@ -24,6 +24,8 @@ export interface ProjectOpsRuntimeConfig {
   readonly clock?: () => string;
   /** Structured log destination; production uses JSON lines on stdout. Tests capture records. */
   readonly logger?: Logger;
+  /** Git commit of the running code, reported by GET /health/live (Render sets RENDER_GIT_COMMIT). */
+  readonly commit?: string;
 }
 
 export function validateProjectOpsOrigin(host: string, value?: string): string | undefined {
@@ -38,20 +40,29 @@ export function validateProjectOpsOrigin(host: string, value?: string): string |
   return value;
 }
 
-export function readProjectOpsRuntimeConfig(
-  env: Readonly<Record<string, string | undefined>> = process.env
-): ProjectOpsRuntimeConfig {
+/** DATABASE_URL alone: what commands that do not serve HTTP (operator provisioning) need. */
+export function readProjectOpsDatabaseUrl(env: Readonly<Record<string, string | undefined>> = process.env): string {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required.');
   let url: URL;
   try { url = new URL(env.DATABASE_URL); } catch { throw new Error('Invalid DATABASE_URL.'); }
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname || !url.pathname.slice(1)) {
     throw new Error('DATABASE_URL must identify a PostgreSQL server and database.');
   }
+  return env.DATABASE_URL;
+}
+
+export function readProjectOpsRuntimeConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): ProjectOpsRuntimeConfig {
+  const databaseUrl = readProjectOpsDatabaseUrl(env);
   const rawPort = env.PORT ?? '3000';
   if (!/^\d+$/.test(rawPort) || Number(rawPort) > 65535) throw new Error('Invalid PORT.');
   const host = env.HOST ?? '127.0.0.1';
   if (!host.trim()) throw new Error('Invalid HOST.');
-  return Object.freeze({ databaseUrl: env.DATABASE_URL, host, port: Number(rawPort), publicOrigin: validateProjectOpsOrigin(host, env.PUBLIC_ORIGIN) });
+  // The commit is informational; anything but a full SHA is ignored rather than echoed publicly.
+  const commit = /^[0-9a-f]{40}$/.test(env.RENDER_GIT_COMMIT ?? '') ? env.RENDER_GIT_COMMIT : undefined;
+  return Object.freeze({ databaseUrl, host, port: Number(rawPort), publicOrigin: validateProjectOpsOrigin(host, env.PUBLIC_ORIGIN),
+    ...(commit ? { commit } : {}) });
 }
 
 export async function startProjectOpsPostgresApp(
@@ -86,7 +97,7 @@ export async function startProjectOpsPostgresApp(
           await pool.query('SELECT 1');
           return true;
         },
-      }]),
+      }], config.commit ? { commit: config.commit } : undefined),
       async migrate() {
         const client = await pool.connect();
         try {

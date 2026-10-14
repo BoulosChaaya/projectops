@@ -1,0 +1,59 @@
+name: Deployed smoke
+
+# Runs the browser acceptance journey against the live Render service. Started by hand after a
+# deploy, because it writes one archived acceptance client and project into production.
+# Needs repository secrets PROJECTOPS_OPERATOR_LOGIN and PROJECTOPS_OPERATOR_PASSWORD and the
+# repository variable PROJECTOPS_ORIGIN (the exact https:// origin, no trailing slash).
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: initial creates the acceptance project; after-restart re-reads it after a Render restart
+        type: choice
+        options: [initial, after-restart]
+        default: initial
+      receipt:
+        description: For after-restart only, the JSON receipt printed by the initial run
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployed-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # The expected commit is main's head: what Render deploys once CI passes on it.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run against the deployed service
+        env:
+          ORIGIN: ${{ vars.PROJECTOPS_ORIGIN }}
+          LOGIN: ${{ secrets.PROJECTOPS_OPERATOR_LOGIN }}
+          PASSWORD: ${{ secrets.PROJECTOPS_OPERATOR_PASSWORD }}
+          PHASE: ${{ inputs.phase }}
+          RECEIPT: ${{ inputs.receipt }}
+        # Credentials travel only through the environment and stdin, never argv or the log.
+        run: |
+          node -e '
+            const e = process.env;
+            const config = { origin: e.ORIGIN, authorizeAcceptanceWrites: true, login: e.LOGIN, password: e.PASSWORD,
+              checkpoint: require("node:child_process").execSync("git rev-parse HEAD").toString().trim() };
+            if (e.PHASE === "after-restart") {
+              const { projectId, clientId, snapshotSha256, operatorDefaults } = JSON.parse(e.RECEIPT || "{}");
+              Object.assign(config, { phase: "after-restart", renderRestartCompleted: true, projectId, clientId, snapshotSha256, operatorDefaults });
+            }
+            process.stdout.write(JSON.stringify(config));
+          ' | node --experimental-strip-types scripts/projectops-deployed-smoke.mjs

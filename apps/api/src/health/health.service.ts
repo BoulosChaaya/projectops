@@ -7,9 +7,12 @@ export class HealthService {
   private initialized = false;
   private fatal = false;
   private readonly checks: DependencyHealthCheck[];
+  private readonly release?: Readonly<Record<string, string>>;
 
-  constructor(checks: readonly DependencyHealthCheck[] = []) {
+  /** `release` (for example the deployed Git commit) is reported by liveness so a deploy can be verified from outside. */
+  constructor(checks: readonly DependencyHealthCheck[] = [], release?: Readonly<Record<string, string>>) {
     this.checks = [...checks];
+    if (release && Object.keys(release).length > 0) this.release = Object.freeze({ ...release });
   }
 
   public setInitialized(value: boolean): void {
@@ -21,7 +24,8 @@ export class HealthService {
   }
 
   public checkLiveness(): HealthStatus {
-    return liveness(this.fatal);
+    const status = liveness(this.fatal);
+    return this.release ? Object.freeze({ ...status, details: this.release }) : status;
   }
 
   public async checkReadiness(): Promise<HealthStatus> {
