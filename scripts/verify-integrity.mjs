@@ -58,10 +58,15 @@ if (disguisedYaml.length > 0) {
   fail(`YAML files contain TypeScript content: ${disguisedYaml.join(', ')}`);
 }
 
-const workspacePackages = ['apps/api', 'apps/gateway', 'apps/web', 'apps/worker'];
-for (const dir of fs.readdirSync(path.join(ROOT, 'packages')).sort()) {
-  workspacePackages.push(`packages/${dir}`);
+// Discover workspace folders (matching pnpm-workspace.yaml) instead of hardcoding names,
+// so removing or adding a package cannot silently skip or break this check.
+const workspacePackages = [];
+for (const parent of ['apps', 'packages']) {
+  for (const entry of fs.readdirSync(path.join(ROOT, parent), { withFileTypes: true })) {
+    if (entry.isDirectory()) workspacePackages.push(`${parent}/${entry.name}`);
+  }
 }
+workspacePackages.sort();
 for (const pkgDir of workspacePackages) {
   if (!fs.existsSync(path.join(ROOT, pkgDir, 'package.json'))) {
     fail(`Workspace package is missing package.json: ${pkgDir}`);
