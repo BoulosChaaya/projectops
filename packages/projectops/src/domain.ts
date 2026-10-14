@@ -751,14 +751,14 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const workflowTransitions: Readonly<Record<ProjectRequestStatus, readonly ProjectRequestStatus[]>> =
   Object.freeze({
-    new: Object.freeze(['estimated', 'cancelled']),
-    estimated: Object.freeze(['estimated', 'approved', 'cancelled']),
-    approved: Object.freeze(['in_progress', 'cancelled']),
-    in_progress: Object.freeze(['on_hold', 'delivered', 'cancelled']),
-    on_hold: Object.freeze(['in_progress', 'cancelled']),
-    cancelled: Object.freeze(['archived']),
-    delivered: Object.freeze(['archived']),
-    archived: Object.freeze([]),
+    new: Object.freeze(['estimated', 'cancelled'] as const),
+    estimated: Object.freeze(['estimated', 'approved', 'cancelled'] as const),
+    approved: Object.freeze(['in_progress', 'cancelled'] as const),
+    in_progress: Object.freeze(['on_hold', 'delivered', 'cancelled'] as const),
+    on_hold: Object.freeze(['in_progress', 'cancelled'] as const),
+    cancelled: Object.freeze(['archived'] as const),
+    delivered: Object.freeze(['archived'] as const),
+    archived: Object.freeze([] as const),
   });
 
 export function createClient(input: NewClientInput): ProjectOpsClient {
@@ -1231,11 +1231,11 @@ export type ProjectExecutionResource = 'work_log' | 'note' | 'document' | 'issue
 
 const executionCreateStates: Readonly<Record<ProjectExecutionResource, readonly ProjectRequestStatus[]>> =
   Object.freeze({
-    work_log: Object.freeze(['estimated', 'approved', 'in_progress', 'delivered']),
-    note: Object.freeze(['new', 'estimated', 'approved', 'in_progress', 'on_hold', 'delivered']),
-    document: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered']),
-    issue: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered']),
-    risk: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered']),
+    work_log: Object.freeze(['estimated', 'approved', 'in_progress', 'delivered'] as const),
+    note: Object.freeze(['new', 'estimated', 'approved', 'in_progress', 'on_hold', 'delivered'] as const),
+    document: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'] as const),
+    issue: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'] as const),
+    risk: Object.freeze(['estimated', 'approved', 'in_progress', 'on_hold', 'delivered'] as const),
   });
 
 const executionResourceDetails = Object.freeze({

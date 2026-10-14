@@ -50,7 +50,8 @@ Owner-approved hardening that changes no product scope. Each item is a reviewed 
   - #13 removes the Uruk foundation code ProjectOps never used (335 files, -7,880 lines): 11 unused workspace folders, unused files in partly used folders, and 9 test files covering only removed layers. Proven by import tracing from every entry point, a path/stem reference search, unchanged PostgreSQL/Chromium suites and an identical real-use run.
   - #14 replaces six CI workflows with one (`verify` on Node 22 and 24.19.0, `acceptance` on PostgreSQL 16 + Chromium).
   - The docs PR removes `infra/` and Uruk documentation that described removed code, and rewrites `README.md` and `AI_CONTEXT.md` to match the code.
-- Planned, each requiring separate owner approval: strict type-checking in CI, pagination, an explicit API response contract, error logging with causes, deployment, UI redesign.
+- Phase 2 type check: `pnpm verify` runs `tsc` in strict mode over source and tests (TypeScript 6.0.3, `@types/node` 22, `@types/pg` 8.23.1 as dev dependencies; no runtime dependency change). 56 existing errors fixed without behavior change, including handlers and workflow tables that had silently lost type checking and 7 unused repository methods.
+- Planned, each requiring separate owner approval: pagination, an explicit API response contract, error logging with causes, deployment, UI redesign.
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.

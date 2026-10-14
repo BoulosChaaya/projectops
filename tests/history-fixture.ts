@@ -23,7 +23,7 @@ export async function historyJourney(repo: ProjectOpsRepository, actor = 'operat
     if (type === 'status_changed') assert.match(activity.summary, /\((new|approved|in_progress|on_hold|delivered|cancelled) → (in_progress|on_hold|delivered|cancelled|archived)\)/);
     assert.match(activity.id, /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/);
     events.add(type);
-    await assert.rejects(command, undefined, 'Retry must be stale, duplicate or terminal: ' + type);
+    await assert.rejects(command, () => true, 'Retry must be stale, duplicate or terminal: ' + type);
     assert.deepEqual(await repo.listProjectActivities(projectId), after, 'No false retry history: ' + type);
     return result as any;
   }

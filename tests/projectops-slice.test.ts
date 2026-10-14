@@ -1176,6 +1176,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
   const expenses = new Map<string, ProjectExpense>();
   const activities = new Map<string, ProjectActivity>();
 
+  // Partial test double: implements only the service methods these route tests exercise.
   return Object.freeze({
     async createClient(input: NewClientInput): Promise<ProjectOpsClient> {
       const client = createClient(input);
@@ -1755,7 +1756,7 @@ function createMemoryProjectOpsService(): ProjectOpsApiService {
         })
       );
     },
-  });
+  }) as unknown as ProjectOpsApiService;
 }
 
 function milestoneKey(projectRequestId: string, milestoneId: string): string {

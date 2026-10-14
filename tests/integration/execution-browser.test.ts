@@ -91,7 +91,7 @@ test('Execution workspace manages five resource types, conflicts and read-only l
       await risk.getByLabel('Mitigation note (optional)').fill('Mitigated by operator'); await risk.getByRole('button', { name: 'Mitigate risk', exact: true }).click();
       await page.locator('#risk-execution-status').getByText('Risk mitigated.', { exact: true }).waitFor();
       const clientNote = page.locator('#records-notes article').filter({ hasText: 'Client note' }); await clientNote.getByRole('button', { name: 'Archive note', exact: true }).click(); await page.locator('#note-execution-status').getByText('Note archived.', { exact: true }).waitFor();
-      const document = page.locator('#records-documents article').filter({ hasText: 'Handoff link' }); await document.getByRole('button', { name: 'Archive document', exact: true }).click(); await page.locator('#document-execution-status').getByText('Document archived.', { exact: true }).waitFor();
+      const handoffDocument = page.locator('#records-documents article').filter({ hasText: 'Handoff link' }); await handoffDocument.getByRole('button', { name: 'Archive document', exact: true }).click(); await page.locator('#document-execution-status').getByText('Document archived.', { exact: true }).waitFor();
 
       await page.reload(); await page.locator('#issues').getByText('Resolved by operator', { exact: true }).waitFor(); await page.locator('#risks').getByText('Mitigated by operator', { exact: true }).waitFor();
       const logs = await read('project-requests/execution-project/work-logs'); assert.equal(logs[0].actor, 'operator'); assert.equal(logs[0].taskId, 'task-link'); assert.equal(logs[0].billable, false);

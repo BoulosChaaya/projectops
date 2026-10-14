@@ -74,7 +74,12 @@ for (const pkgDir of workspacePackages) {
 }
 console.log(`  [PASS] Hygiene checks passed for ${allFiles.length} files.`);
 
-banner('2. Native TypeScript test suites');
+// Node strips types without checking them, so the compiler is the only thing that does.
+banner('2. Type check (tsc, strict, source and tests)');
+run('node', [path.join('node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.json']);
+console.log('  [PASS] No type errors.');
+
+banner('3. Native TypeScript test suites');
 run('node', ['--experimental-strip-types', '--test', 'tests/*.test.ts']);
 
 console.log('\n[PROJECTOPS VERIFY: PASS]');

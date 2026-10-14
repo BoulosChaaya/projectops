@@ -3,7 +3,7 @@ import {ProjectOpsRepository,ProjectOpsMemorySqlExecutor,applyProjectOpsMigratio
 import {exportCollections,exportFields,composeProjectExportSnapshot,createProjectExportArtifact,projectExportFilename,orderExportCollection,validateExportIdentifier}from'../packages/projectops/src/project-export.ts';
 import {renderDeliverySummary}from'../apps/web/src/projectops/project-handoff.ts';
 import {ProjectOpsAccess}from'../apps/api/src/projectops/access.ts';import {startProjectOpsApp}from'../apps/api/src/projectops/app.ts';
-import {seedExport,assertExport,CREATED,ACTION,AUDIT,states,special}from'./export-fixture.ts';
+import {seedExport,assertExport,CREATED,ACTION,AUDIT,states}from'./export-fixture.ts';import type {OperatorDefaults}from'../packages/projectops/src/operator.ts';
 async function fixture(){const sql=new ProjectOpsMemorySqlExecutor();await applyProjectOpsMigrations(sql);const base=new ProjectOpsRepository(sql);await base.createClient({id:'c',name:'Client Élan',createdAtIso:CREATED});const repo=base.withHistory({actor:'operator',clock:()=>AUDIT});return{sql,base,repo};}
 test('Internal export allowlists all thirteen collections, scopes projects, canonicalizes null/ISO and preserves exact money without mutations',async()=>{
  const{sql,base,repo}=await fixture();await seedExport(repo);await seedExport(repo,'other');await base.createClient({id:'unrelated',name:'PRIVATE-OTHER-CLIENT',createdAtIso:CREATED});
@@ -39,7 +39,7 @@ test('Handoff disclosure includes only approved selections with safe text/links,
 });
 test('Protected artifact routes own generation context and classify access, query, source and encoding failures without partial downloads',async()=>{
  const{sql,repo}=await fixture();await seedExport(repo);let fail=false,reads=0;const session={login:'operator',csrfToken:'csrf',tokenHash:'hash',defaults:{defaultCurrency:'EUR',defaultPriority:'medium' as const,timezone:'Asia/Beirut'}};
- const access=new ProjectOpsAccess({resolve:async token=>token==='valid'?session:null,login:async()=>null,logout:async()=>{},saveDefaults:async v=>v,changeCredentials:async()=>false});
+ const access=new ProjectOpsAccess({resolve:async token=>token==='valid'?session:null,login:async()=>null,logout:async()=>{},saveDefaults:async (v:OperatorDefaults)=>v,changeCredentials:async()=>false});
  const app=await startProjectOpsApp({sql:{transaction:r=>sql.transaction(r),query:async s=>{if(s.sql.startsWith('WITH project_export')){reads++;if(fail)throw Error('SECRET storage failure');}return sql.query(s);}},access,clock:()=>AUDIT,host:'127.0.0.1',port:0});
  try{const get=(path:string,auth=true)=>fetch(app.server.origin+path,{headers:auth?{cookie:'projectops_session=valid'}:{},redirect:'manual'}),root='/projectops/project-requests/r/export',summary='/projectops/projects/r/delivery-summary';const before=sql.snapshot();
  assert.equal((await get(root,false)).status,401);assert.equal((await get(summary,false)).status,302);

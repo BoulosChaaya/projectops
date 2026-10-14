@@ -733,7 +733,7 @@ export function createProjectOpsRoutes(
       )),
     },
   ];
-  return Object.freeze(routes.map(route => {
+  return Object.freeze(routes.map((route): RouteDefinition<KernelRouteHandler> => {
     // Guarded resource commands classify missing children before conflicts and enforce terminal parents atomically.
     if (/\/:id\/(deliverables|feedback|invoices|expenses|activities)(\/|$)/.test(route.path)) return route;
     if (route.method === 'GET' || !route.path.startsWith('/projectops/project-requests/:id') || ['/status','/control'].some(suffix => route.path.endsWith(suffix))) return route;
@@ -1253,7 +1253,8 @@ function readRecord(value: unknown): Record<string, unknown> {
 }
 
 function readPositiveInteger(value: unknown, field: string): number {
-  if (!Number.isInteger(value) || value <= 0) {
+  // typeof narrows for the compiler; Number.isInteger already rejected non-numbers at runtime.
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
     throw new HttpError(400, 'INVALID_PROJECTOPS_FIELD', `Missing or invalid field: ${field}.`);
   }
   return value;

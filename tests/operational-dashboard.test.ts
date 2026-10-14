@@ -47,7 +47,7 @@ test('Operational classification uses strict instant boundaries, stable ties, no
 test('Protected dashboard GET owns one clock, shares validation, timezone and no-store, and renders safe failures', async () => {
   const { sql,repo } = await fixture(); let samples=0,fail=false,reads=0;
   const session={login:'operator',csrfToken:'token',tokenHash:'hash',defaults:{defaultCurrency:'USD',defaultPriority:'low' as const,timezone:'Asia/Beirut'}};
-  const app=await startProjectOpsApp({sql:{query:async statement=>{if(statement.sql.includes('dashboard_scope')){reads++;if(fail)throw Error('Private SQL detail');}return sql.query(statement);},transaction:run=>sql.transaction(run)},port:0,clock:()=>{samples++;return NOW;},access:new ProjectOpsAccess({resolve:async token=>token==='valid'?session:null} as any)});
+  const app=await startProjectOpsApp({sql:{query:async statement=>{if(statement.sql.includes('dashboard_scope')){reads++;if(fail)throw Error('Private SQL detail');}return sql.query(statement);},transaction:run=>sql.transaction(run)},port:0,clock:()=>{samples++;return NOW;},access:new ProjectOpsAccess({resolve:async (token:string)=>token==='valid'?session:null} as any)});
   try {
     const headers={cookie:'projectops_session=valid'};
     assert.equal((await fetch(app.server.origin+'/projectops',{redirect:'manual'})).status,302);
