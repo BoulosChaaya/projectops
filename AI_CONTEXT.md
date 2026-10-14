@@ -11,7 +11,8 @@ Read this before changing anything. ProjectOps is a client and project operation
 5. **Time.** Application timestamps come from an injected clock (`ProjectOpsRuntimeConfig.clock` in tests, the wall clock in production). Tests must not depend on the current date.
 6. **Security boundary.** Every product route is protected by operator sessions; writes require the configured `Origin`, `application/json` and the session's CSRF token. Stored user text is rendered as text, never HTML.
 7. **Types.** Node strips types without checking them; `tsc` (strict, `erasableSyntaxOnly`, `verbatimModuleSyntax`) is the only checker and runs in `pnpm verify`. Keep it at zero errors. Use `import type` for type-only imports, and give `Object.freeze` an explicit type when freezing handlers or tables, or their contents lose type checking.
-8. **Testing.** Node's built-in `node:test` and `node:assert/strict`. Behavior that touches persistence needs PostgreSQL acceptance coverage, not only memory-executor tests.
+8. **Errors and logs.** Expected failures throw `HttpError` with a 4xx status and a specific code. Anything else becomes 500 (or 503 when the database is unreachable) with a generic body; the listener logs it with `describeError`. Never put stacks, SQL or internal messages in responses, and never log query strings, request bodies, pg `detail`/`where` or query parameters.
+9. **Testing.** Node's built-in `node:test` and `node:assert/strict`. Behavior that touches persistence needs PostgreSQL acceptance coverage, not only memory-executor tests.
 
 ## Repository layout
 

@@ -65,6 +65,14 @@ Pagination is keyset-based. Clients are ordered by creation time (newest first, 
 
 The client directory loads 50 clients and offers **Load more clients**; a new search starts again from the first page.
 
+## Errors and logs
+
+Error responses are `{ code, message, status, correlationId }` and never include stack traces, SQL or internal messages. Client errors keep their specific code (400 validation, 401 session, 403 origin or CSRF, 404, 409 conflicts). An unexpected failure returns 500 `INTERNAL_SERVER_ERROR`. When PostgreSQL cannot be reached (connection refused or dropped, server shutting down, pool connect timeout, too many connections) requests return 503 `SERVICE_UNAVAILABLE` with `Retry-After: 5` instead of 500, and `/health/ready` returns 503 `SERVICE_NOT_READY`; the pool reconnects on its own when the database returns, without restarting the process.
+
+The process writes JSON lines to stdout: `timestamp`, `level`, `message` and `context`. Each request logs `http.request.completed` (info), `http.request.error` (warn, client errors) or `http.request.failed` (error, server errors) with the correlation id (also returned in the `x-correlation-id` header), method, path, code and status. Paths are logged without their query string, because queries carry search text. Failed requests also log `error`: the error's name, message, code, stack frames and up to three causes, plus PostgreSQL's `severity`, `schema`, `table`, `column`, `constraint` and `routine` when present. PostgreSQL `detail` and `where` (which quote row values) and query parameters are never logged, and credentials in connection strings are redacted. A deliberate server response such as `SERVICE_NOT_READY` is logged by its code without a stack. Errors on idle pooled connections, typically the first sign of a database restart, are logged as `db.pool.error`.
+
+To trace a report, take the `correlationId` from the error response and search the log for it.
+
 ## Project workspace and editing
 
 Create projects from an active client page. Creation uses the saved priority and accepts a title, brief, budget range and optional deadline. Dashboard project names and client project lists link to /projectops/projects/:id.

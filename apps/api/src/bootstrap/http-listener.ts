@@ -1,6 +1,6 @@
 // EXEC-FOUND-034: HTTP Listener & EXEC-FOUND-060: Request-Serving System
 import type http from 'node:http';
-import { createLogger, type Logger } from '../../../../packages/logger/src/index.ts';
+import { createLogger, describeError, type Logger } from '../../../../packages/logger/src/index.ts';
 import { HealthService } from '../health/health.service.ts';
 import { bindNetwork } from './network.ts';
 import { createConnectionTracker, acceptConnection } from '../http/connection.ts';
@@ -42,6 +42,15 @@ export interface HttpServer {
   readonly origin: string;
   readonly rawServer: http.Server;
   close(): Promise<void>;
+}
+
+// Every 503 here is temporary (overload or an unreachable database); tell clients when to retry.
+const RETRY_AFTER_SECONDS = '5';
+
+/** The request path without its query string: queries can carry search terms and other user input. */
+export function requestPath(url: string | undefined): string {
+  const path = (url ?? '/').split('?')[0]!.split('#')[0]!;
+  return path.length > 512 ? `${path.slice(0, 512)}…` : path;
 }
 
 export async function startHttpListener(config: HttpListenerConfig = {}): Promise<HttpServer> {
@@ -90,7 +99,8 @@ export async function startHttpListener(config: HttpListenerConfig = {}): Promis
         const errBody = normalizeError(
           new HttpError(503, 'SERVER_BUSY', 'Maximum concurrent request limit reached.')
         );
-        const serialized = serializeResponse(errBody, { status: 503 });
+        const serialized = serializeResponse(errBody, { status: 503, headers: { 'retry-after': RETRY_AFTER_SECONDS } });
+        logger.warn('http.request.rejected', { code: errBody.code, status: 503, method: req.method, path: requestPath(req.url) });
         res.writeHead(serialized.status, { ...serialized.headers, ...config.responseHeaders });
         res.end(serialized.body);
         return;
@@ -140,15 +150,29 @@ export async function startHttpListener(config: HttpListenerConfig = {}): Promis
         res.end(serialized.body);
       } catch (error) {
         const normalized = normalizeError(error, correlationId);
-        logger.warn('http.request.error', {
+        const entry = {
           correlationId: normalized.correlationId,
+          method: req.method,
+          path: requestPath(req.url),
           code: normalized.code,
           status: normalized.status,
-        });
+        };
+        // Client errors are expected outcomes (validation, missing session, conflicts): a warning
+        // without a stack. Server errors are what an operator must diagnose from the log alone,
+        // because the response deliberately hides the cause: log the error itself at error level.
+        // A deliberate HttpError without a cause (such as SERVICE_NOT_READY) is fully described by
+        // its code, so its stack would only point at the line that threw it.
+        if (normalized.status >= 500) {
+          const deliberate = error instanceof HttpError && error.cause === undefined;
+          logger.error('http.request.failed', deliberate ? entry : { ...entry, error: describeError(error) });
+        } else {
+          logger.warn('http.request.error', entry);
+        }
 
         const serializedErr = serializeResponse(normalized, {
           status: normalized.status,
           correlationId: normalized.correlationId,
+          ...(normalized.status === 503 ? { headers: { 'retry-after': RETRY_AFTER_SECONDS } } : {}),
         });
         res.writeHead(serializedErr.status, { ...serializedErr.headers, ...config.responseHeaders });
         res.end(serializedErr.body);

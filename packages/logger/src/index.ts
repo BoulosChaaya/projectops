@@ -69,3 +69,4 @@ export function withLogContext(logger: Logger, context: Record<string, unknown>)
 }
 
 export { type LogLevel, type LogSink, type LogRecord };
+export { describeError, redactSecrets, type ErrorDescription } from './error.ts';
