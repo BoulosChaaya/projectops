@@ -11,3 +11,6 @@ ORMs (Prisma/TypeORM), unvalidated `process.env` access, and third-party logging
 
 ## Consequences & Enforcement
 Eliminates ORM impedance mismatch, supply-chain bloat, and hidden connection/transaction magic.
+
+## Status note (2026-10-14)
+The decision stands: ProjectOps uses raw Node.js and PostgreSQL primitives with no ORM, and `pg` is its only runtime dependency (see ADR-001). This record predates the product. Its Redis reference was never implemented in ProjectOps, and the execution-graph node it cites belonged to the removed Uruk foundation docs.

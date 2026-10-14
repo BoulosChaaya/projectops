@@ -1,5 +1,0 @@
-node_id: EXEC-CICD-017
-name: "Build Reproducibility"
-contract: "[\\\"`ReproducibleBuildContract`\\\"]"
-status: foundation_contract
-owner: "docker"

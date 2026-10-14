@@ -1,5 +1,0 @@
-node_id: EXEC-OBS-022
-name: "Alert Fatigue Reduction"
-contract: "\"`AlertNoisePolicy`\""
-status: foundation_contract
-owner: "alerting"

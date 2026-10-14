@@ -1,5 +1,0 @@
-node_id: EXEC-SEC-031
-name: "Encrypted Transport (TLS)"
-contract: "\"`TlsBoundaryConfig`\""
-status: foundation_contract
-owner: "tls"

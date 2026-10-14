@@ -1,5 +1,0 @@
-node_id: EXEC-CICD-029
-name: "Deployment Execution Ordering"
-contract: "[\\\"`DeploymentPlan`\\\"]"
-status: foundation_contract
-owner: "deploy"

@@ -1,5 +1,0 @@
-node_id: EXEC-TEST-020
-name: "Environment Data Isolation"
-contract: "[\\\"`TestDataNamespace`\\\"]"
-status: foundation_contract
-owner: "ci"

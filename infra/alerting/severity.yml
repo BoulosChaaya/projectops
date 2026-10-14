@@ -1,5 +1,0 @@
-node_id: EXEC-OBS-024
-name: "Alert Severity Tiering"
-contract: "\"`AlertSeverity`\""
-status: foundation_contract
-owner: "alerting"

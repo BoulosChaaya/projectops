@@ -1,41 +1,32 @@
 # ProjectOps AI Context
 
-ProjectOps is a production-grade client and project operations product built on the Uruk foundation. Treat Uruk as the base layer and ProjectOps as the product being proven on top of it.
+Read this before changing anything. ProjectOps is a client and project operations application for a single operator, built on raw Node.js and PostgreSQL. Its scope is fixed by [the roadmap](docs/projectops/roadmap.md); [status](docs/projectops/status.md) is the engineering handoff and must stay evidence-based.
 
-The first vertical slice is:
+## Technology invariants
 
-1. Create a client.
-2. Create a project request for that client.
-3. Move the request through explicit workflow states.
-4. Show the request in a dashboard boundary.
-5. Persist behavior through raw SQL contracts.
-6. Verify the slice with focused tests.
+1. **No frameworks or ORMs.** Node.js's HTTP server, Web Platform APIs and hand-written parameterized SQL. Adding any runtime dependency, framework or SDK requires an explicit owner decision recorded in `docs/decisions`. Today `pg` is the only runtime dependency ([ADR-001](docs/decisions/ADR-001-projectops-postgres-transport.md)).
+2. **Persistence.** Product SQL lives in `packages/projectops/src` (mostly `sql.ts`; operator sessions in `operator.ts`); queries are always parameterized. Schema changes are new files in `packages/projectops/migrations/`, registered in `postgres-migrations.ts`. Never edit an applied migration; startup verifies checksums.
+3. **Concurrency.** Edits to clients, projects, milestones and tasks send `expectedRevision`; writes to a project's records lock and re-check the parent project in the same statement. New write paths must keep both guarantees and be covered by a PostgreSQL race test.
+4. **Time.** Application timestamps come from an injected clock (`ProjectOpsRuntimeConfig.clock` in tests, the wall clock in production). Tests must not depend on the current date.
+5. **Security boundary.** Every product route is protected by operator sessions; writes require the configured `Origin`, `application/json` and the session's CSRF token. Stored user text is rendered as text, never HTML.
+6. **Testing.** Node's built-in `node:test` and `node:assert/strict`. Behavior that touches persistence needs PostgreSQL acceptance coverage, not only memory-executor tests.
 
-## Technology Invariants
+## Repository layout
 
-1. **Raw implementation default:** do not add ORMs, framework wrappers, or third-party SDKs without a deliberate decision.
-2. **Runtime:** prefer Node.js and Web Platform primitives.
-3. **Persistence boundary (`packages/db`):** parameterized raw SQL contracts; no Prisma or ORM layer.
-4. **Cache boundary (`packages/cache`):** owned cache abstractions, raw protocol support, explicit fallback behavior.
-5. **Queue boundary (`packages/queue`, `apps/worker`):** owned job contracts, retries, idempotency, and durable handoff semantics.
-6. **Security (`packages/auth`, `packages/security`):** Node.js `node:crypto`, scoped principals, RBAC, secrets handling, field encryption, and audit integrity.
-7. **Observability (`packages/logger`, `packages/observability`):** structured logs, metrics, tracing, privacy redaction, and SLO/error-budget primitives.
-8. **Verification (`tests`, `packages/testing-kit`):** Node.js built-in `node:test` and `node:assert/strict`.
+- `apps/api`: HTTP kernel, health and readiness, ProjectOps routes, PostgreSQL runtime (`src/projectops/postgres-app.ts`), entry point `src/projectops/main.ts`
+- `apps/web/src/projectops`: server-rendered pages and browser scripts
+- `packages/projectops`: domain rules, SQL, repository, migrations, export and dashboard logic
+- `packages/db`: PostgreSQL connection handling and the migration runner
+- `packages/auth`: scrypt password hashing
+- `packages/logger`: structured JSON logging
+- `packages/config`, `packages/http-contracts`, `packages/testing-kit`: small shared helpers
+- `scripts`: integrity check, backup/restore, release packaging, deployed smoke test
+- `tests`: native suites; `tests/integration` holds PostgreSQL and Chromium suites
 
-## Repository Layout
+## Working rules
 
-- `apps/api` — Node.js HTTP kernel and request-serving boundary.
-- `apps/worker` — asynchronous worker boundary.
-- `apps/web` — server/client rendering and interaction boundary.
-- `apps/gateway` — optional gateway boundary for larger systems.
-- `packages/config` — environment and runtime configuration.
-- `packages/logger` — structured logging and context enrichment.
-- `packages/runtime` — lifecycle, draining, faults, supervision, and filesystem boundaries.
-- `packages/http-contracts` — shared HTTP, validation, and data-fetching contracts.
-- `packages/db` — persistence contracts, transactions, migrations, pooling, and query behavior.
-- `packages/cache` — cache keys, invalidation, staleness, stampede protection, and raw protocol support.
-- `packages/queue` — jobs, retries, backoff, idempotency, scheduling, and dead-letter behavior.
-- `packages/auth` and `packages/security` — authentication, authorization, sessions, secrets, encryption, abuse controls, and audit.
-- `packages/observability` — metrics, traces, correlation, privacy, SLOs, and incidents.
-- `packages/testing-kit` — unit, integration, contract, migration, and chaos test helpers.
-- `packages/release` — provenance, rollout, policy gates, and rollback decisions.
+- Work on a branch and open a pull request; `main` is protected and only the owner merges.
+- Make the smallest change that satisfies the approved task. Stop and ask before widening scope, changing architecture or adding dependencies.
+- Commit messages explain what changed, why, and the evidence.
+- Before claiming a change works, run `pnpm verify`, `pnpm test:postgres` and `pnpm test:browser`, and report exactly what ran and what passed. Never claim deployment or live-provider behavior that was not observed.
+- Never commit secrets. Test databases use disposable credentials.
