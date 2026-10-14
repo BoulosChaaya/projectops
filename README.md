@@ -69,4 +69,4 @@ Use a dedicated test database; the suites create and drop their own schemas.
 
 ## Status
 
-All 14 roadmap slices are implemented. The application is **not deployed**: Slice 14 is pre-deployment ready, and the hosting choice is open. See [status](docs/projectops/status.md) for evidence per slice and [decision records](docs/decisions) for design choices.
+All 14 roadmap slices are implemented. Deployment targets Render (a Node web service and managed PostgreSQL 16, declared in [`render.yaml`](render.yaml)); the application is **not deployed yet**. See [status](docs/projectops/status.md) for evidence per slice and [decision records](docs/decisions) for design choices.

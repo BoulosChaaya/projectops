@@ -1,12 +1,23 @@
+# Render Blueprint: one Node web service and one managed PostgreSQL database.
+# Applying it creates billed resources (about $13/month at the time of writing); review the plan
+# Render shows before clicking Apply. Field reference: https://render.com/docs/blueprint-spec
 services:
   - type: web
     name: projectops
     runtime: node
-    plan: starter
-    buildCommand: corepack enable && corepack prepare pnpm@9.12.0 --activate && pnpm install --prod --frozen-lockfile
+    # Smallest paid instance (0.5 CPU, 512 MB). It never sleeps, unlike the free instance, and has a Shell.
+    plan: 0.5c-512mb
+    # Frankfurt: closest Render region to the owner. Fixed at creation; must match the database for the private network.
+    region: frankfurt
+    # Corepack runs the pnpm version pinned in package.json; production dependencies only (pg).
+    buildCommand: COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm install --prod --frozen-lockfile
+    # Applies pending migrations under an advisory lock, then binds; sets PUBLIC_ORIGIN from RENDER_EXTERNAL_URL.
     startCommand: node --experimental-strip-types scripts/projectops-render-start.mjs
+    # New instances receive traffic only once PostgreSQL answers; deploys are zero-downtime.
     healthCheckPath: /health/ready
-    autoDeployTrigger: "off"
+    # Deploy a commit on main only after its GitHub Actions checks pass. main changes only through
+    # reviewed, merged pull requests, so merging is the deploy approval.
+    autoDeployTrigger: checksPass
     envVars:
       - key: NODE_VERSION
         value: 24.19.0
@@ -15,8 +26,17 @@ services:
       - key: DATABASE_URL
         fromDatabase:
           name: projectops-postgres
+          # The private-network URL; the database is not reachable from the internet (ipAllowList below).
           property: connectionString
+
 databases:
   - name: projectops-postgres
-    plan: basic-256mb
+    # Smallest paid database (0.1 CPU, 256 MB, 100 connections). Free databases are deleted after 30 days.
+    plan: 0.1c-256mb
+    region: frankfurt
+    # The version CI tests against. Fixed at creation.
     postgresMajorVersion: "16"
+    # The default for this tier is 15 GB, billed per GB. 1 GB is plenty for one operator; disks can grow later, not shrink.
+    diskSizeGB: 1
+    # Private network only: no public connections at all.
+    ipAllowList: []

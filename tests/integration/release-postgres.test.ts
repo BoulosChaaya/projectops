@@ -21,7 +21,9 @@ test('Isolated source-runtime release installs frozen production dependencies, s
   assert.equal(release.manifest.format,'projectops.source-runtime');
   await command('corepack',['pnpm','install','--prod','--frozen-lockfile'],{cwd:release.destination,env:{...process.env,CI:'true'}});
   const secret=randomBytes(24).toString('base64url'),baseEnv={...process.env,DATABASE_URL:f.databaseUrl,HOST:'127.0.0.1',PORT:'0'};
-  const provision=spawn(process.execPath,['--experimental-strip-types','apps/api/src/projectops/provision-operator.ts'],{cwd:release.destination,env:baseEnv,stdio:['pipe','pipe','pipe']});provision.stdout.resume();provision.stderr.resume();provision.stdin.end(JSON.stringify({login:'operator',password:secret}));assert.equal((await once(provision,'close'))[0],0);
+  // Provision with the environment a Render Shell has: public HOST, Render URL, no PUBLIC_ORIGIN.
+  const shellEnv={...process.env,DATABASE_URL:f.databaseUrl,HOST:'0.0.0.0',PORT:'10000',RENDER_EXTERNAL_URL:'https://projectops.onrender.com',PUBLIC_ORIGIN:undefined};
+  const provision=spawn(process.execPath,['--experimental-strip-types','apps/api/src/projectops/provision-operator.ts'],{cwd:release.destination,env:shellEnv as any,stdio:['pipe','pipe','pipe']});provision.stdout.resume();provision.stderr.resume();provision.stdin.end(JSON.stringify({login:'operator',password:secret}));assert.equal((await once(provision,'close'))[0],0);
   async function start(env:any=baseEnv,entry='apps/api/src/projectops/main.ts'){
     const child=spawn(process.execPath,['--experimental-strip-types',entry],{cwd:release.destination,env,stdio:['ignore','pipe','pipe']});
     child.stderr.resume();let output='';

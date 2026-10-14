@@ -9,7 +9,6 @@ export function validateDeployedSmoke(value) {
   if (value.authorizeAcceptanceWrites !== true) throw Error('Explicit acceptance-data write authorization is required.');
   if (typeof value.login !== 'string' || !value.login || typeof value.password !== 'string' || !value.password) throw Error('Private credentials are required at execution time.');
   if (typeof value.checkpoint !== 'string' || !/^[a-f0-9]{40}$/.test(value.checkpoint)) throw Error('Expected release checkpoint is required.');
-  if (value.renderDeployedCheckpoint !== value.checkpoint) throw Error('Verify the Render deployed commit before acceptance.');
   if (![undefined, 'initial', 'after-restart'].includes(value.phase)) throw Error('Unknown acceptance phase.');
   if (value.phase === 'after-restart' && (value.renderRestartCompleted !== true || !/^[a-f0-9-]{36}$/.test(value.projectId ?? '') || !/^[a-f0-9-]{36}$/.test(value.clientId ?? '') || !/^[a-f0-9]{64}$/.test(value.snapshotSha256 ?? ''))) throw Error('A verified external restart and prior acceptance receipt are required.');
   if (value.phase === 'after-restart' && (!value.operatorDefaults || ['defaultCurrency','defaultPriority','timezone'].some(key => typeof value.operatorDefaults[key] !== 'string'))) throw Error('Prior saved operator defaults are required.');
@@ -27,6 +26,9 @@ export async function runDeployedSmoke(config) {
   const { origin } = config;
   try {
     for (const route of ['/health/live','/health/ready']) check((await context.request.get(origin + route)).status() === 200, route);
+    // The service reports the commit it runs (Render's RENDER_GIT_COMMIT), so the target is verified, not attested.
+    const deployed = (await (await context.request.get(origin + '/health/live')).json()).details?.commit;
+    if (deployed !== config.checkpoint) throw Error(`Deployed commit ${deployed ?? 'unknown'} is not the expected ${config.checkpoint}; wait for the deploy to finish.`);
     const denied = await context.request.get(origin + '/projectops/dashboard'); check(denied.status() === 401, 'API authentication'); check(denied.headers()['cache-control'] === 'no-store', 'private denied response');
     const redirect = await context.request.get(origin + '/projectops', { maxRedirects: 0 }); check(redirect.status() === 302 && redirect.headers().location === '/projectops/login', 'page authentication');
     await page.goto(origin + '/projectops/login');
@@ -94,12 +96,23 @@ export async function runDeployedSmoke(config) {
     await page.goto(origin + '/projectops/projects/' + projectId + '/delivery-summary'); await page.getByText('Current project status: archived',{exact:true}).waitFor();
     await page.getByText('Deployed acceptance result',{exact:true}).waitFor();
     check((await page.goto(origin + '/projectops')).status() === 200, 'dashboard'); await page.locator('.metric').first().waitFor(); check(errors.length === 0, 'unexpected browser errors');
+    // Dashboard search uses the C.utf8 collation, which the provider's PostgreSQL must provide.
+    check((await context.request.get(origin + '/projectops/dashboard?q=acceptance')).status() === 200, 'dashboard search (C.utf8 collation)');
     return { passed: true, checkpoint: config.checkpoint, clientId, projectId, archived: true, snapshotSha256: fingerprint(artifact), operatorDefaults: session.defaults, restartVerified: false };
   } finally { await context.close(); await browser.close(); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  let secrets = [];
   try {
     let input = ''; for await (const part of process.stdin) { input += part; if (input.length > 8192) throw Error('Input too large.'); }
-    console.log(JSON.stringify(await runDeployedSmoke(JSON.parse(input))));
-  } catch { console.error('ProjectOps deployed acceptance failed. Check approved HTTPS target, private credentials and verified Render revision. No checks were skipped.'); process.exitCode = 1; }
+    const config = JSON.parse(input);
+    secrets = [config?.login, config?.password].filter(value => typeof value === 'string' && value.length > 0);
+    console.log(JSON.stringify(await runDeployedSmoke(config)));
+  } catch (error) {
+    // Report which check failed (first line only; Playwright appends call logs) with credentials removed.
+    let reason = (error instanceof Error ? error.message : 'unknown error').split('\n')[0];
+    for (const secret of secrets) reason = reason.split(secret).join('[Redacted]');
+    console.error('ProjectOps deployed acceptance failed: ' + reason + ' No checks were skipped.');
+    process.exitCode = 1;
+  }
 }

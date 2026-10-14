@@ -61,8 +61,8 @@ test('Recovery refuses unsafe target identities and insecure/implicit credential
 });
 
 test('Explicit deployed smoke fails closed without HTTPS, write approval, private credentials or verified revision',async()=>{
-  const config={origin:'https://approved.onrender.com',authorizeAcceptanceWrites:true,login:'operator',password:randomBytes(24).toString('hex'),checkpoint:'a'.repeat(40),renderDeployedCheckpoint:'a'.repeat(40)};
-  for(const value of [null,{}, {...config,origin:'http://localhost'}, {...config,origin:'https://approved.onrender.com/path'}, {...config,authorizeAcceptanceWrites:false}, {...config,password:undefined}, {...config,renderDeployedCheckpoint:'b'.repeat(40)}])assert.throws(()=>validateDeployedSmoke(value));
+  const config={origin:'https://approved.onrender.com',authorizeAcceptanceWrites:true,login:'operator',password:randomBytes(24).toString('hex'),checkpoint:'a'.repeat(40)};
+  for(const value of [null,{}, {...config,origin:'http://localhost'}, {...config,origin:'https://approved.onrender.com/path'}, {...config,authorizeAcceptanceWrites:false}, {...config,password:undefined}, {...config,checkpoint:'main'}])assert.throws(()=>validateDeployedSmoke(value));
   assert.equal(validateDeployedSmoke(config),config);
   assert.throws(()=>validateDeployedSmoke({...config,phase:'after-restart'}));
   assert.throws(()=>validateDeployedSmoke({...config,phase:'unknown'}));
