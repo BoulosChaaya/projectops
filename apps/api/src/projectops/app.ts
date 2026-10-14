@@ -7,6 +7,7 @@ import { createProjectOpsDashboardWebRoute } from '../../../web/src/projectops/d
 import { startHttpListener, type HttpServer } from '../bootstrap/http-listener.ts';
 import type { RouteDefinition } from '../http/path-matching.ts';
 import type { HealthService } from '../health/health.service.ts';
+import type { Logger } from '../../../../packages/logger/src/index.ts';
 import { createProjectOpsRoutes } from './routes.ts';
 import { createProjectOpsRepositoryService } from './service.ts';
 import type { ProjectOpsAccess } from './access.ts';
@@ -20,6 +21,8 @@ export interface ProjectOpsAppConfig {
   readonly migrate?: (sql: ProjectOpsSqlExecutor) => Promise<void>;
   readonly healthService?: HealthService;
   readonly access?: ProjectOpsAccess;
+  /** Structured log destination; defaults to JSON lines on stdout. */
+  readonly logger?: Logger;
 }
 
 export interface ProjectOpsApp {
@@ -47,6 +50,7 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
     port: config.port,
     routes,
     healthService: config.healthService,
+    logger: config.logger,
   });
   // Keep the configured hostname: localhost may bind an IPv6 address, and
   // browser Origin must match the URL operators actually open.

@@ -8,6 +8,7 @@ import { startProjectOpsApp, type ProjectOpsApp } from './app.ts';
 import { HealthService } from '../health/health.service.ts';
 import { ProjectOpsOperatorStore } from '../../../../packages/projectops/src/operator.ts';
 import { ProjectOpsAccess } from './access.ts';
+import { createLogger, describeError, type Logger } from '../../../../packages/logger/src/index.ts';
 
 export interface ProjectOpsRuntimeConfig {
   readonly databaseUrl: string;
@@ -21,6 +22,8 @@ export interface ProjectOpsRuntimeConfig {
    * Session expiry and login limits use PostgreSQL NOW() and are unaffected.
    */
   readonly clock?: () => string;
+  /** Structured log destination; production uses JSON lines on stdout. Tests capture records. */
+  readonly logger?: Logger;
 }
 
 export function validateProjectOpsOrigin(host: string, value?: string): string | undefined {
@@ -62,8 +65,11 @@ export async function startProjectOpsPostgresApp(
     idleTimeoutMillis: 30000,
     statement_timeout: 15000,
   });
-  // pg emits idle-client errors; do not expose credentials or crash on an unhandled event.
-  pool.on('error', () => console.error('ProjectOps database connection failed.'));
+  const logger = config.logger ?? createLogger({ minLevel: 'info' });
+  // pg emits errors for idle pooled connections (for example when PostgreSQL restarts). Handle the
+  // event so it cannot crash the process, and log it structurally: it is often the first sign of
+  // an outage. describeError redacts connection-string credentials.
+  pool.on('error', error => logger.error('db.pool.error', { error: describeError(error, { stack: false }) }));
   let app: ProjectOpsApp | undefined;
   try {
     const sql = new ProjectOpsConnectionSqlExecutor(projectOpsPoolConnection(pool));
@@ -72,6 +78,7 @@ export async function startProjectOpsPostgresApp(
       host: config.host,
       port: config.port,
       clock: config.clock,
+      logger,
       access: new ProjectOpsAccess(new ProjectOpsOperatorStore(pool), config.publicOrigin),
       healthService: new HealthService([{
         name: 'postgres',

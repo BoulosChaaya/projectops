@@ -1,5 +1,6 @@
 // EXEC-FOUND-050: Error Classification (client vs server)
 import type { ValidationProblem } from '../../../../../packages/http-contracts/src/validation-problem.ts';
+import { isDatabaseUnavailableError } from '../../../../../packages/db/src/connection/unavailable.ts';
 
 export class HttpError extends Error {
   public readonly status: number;
@@ -65,6 +66,17 @@ export function classifyHttpError(error: unknown): ClientError | ServerError {
       code: 'VALIDATION_FAILED',
       message: 'Request input validation failed.',
       details: Object.freeze({ problems: Object.freeze([...maybeProblems]) }),
+    });
+  }
+
+  // A database outage is temporary and not a defect in the request or the code: answer 503 so
+  // clients retry and monitors alert on availability instead of reporting a bug.
+  if (isDatabaseUnavailableError(error)) {
+    return Object.freeze({
+      kind: 'server',
+      status: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'The service is temporarily unavailable. Try again shortly.',
     });
   }
 
