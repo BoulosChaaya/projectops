@@ -51,6 +51,12 @@ The client API provides GET /projectops/clients?q=...&status=active|archived|all
 
 Migration 0003 adds client revisions without changing existing records. Conditional SQL updates prevent lost edits. Project insertion locks and checks the client row, so a concurrent archive cannot be bypassed. Native, PostgreSQL and Chromium checks run through the existing verification commands.
 
+## API response contract
+
+API responses are camelCase domain objects (`contactName`, `projectRequestId`, `createdAtIso`); database column names never appear. The PostgreSQL executor copies single-word columns (whose names are already correct) and maps every multi-word column explicitly; the memory executor used by native tests returns the same fields, and `tests/integration/contract-postgres.test.ts` enforces both rules for every read and write endpoint. Timestamps are ISO 8601 strings in fields ending in `Iso`; money is integer cents with a separate currency.
+
+Empty optional values are currently represented two ways: multi-word fields (such as `budgetRange`) are omitted, while some single-word fields (such as `owner` or `vendor`) are `null`. Clients must treat a missing field and `null` the same way.
+
 ## List pagination
 
 GET /projectops/clients and GET /projectops/project-requests return one page: `{ "items": [...], "nextCursor": "..." | null }`. `limit` is an integer from 1 to 100 (default 50). To read the next page, repeat the same request with `cursor=<nextCursor>`; `nextCursor` is null on the last page. Invalid limits return 400 `INVALID_PAGE_LIMIT`; malformed, tampered or wrong-list cursors return 400 `INVALID_PAGE_CURSOR`. Cursors are opaque: do not build or edit them.

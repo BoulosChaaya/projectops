@@ -146,7 +146,7 @@ export class ProjectOpsMemorySqlExecutor implements ProjectOpsSqlExecutor {
         changeRequests: this.projectChangeRequests,
       };
       const pick = (kind: keyof typeof exportFields, row: any) => Object.fromEntries(exportFields[kind].map(key => [key,row?.[key] ?? null]));
-      return Object.freeze([{ project_export_snapshot: {
+      return Object.freeze([{ projectExportSnapshot: {
         project: pick('project', project), client: pick('client', client),
         collections: Object.fromEntries(exportCollections.map(kind => [kind,[...sources[kind].values()].filter(row => row.projectRequestId === project.id).map(row => pick(kind,row))])),
       } } as T]);
@@ -1938,11 +1938,21 @@ function compareOptionalIso(a: string | undefined, b: string | undefined): numbe
   return 0;
 }
 
+// PostgreSQL returns column names (snake_case); the application contract is camelCase. Copy
+// only single-word columns (id, name, status, ...), whose names are already correct, and map
+// every multi-word column explicitly below. Passing raw columns through made every response
+// carry both shapes (contact_name and contactName) and exposed internal column names in the
+// API, while the memory executor used by native tests returned only camelCase.
+function singleWordColumns(source: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(source).filter(([key]) => !key.includes('_')));
+}
+
 function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
   if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
   const source = row as Record<string, unknown>;
   return Object.freeze({
-    ...source,
+    ...singleWordColumns(source),
+    ...(source.project_export_snapshot !== undefined ? { projectExportSnapshot: source.project_export_snapshot } : {}),
     ...(source.has_eligible_projects !== undefined ? { hasEligibleProjects: source.has_eligible_projects } : {}),
     ...(source.overdue_task_count !== undefined ? { overdueTaskCount: normalizeOptionalNumberValue(source.overdue_task_count) } : {}),
     ...(source.overdue_milestone_count !== undefined ? { overdueMilestoneCount: normalizeOptionalNumberValue(source.overdue_milestone_count) } : {}),
