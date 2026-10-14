@@ -6,11 +6,12 @@ Read this before changing anything. ProjectOps is a client and project operation
 
 1. **No frameworks or ORMs.** Node.js's HTTP server, Web Platform APIs and hand-written parameterized SQL. Adding any runtime dependency, framework or SDK requires an explicit owner decision recorded in `docs/decisions`. Today `pg` is the only runtime dependency ([ADR-001](docs/decisions/ADR-001-projectops-postgres-transport.md)).
 2. **Persistence.** Product SQL lives in `packages/projectops/src` (mostly `sql.ts`; operator sessions in `operator.ts`); queries are always parameterized. Schema changes are new files in `packages/projectops/migrations/`, registered in `postgres-migrations.ts`. Never edit an applied migration; startup verifies checksums.
-3. **Concurrency.** Edits to clients, projects, milestones and tasks send `expectedRevision`; writes to a project's records lock and re-check the parent project in the same statement. New write paths must keep both guarantees and be covered by a PostgreSQL race test.
-4. **Time.** Application timestamps come from an injected clock (`ProjectOpsRuntimeConfig.clock` in tests, the wall clock in production). Tests must not depend on the current date.
-5. **Security boundary.** Every product route is protected by operator sessions; writes require the configured `Origin`, `application/json` and the session's CSRF token. Stored user text is rendered as text, never HTML.
-6. **Types.** Node strips types without checking them; `tsc` (strict, `erasableSyntaxOnly`, `verbatimModuleSyntax`) is the only checker and runs in `pnpm verify`. Keep it at zero errors. Use `import type` for type-only imports, and give `Object.freeze` an explicit type when freezing handlers or tables, or their contents lose type checking.
-7. **Testing.** Node's built-in `node:test` and `node:assert/strict`. Behavior that touches persistence needs PostgreSQL acceptance coverage, not only memory-executor tests.
+3. **Lists.** Global list endpoints return `{ items, nextCursor }` pages via `packages/projectops/src/pagination.ts`: keyset cursors with an index matching the sort order. Never return an unbounded global list.
+4. **Concurrency.** Edits to clients, projects, milestones and tasks send `expectedRevision`; writes to a project's records lock and re-check the parent project in the same statement. New write paths must keep both guarantees and be covered by a PostgreSQL race test.
+5. **Time.** Application timestamps come from an injected clock (`ProjectOpsRuntimeConfig.clock` in tests, the wall clock in production). Tests must not depend on the current date.
+6. **Security boundary.** Every product route is protected by operator sessions; writes require the configured `Origin`, `application/json` and the session's CSRF token. Stored user text is rendered as text, never HTML.
+7. **Types.** Node strips types without checking them; `tsc` (strict, `erasableSyntaxOnly`, `verbatimModuleSyntax`) is the only checker and runs in `pnpm verify`. Keep it at zero errors. Use `import type` for type-only imports, and give `Object.freeze` an explicit type when freezing handlers or tables, or their contents lose type checking.
+8. **Testing.** Node's built-in `node:test` and `node:assert/strict`. Behavior that touches persistence needs PostgreSQL acceptance coverage, not only memory-executor tests.
 
 ## Repository layout
 

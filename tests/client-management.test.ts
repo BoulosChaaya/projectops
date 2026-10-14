@@ -12,8 +12,8 @@ test('Client edits preserve identity, clear contacts, search literally, and reje
   assert.equal(updated.revision, 2); assert.equal(updated.contactName, undefined); assert.equal(updated.email, undefined);
   assert.equal(updated.createdAtIso, time); assert.equal(updated.id, 'c');
   await assert.rejects(() => repo.editClient('c', { name: 'Stale', expectedRevision: 1 }), /Reload/);
-  assert.equal((await repo.listClients({ q: '%_' })).length, 1);
-  assert.equal((await repo.listClients({ q: "' OR 1=1 --" })).length, 0);
+  assert.equal((await repo.listClients({ q: '%_' })).items.length, 1);
+  assert.equal((await repo.listClients({ q: "' OR 1=1 --" })).items.length, 0);
   await assert.rejects(() => repo.listClients({ status: 'invalid' as any }));
   await assert.rejects(() => repo.editClient('c', { name: '', expectedRevision: 2 }));
   await assert.rejects(() => repo.editClient('c', { name: 'Good', email: 'invalid', expectedRevision: 2 }));
@@ -30,8 +30,8 @@ test('Archiving retains project history and prevents new projects and edits', as
   await repo.createProjectRequest({ id: 'other-r', clientId: 'other', title: 'Unrelated', brief: 'Other', priority: 'low', createdAtIso: time });
   assert.equal((await repo.archiveClient('c', 1)).status, 'archived');
   assert.deepEqual((await repo.listClientProjects('c')).map(r => r.id), ['r']);
-  assert.equal((await repo.listClients({ status: 'archived' })).length, 1);
-  assert.equal((await repo.listClients({ status: 'active' })).length, 1);
+  assert.equal((await repo.listClients({ status: 'archived' })).items.length, 1);
+  assert.equal((await repo.listClients({ status: 'active' })).items.length, 1);
   await assert.rejects(() => repo.createProjectRequest({ id: 'blocked', clientId: 'c', title: 'Blocked', brief: 'Blocked', priority: 'low', createdAtIso: time }), /Archived/);
   await assert.rejects(() => repo.editClient('c', { name: 'Blocked', expectedRevision: 2 }), /archived/);
 });

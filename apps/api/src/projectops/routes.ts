@@ -10,6 +10,7 @@ import {
   ProjectOpsOperationError,
   ProjectOpsValidationError,
 } from '../../../../packages/projectops/src/index.ts';
+import { MAX_PAGE_LIMIT, type Page, type PageRequest } from '../../../../packages/projectops/src/pagination.ts';
 import type {
   AddressProjectFeedbackInput,
   ArchiveProjectDocumentInput,
@@ -68,12 +69,12 @@ export interface ProjectOpsApiService {
   withHistory?(context: ProjectHistoryContext): ProjectOpsApiService;
   createClient(input: NewClientInput): Promise<ProjectOpsClient>;
   createProjectRequest(input: NewProjectRequestInput): Promise<ProjectRequest>;
-  listClients(filter?: ClientFilter): Promise<readonly ProjectOpsClient[]>;
+  listClients(filter?: ClientFilter, page?: PageRequest): Promise<Page<ProjectOpsClient>>;
   getClient(id: string): Promise<ProjectOpsClient | undefined>;
   editClient(id: string, input: EditClientInput): Promise<ProjectOpsClient>;
   archiveClient(id: string, expectedRevision: number): Promise<ProjectOpsClient>;
   listClientProjects(id: string): Promise<readonly ProjectRequest[]>;
-  listProjectRequests(): Promise<readonly ProjectRequest[]>;
+  listProjectRequests(page?: PageRequest): Promise<Page<ProjectRequest>>;
   getProjectRequest(id: string): Promise<ProjectRequest | undefined>;
   editProject(id: string, input: EditProjectInput, nowIso: string): Promise<ProjectRequest>;
   createProjectMilestone(
@@ -247,7 +248,8 @@ export function createProjectOpsRoutes(
     {
       method: 'GET',
       path: '/projectops/clients',
-      handler: async (request, _context) => await runProjectOpsRequest(() => requestService(_context).listClients({ q: request.query.q, status: request.query.status as ClientFilter['status'] })),
+      handler: async (request, _context) => await runProjectOpsRequest(() => requestService(_context).listClients(
+        { q: request.query.q, status: request.query.status as ClientFilter['status'] }, readPageRequest(request.query))),
     },
     {
       method: 'GET',
@@ -283,7 +285,7 @@ export function createProjectOpsRoutes(
     {
       method: 'GET',
       path: '/projectops/project-requests',
-      handler: async (_request, _context) => await requestService(_context).listProjectRequests(),
+      handler: async (request, _context) => await runProjectOpsRequest(() => requestService(_context).listProjectRequests(readPageRequest(request.query))),
     },
     {
       method: 'PUT', path: '/projectops/project-requests/:id',
@@ -751,6 +753,16 @@ async function requireFound<T>(value: Promise<T | undefined>, code: string): Pro
     throw new HttpError(404, code, 'ProjectOps resource not found.');
   }
   return resolved;
+}
+
+// Query strings arrive as text: accept only plain decimal digits for limit, so values such as
+// "1e2", " 5" or "0x10" are rejected rather than coerced. Range and cursor checks live in pagination.ts.
+function readPageRequest(query: Readonly<Record<string, string>>): PageRequest {
+  const { limit, cursor } = query;
+  if (limit !== undefined && !/^[0-9]{1,4}$/.test(limit)) {
+    throw new ProjectOpsValidationError('INVALID_PAGE_LIMIT', `limit must be an integer from 1 to ${MAX_PAGE_LIMIT}.`);
+  }
+  return { ...(limit === undefined ? {} : { limit: Number(limit) }), ...(cursor === undefined ? {} : { cursor }) };
 }
 
 async function runProjectOpsRequest<T>(operation: () => Promise<T>): Promise<T> {

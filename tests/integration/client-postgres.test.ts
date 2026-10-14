@@ -32,8 +32,8 @@ test('Client schema upgrade, search, revision conflicts and archive persist thro
       const edited = await (await get('clients/c')).json(); assert.equal(edited.revision, 2);
       assert.equal(edited.contactName, null); assert.equal(edited.email, null);
       assert.equal((await send('clients/c', { name: 'Studio %_', contactName: 'Boulos', email: 'client@example.com', expectedRevision: 2 }, 'PUT')).status, 200);
-      for (const q of ['%_', 'bOuLoS', 'CLIENT@']) assert.equal((await (await get('clients?q=' + encodeURIComponent(q))).json()).length, 1);
-      assert.equal((await (await get('clients?q=' + encodeURIComponent("' OR 1=1 --"))).json()).length, 0);
+      for (const q of ['%_', 'bOuLoS', 'CLIENT@']) assert.equal((await (await get('clients?q=' + encodeURIComponent(q))).json()).items.length, 1);
+      assert.equal((await (await get('clients?q=' + encodeURIComponent("' OR 1=1 --"))).json()).items.length, 0);
       assert.equal((await get('clients?status=invalid')).status, 400);
       assert.equal((await send('project-requests', { id: 'r', clientId: 'c', title: 'Existing project', brief: 'History' })).status, 200);
       const archive = await send('clients/c/archive', { expectedRevision: 3 }); assert.equal(archive.status, 200);
@@ -42,8 +42,8 @@ test('Client schema upgrade, search, revision conflicts and archive persist thro
       await app.close(); app = await startProjectOpsPostgresApp(config); origin = app.server.origin;
       const persisted = await (await get('clients/c')).json(); assert.equal(persisted.status, 'archived'); assert.equal(persisted.revision, 4);
       assert.equal((await (await get('clients/c/projects')).json())[0].id, 'r');
-      assert.equal((await (await get('clients?status=archived')).json()).length, 1);
-      assert.equal((await (await get('clients?status=active')).json()).length, 1);
+      assert.equal((await (await get('clients?status=archived')).json()).items.length, 1);
+      assert.equal((await (await get('clients?status=active')).json()).items.length, 1);
       assert.equal((await get('clients/missing/projects')).status, 404);
     } finally { await app.close(); }
   });

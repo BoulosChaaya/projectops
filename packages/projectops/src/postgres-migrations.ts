@@ -42,6 +42,11 @@ export async function loadProjectOpsPostgresMigrations(): Promise<readonly Migra
     name: 'automatic_history',
     upSql: await readFile(new URL('../migrations/0007_automatic_history.sql', import.meta.url), 'utf8'),
     reversible: false,
+  }, {
+    version: '0008',
+    name: 'list_pagination_indexes',
+    upSql: await readFile(new URL('../migrations/0008_list_pagination_indexes.sql', import.meta.url), 'utf8'),
+    reversible: false,
   }];
 }
 
