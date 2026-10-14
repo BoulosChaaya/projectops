@@ -14,6 +14,13 @@ export interface ProjectOpsRuntimeConfig {
   readonly host: string;
   readonly port: number;
   readonly publicOrigin?: string;
+  /**
+   * Optional source of "now" for application timestamps (record creation, audit history,
+   * dashboard evaluation). Production never sets it — readProjectOpsRuntimeConfig omits it,
+   * so the wall clock is used. Acceptance tests pin it to stay deterministic over time.
+   * Session expiry and login limits use PostgreSQL NOW() and are unaffected.
+   */
+  readonly clock?: () => string;
 }
 
 export function validateProjectOpsOrigin(host: string, value?: string): string | undefined {
@@ -64,6 +71,7 @@ export async function startProjectOpsPostgresApp(
       sql,
       host: config.host,
       port: config.port,
+      clock: config.clock,
       access: new ProjectOpsAccess(new ProjectOpsOperatorStore(pool), config.publicOrigin),
       healthService: new HealthService([{
         name: 'postgres',
