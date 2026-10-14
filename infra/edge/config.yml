@@ -1,5 +1,0 @@
-node_id: EXEC-CLIENT-023
-name: "Edge Distribution"
-contract: "\"`EdgeDeliveryConfig`\""
-status: foundation_contract
-owner: "edge"

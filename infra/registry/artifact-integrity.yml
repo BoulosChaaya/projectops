@@ -1,5 +1,0 @@
-node_id: EXEC-CICD-023
-name: "Artifact Integrity Verification"
-contract: "[\\\"`verifyArtifactIntegrity()`\\\"]"
-status: foundation_contract
-owner: "registry"

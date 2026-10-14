@@ -38,10 +38,19 @@ See [roadmap](roadmap.md). The roadmap was approved on 2026-10-03 after the prev
 Implemented does not mean complete browser workflow. The original contract/application tests use the memory executor; the durable-runtime acceptance added below verifies real PostgreSQL separately. The dashboard displays summaries without forms/actions. The PostgreSQL runtime now protects these routes; contract tests may still inject an unprotected memory harness.
 
 ## Remaining approved work
-Roadmap slices 1–13 are complete and merged. PR #6 merged Slice 9 at `4f17a71f2f844e72a6c3cf87bd5c82e87a2442b8`; PR #7 merged Slice 10 at `7c341250b6b8ef74b836aeac0dbfac6b88307f99`. PR #8 merged Slice 11 at `8aff0138ea5857eacbb5f71c2e829c5bfa3c9496`. PR #9 merged Slice 12 at `7fa7f4b3caafbd55c63952f1328721d4ff65ed91`. PR #10 merged Slice 13 at `3b8e33ae536fd68c6e0abf58c9603ec2906b2ab8`. Slice 14 is implemented and verified for pre-deployment review; actual Render production deployment and deployed acceptance remain open. The foundational capabilities above are not a separate product roadmap.
+Roadmap slices 1–13 are complete and merged. PR #6 merged Slice 9 at `4f17a71f2f844e72a6c3cf87bd5c82e87a2442b8`; PR #7 merged Slice 10 at `7c341250b6b8ef74b836aeac0dbfac6b88307f99`. PR #8 merged Slice 11 at `8aff0138ea5857eacbb5f71c2e829c5bfa3c9496`. PR #9 merged Slice 12 at `7fa7f4b3caafbd55c63952f1328721d4ff65ed91`. PR #10 merged Slice 13 at `3b8e33ae536fd68c6e0abf58c9603ec2906b2ab8`. PR #11 merged Slice 14 at `48b6e5c` as **pre-deployment ready**; actual production deployment and deployed acceptance remain open. The foundational capabilities above are not a separate product roadmap.
 
 ## Next slice
-Slice 14: final acceptance and deployment. **PRE-DEPLOYMENT READY; not complete.** Review the dedicated Slice 14 PR, then connect/authorize the Render account and give separate explicit production deployment approval. No Slice 15 or additional product work is authorized. The application is not deployed.
+Slice 14 deployment: **pre-deployment ready; not complete; not deployed.** The previous Render service and database were deleted by the owner on 2026-10-14, so no hosting account is connected. The hosting choice and a separate explicit production deployment approval come before any deployment. No Slice 15 or additional product work is authorized.
+
+## Post-roadmap maintenance
+Owner-approved hardening that changes no product scope. Each item is a reviewed pull request; GitHub holds the merge evidence.
+- PR #12 (merged at `57351c4`): acceptance tests no longer depend on the wall clock. `ProjectOpsRuntimeConfig` accepts an optional injected `clock` (never set in production); three tests that broke on or after 2026-10-06 now pin it. Verified with Node's clock shifted to today, +30, +400 and -30 days.
+- Phase 1 cleanup, three independent PRs:
+  - #13 removes the Uruk foundation code ProjectOps never used (335 files, -7,880 lines): 11 unused workspace folders, unused files in partly used folders, and 9 test files covering only removed layers. Proven by import tracing from every entry point, a path/stem reference search, unchanged PostgreSQL/Chromium suites and an identical real-use run.
+  - #14 replaces six CI workflows with one (`verify` on Node 22 and 24.19.0, `acceptance` on PostgreSQL 16 + Chromium).
+  - The docs PR removes `infra/` and Uruk documentation that described removed code, and rewrites `README.md` and `AI_CONTEXT.md` to match the code.
+- Planned, each requiring separate owner approval: strict type-checking in CI, pagination, an explicit API response contract, error logging with causes, deployment, UI redesign.
 
 ## Resume protocol
 Read roadmap.md and this file, inspect the current GitHub branch/worktree, and verify the checkpoint before modifying product code. Update this file at each slice with changes, checks, remaining limitations and the next action. Never infer completion from a chat approval alone.

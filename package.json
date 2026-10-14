@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "ProjectOps: client and project operations product built on the Uruk foundation",
+  "description": "ProjectOps: client and project operations application on raw Node.js and PostgreSQL",
   "packageManager": "pnpm@9.12.0",
   "engines": {
     "node": ">=22.6.0"

@@ -1,5 +1,0 @@
-node_id: EXEC-OBS-020
-name: "Alert Condition Definition"
-contract: "\"`AlertCondition`\""
-status: foundation_contract
-owner: "alerting"

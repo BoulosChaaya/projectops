@@ -1,5 +1,0 @@
-node_id: EXEC-OBS-017
-name: "Metric Visualization Design"
-contract: "\"`MetricViewDefinition`\""
-status: foundation_contract
-owner: "dashboards"

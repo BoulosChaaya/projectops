@@ -1,5 +1,0 @@
-node_id: EXEC-OPS-011
-name: "CPU/Memory Boundary Enforcement"
-contract: "[\\\"`ContainerResourceLimits`\\\"]"
-status: foundation_contract
-owner: "docker"
