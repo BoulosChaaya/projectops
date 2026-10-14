@@ -45,7 +45,7 @@ export function createLogger(options: CreateLoggerOptions = {}): Logger {
     }
   };
 
-  return Object.freeze({
+  return Object.freeze<Logger>({
     log: emit,
     trace: (msg, ctx) => emit('trace', msg, ctx),
     debug: (msg, ctx) => emit('debug', msg, ctx),

@@ -3,7 +3,7 @@ import {operatorFixture}from'./operator-fixture.ts';
 import {ProjectOpsRepository,ProjectOpsConnectionSqlExecutor,projectOpsPoolConnection,ProjectOpsMemorySqlExecutor,applyProjectOpsMigrations,type ProjectOpsSqlExecutor}from'../../packages/projectops/src/index.ts';
 import {loadProjectOpsPostgresMigrations,migrateProjectOpsPostgres}from'../../packages/projectops/src/postgres-migrations.ts';
 import {ProjectOpsOperatorStore}from'../../packages/projectops/src/operator.ts';import {startProjectOpsPostgresApp}from'../../apps/api/src/projectops/postgres-app.ts';
-import {composeProjectExportSnapshot,createProjectExportArtifact,exportCollections,exportFields}from'../../packages/projectops/src/project-export.ts';import {selectProjectExportSnapshotSql}from'../../packages/projectops/src/sql.ts';
+import {createProjectExportArtifact}from'../../packages/projectops/src/project-export.ts';import {selectProjectExportSnapshotSql}from'../../packages/projectops/src/sql.ts';
 import {renderDeliverySummary}from'../../apps/web/src/projectops/project-handoff.ts';
 import {seedExport,assertExport,CREATED,ACTION,AUDIT,states}from'../export-fixture.ts';
 async function fixture(pool:any){const client=await pool.connect();try{await migrateProjectOpsPostgres(client,await loadProjectOpsPostgresMigrations());}finally{client.release();}const sql=new ProjectOpsConnectionSqlExecutor(projectOpsPoolConnection(pool)),base=new ProjectOpsRepository(sql);await base.createClient({id:'c',name:'Client Élan',createdAtIso:CREATED});return{sql,base,repo:base.withHistory({actor:'operator',clock:()=>AUDIT})};}
@@ -38,7 +38,7 @@ test('Protected export and handoff survive application restart, preserve rows, a
  });
 });
 test('Artifact snapshots see complete committed business/history before and after paused mutations, rollback and client/lifecycle changes without read locks',{timeout:30000},async()=>{
- await operatorFixture(async(_url,pool)=>{const{sql,base,repo}=await fixture(pool);
+ await operatorFixture(async(_url,pool)=>{const{sql,repo}=await fixture(pool);
  for(const kind of ['edit','task','issue','accept','feedback','payment','expense','deliver','archive','cancel','rollback']as const){const id='race-'+kind;await seedExport(repo,id,kind==='archive'?'delivered':'in_progress');
  if(kind==='accept'){await repo.createProjectDeliverable(id,{id:'pending',projectRequestId:id,title:'Pending',artifactUrl:'https://example.test/pending',submittedAtIso:CREATED});}
  if(kind==='feedback')await repo.createProjectFeedback(id,{id:'open',projectRequestId:id,author:'Client',message:'Open',receivedAtIso:CREATED});

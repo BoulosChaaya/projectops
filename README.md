@@ -2,7 +2,7 @@
 
 ProjectOps runs client projects from intake to payment in one application: clients, estimates and approval, planning, execution, delivery and acceptance, invoices and expenses, an automatic audit history, an operational dashboard, and project export.
 
-It is built on raw platform primitives: Node.js's own HTTP server, hand-written parameterized SQL on PostgreSQL, and server-rendered pages. `pg` is the only runtime dependency.
+It is built on raw platform primitives: Node.js's own HTTP server, hand-written parameterized SQL on PostgreSQL, and server-rendered pages. `pg` is the only runtime dependency. Node runs the TypeScript directly by stripping types, so `pnpm verify` runs the TypeScript compiler (strict, source and tests) to actually check them.
 
 ## What it does
 
@@ -56,7 +56,7 @@ The [runtime guide](docs/projectops/runtime.md) covers configuration, HTTPS orig
 ## Verify
 
 ```bash
-pnpm verify                                   # repository hygiene + native tests
+pnpm verify                                   # repository hygiene + strict type check + native tests
 export PROJECTOPS_TEST_DATABASE_URL='postgres://user:password@127.0.0.1:5432/projectops_test'
 pnpm test:postgres                            # PostgreSQL acceptance
 pnpm exec playwright install chromium

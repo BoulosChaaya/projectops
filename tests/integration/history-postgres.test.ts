@@ -101,7 +101,7 @@ function pairedRepository(pool: any, match: (text: string) => boolean) {
   const barrier = new Promise<void>(resolve => release = resolve);
   const decorate = (scope: any): any => ({
     async query<T>(text: string, params: readonly unknown[] = []) {
-      const result = await scope.query<T>(text, params);
+      const result = await scope.query(text, params);
       if (reads < 2 && match(text)) { if (++reads === 2) release(); await barrier; }
       return result;
     },

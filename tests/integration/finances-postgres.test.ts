@@ -5,8 +5,8 @@ import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgr
 import { ProjectOpsOperatorStore } from '../../packages/projectops/src/operator.ts';
 import { loadProjectOpsPostgresMigrations,migrateProjectOpsPostgres } from '../../packages/projectops/src/postgres-migrations.ts';
 import { ProjectOpsConnectionSqlExecutor,ProjectOpsRepository,projectOpsPoolConnection,createProjectInvoice,createProjectExpense,
- insertProjectInvoiceSql,insertProjectExpenseSql,markProjectInvoicePaidSql,updateProjectExpenseDecisionSql,
- markProjectInvoicePaid,approveProjectExpense,selectDashboardRowsSql } from '../../packages/projectops/src/index.ts';
+ insertProjectInvoiceSql,insertProjectExpenseSql,
+ selectDashboardRowsSql } from '../../packages/projectops/src/index.ts';
 const T0='2026-10-03T12:00:00.000Z',T1='2026-10-03T13:00:00.000Z';
 const invoice=(parent:string,id='i')=>({id,projectRequestId:parent,invoiceNumber:id,amountCents:100,currency:' eur ',issuedAtIso:T0});
 const expense=(parent:string,id='e')=>({id,projectRequestId:parent,description:'Cost',amountCents:200,currency:' usd ',incurredAtIso:T0});

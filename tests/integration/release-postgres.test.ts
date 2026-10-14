@@ -10,7 +10,8 @@ import { finalDatabaseFixture } from './final-fixture.ts';
 import { createRuntimeRelease } from '../../scripts/projectops-release.mjs';
 
 const execute=promisify(execFile);
-async function command(file:string,args:string[],options:any){try{return await execute(file,args,{...options,maxBuffer:1024*1024});}catch{throw Error('Isolated release command failed.');}}
+// encoding 'utf8' is execFile's default; stating it lets the compiler type stdout as a string.
+async function command(file:string,args:string[],options:object):Promise<{stdout:string;stderr:string}>{try{return await execute(file,args,{...options,encoding:'utf8',maxBuffer:1024*1024});}catch{throw Error('Isolated release command failed.');}}
 
 test('Isolated source-runtime release installs frozen production dependencies, starts real entrypoint, loads migrations and persists through SIGTERM/restart', {timeout:120000},async()=>{
  await finalDatabaseFixture(async f=>{

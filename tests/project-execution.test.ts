@@ -39,7 +39,7 @@ test('Execution parent-state rules match the approved resource matrix', () => {
   const states: ProjectRequest['status'][] = ['new', 'estimated', 'approved', 'in_progress', 'on_hold', 'delivered', 'cancelled', 'archived'];
   for (const [resource, create] of Object.entries(inputs) as [keyof typeof inputs, (parent: ProjectRequest) => unknown][]) {
     for (const status of states) {
-      if (allowed[resource].includes(status)) assert.doesNotThrow(() => create(request(status)), `${resource}/${status}`);
+      if ((allowed[resource] as readonly ProjectRequest['status'][]).includes(status)) assert.doesNotThrow(() => create(request(status)), `${resource}/${status}`);
       else assert.throws(() => create(request(status)), conflict(), `${resource}/${status}`);
     }
   }

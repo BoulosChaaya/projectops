@@ -10,7 +10,7 @@ import { renderProjectOpsDashboardPage, renderDashboardUnavailable } from './das
 export function createProjectOpsDashboardWebRoute(
   service: Pick<ProjectOpsApiService, 'getDashboard'>, clock: () => string = () => new Date().toISOString()
 ): RouteDefinition<KernelRouteHandler> {
-  return Object.freeze({
+  return Object.freeze<RouteDefinition<KernelRouteHandler>>({
     method: 'GET',
     path: '/projectops',
     handler: async (request, context) => {

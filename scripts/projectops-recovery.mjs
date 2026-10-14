@@ -87,6 +87,16 @@ async function privateDestination(directory) {
   if (info.isSymbolicLink() || !info.isDirectory() || (info.mode & 0o077)) throw Error('A private backup directory is required.');
   return resolved;
 }
+/**
+ * Back up the ProjectOps database named by a libpq service into a private directory.
+ * @param {{
+ *   sourceService: string,
+ *   sourceIdentity: string,
+ *   directory: string,
+ *   checkpoint?: string,        // optional 40-hex commit recorded in the receipt
+ *   env?: NodeJS.ProcessEnv,
+ * }} options
+ */
 export async function backupProjectOps({ sourceService, sourceIdentity, directory, checkpoint, env: suppliedEnv = process.env }) {
   safeName(sourceIdentity);
   if (checkpoint !== undefined && !/^[a-f0-9]{40}$/.test(checkpoint)) throw Error('Invalid checkpoint.');
@@ -106,6 +116,18 @@ export async function backupProjectOps({ sourceService, sourceIdentity, director
     return { archive, receipt, source }; // source is internal guard metadata, never printed in the receipt.
   } catch (error) { await unlink(archive).catch(() => {}); throw error; }
 }
+/**
+ * Restore a backup into a fresh disposable database and verify its integrity.
+ * @param {{
+ *   sourceService: string,
+ *   maintenanceService: string,
+ *   targetDatabase: string,
+ *   archive: string,
+ *   env?: NodeJS.ProcessEnv,
+ *   verifyApplication?: (target: { targetDatabase: string, connection: object }) => Promise<void>,
+ *     // optional application-level check; without it the result reports applicationVerified: false
+ * }} options
+ */
 export async function restoreDisposableBackup({ sourceService, maintenanceService, targetDatabase, archive, env: suppliedEnv = process.env, verifyApplication }) {
   validateRestoreDatabase(targetDatabase);
   const env = await privateLibpqEnvironment(suppliedEnv), source = await serviceConnection(sourceService, env), maintenance = await serviceConnection(maintenanceService, env);

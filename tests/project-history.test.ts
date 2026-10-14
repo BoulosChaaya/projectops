@@ -6,6 +6,7 @@ import {
   projectOpsPoolConnection, type ProjectOpsSqlExecutor,
 } from '../packages/projectops/src/index.ts';
 import { startProjectOpsApp } from '../apps/api/src/projectops/app.ts';
+import type { SqlStatement } from '../packages/projectops/src/sql.ts';
 import { ProjectOpsAccess } from '../apps/api/src/projectops/access.ts';
 import { historyJourney, historyBusinessSnapshot, BUSINESS_TIME, ACTION_TIME, AUDIT_TIME } from './history-fixture.ts';
 
@@ -28,7 +29,7 @@ test('Every approved history trigger commits exactly one trusted event; retries 
 test('Every covered command rolls back all business rows and revisions when required history insertion fails in memory', async () => {
   const { sql, base } = await fixture(); let fail = false, failures = 0;
   const decorate = (executor: ProjectOpsSqlExecutor): ProjectOpsSqlExecutor => ({
-    async query<T>(statement) { if (fail && statement.sql.startsWith('INSERT INTO projectops_project_activities')) { failures++; throw new Error('Injected history failure'); } return await executor.query<T>(statement); },
+    async query<T>(statement: SqlStatement) { if (fail && statement.sql.startsWith('INSERT INTO projectops_project_activities')) { failures++; throw new Error('Injected history failure'); } return await executor.query<T>(statement); },
     transaction: run => executor.transaction!(scoped => run(decorate(scoped))),
   });
   const repo = new ProjectOpsRepository(decorate(sql)).withHistory({ actor: 'operator', clock: () => AUDIT_TIME });

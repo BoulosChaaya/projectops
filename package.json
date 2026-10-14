@@ -10,6 +10,7 @@
   },
   "scripts": {
     "verify": "node scripts/verify-integrity.mjs",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "start": "node --experimental-strip-types apps/api/src/projectops/main.ts",
     "operator:create": "node --experimental-strip-types apps/api/src/projectops/provision-operator.ts",
@@ -20,6 +21,9 @@
     "pg": "8.23.1"
   },
   "devDependencies": {
-    "playwright": "1.63.0"
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "playwright": "1.63.0",
+    "typescript": "6.0.3"
   }
 }
