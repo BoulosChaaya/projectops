@@ -67,8 +67,22 @@ export async function runDeployedSmoke(config) {
     const projectId = page.url().split('/').at(-1), root = '/projectops/project-requests/' + projectId;
     const response = await context.request.get(origin + root); check(response.status() === 200 && response.headers()['cache-control'] === 'no-store', 'persistent project');
     const html = await page.goto(page.url()); check(html.headers()['content-security-policy']?.includes("frame-ancestors 'none'"), 'workspace CSP');
-    for (const id of ['invoices','expenses','activities']) await page.locator('#' + id).getByRole('heading').first().waitFor();
+    // The workspace shows one tab at a time beside the history; create forms open from "New …".
+    async function tab(label) {
+      const link = page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: label, exact: true });
+      if (await link.getAttribute('aria-current') !== 'page') await link.click();
+      await page.locator('.ws-tabs a[aria-current="page"]').filter({ hasText: label }).waitFor();
+    }
+    const formTab = { 'create-deliverable': 'Delivery', 'create-feedback': 'Delivery', 'create-invoice': 'Money', 'create-expense': 'Money' };
+    await page.locator('#activities').getByRole('heading').first().waitFor();
+    await tab('Money'); for (const id of ['invoices','expenses']) await page.locator('#' + id).getByRole('heading').first().waitFor(); await tab('Overview');
     async function form(selector, fields) {
+      const id = selector.slice(1);
+      if (formTab[id]) {
+        await tab(formTab[id]);
+        const panel = page.locator('details.ws-create:has(' + selector + ')');
+        if (await panel.getAttribute('open') === null) await panel.locator('> summary').click();
+      }
       for (const [key,value] of Object.entries(fields)) await page.locator(selector + ' [name=' + key + ']').fill(value);
       const pending = page.waitForResponse(r => ['POST','PUT'].includes(r.request().method()) && r.url().includes(root));
       await page.locator(selector + ' button').first().click(); check((await pending).status() === 200, selector);
@@ -87,7 +101,7 @@ export async function runDeployedSmoke(config) {
     await form('#create-feedback',{author:'Deployed acceptance source',message:'Authorized acceptance review'}); await terminal('Address feedback');
     await form('#create-invoice',{invoiceNumber:'DEPLOYED-EUR',amountCents:'100000',currency:'EUR'}); await terminal('Record payment');
     await form('#create-expense',{description:'Deployed acceptance expense',amountCents:'5000',currency:'USD'}); await terminal('Approve expense');
-    await page.locator('#finance-totals').getByText('Paid invoices: 1000.00 EUR',{exact:true}).waitFor();
+    await tab('Money'); await page.locator('#finance-totals').getByText('Paid invoices: 1000.00 EUR',{exact:true}).waitFor();
     await control('Mark delivered','Confirm delivery'); await control('Archive project','Confirm archive');
     const exportResponse = await context.request.get(origin + root + '/export'); check(exportResponse.status() === 200 && exportResponse.headers()['content-disposition']?.includes('attachment;') && exportResponse.headers()['cache-control'] === 'no-store', 'export attachment');
     const artifact = await exportResponse.json(); check(artifact.project.id === projectId && artifact.generatedBy === session.login, 'export source');
