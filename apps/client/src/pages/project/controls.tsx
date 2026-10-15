@@ -78,25 +78,27 @@ export function Controls() {
     : `Confirm ${BUTTON[pending.action].toLowerCase()}?`;
 
   return (
-    <section id="controls" className="ws-section" aria-labelledby="controls-title">
-      <h2 id="controls-title">Estimates and controls</h2>
-      <p id="control-status" className="ws-help">{guidance(project.status)}</p>
-      <form id="estimate-form" className="ws-form ws-form-inline" hidden={!estimating} onSubmit={saveEstimate} key={`estimate-${project.revision}`}>
+    <section id="controls" className="ws-controls" aria-labelledby="controls-title">
+      <h2 id="controls-title" className="visually-hidden">Estimates and controls</h2>
+      <div className="ws-controls-row">
+        <p id="control-status" className="ws-controls-guidance">{guidance(project.status)}</p>
+        <div id="control-actions" className="ws-actions">
+          {(ACTIONS[project.status] ?? []).map(action => (
+            <button key={action} type="button" disabled={busy}
+              className={`button ${action === 'cancel' ? 'button-quiet' : 'button-primary'}`}
+              onClick={() => setPending({ action, revision: project.revision ?? 1 })}>{BUTTON[action]}</button>
+          ))}
+        </div>
+      </div>
+      <form id="estimate-form" className="ws-form-inline" hidden={!estimating} onSubmit={saveEstimate} key={`estimate-${project.revision}`}>
         <label className="field"><span className="field-label">Estimate amount (currency units)</span>
           <input name="amount" inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" required maxLength={12}
             defaultValue={project.estimateAmountCents == null ? '' : (project.estimateAmountCents / 100).toFixed(2)} /></label>
         <label className="field"><span className="field-label">Estimate currency</span>
           <input name="currency" required pattern="[A-Z]{3}" maxLength={3} className="input-short"
             defaultValue={project.estimateCurrency ?? session.defaults.defaultCurrency} /></label>
-        <button className="button button-primary" disabled={busy}>Save estimate</button>
+        <button className="button button-secondary" disabled={busy}>Save estimate</button>
       </form>
-      <div id="control-actions" className="ws-actions">
-        {(ACTIONS[project.status] ?? []).map(action => (
-          <button key={action} type="button" disabled={busy}
-            className={`button ${action === 'cancel' ? 'button-quiet' : 'button-secondary'}`}
-            onClick={() => setPending({ action, revision: project.revision ?? 1 })}>{BUTTON[action]}</button>
-        ))}
-      </div>
       {pending && (
         <div id="control-confirmation" className="ws-confirm" role="group" aria-label="Confirm project action">
           <p id="control-question">{question}</p>

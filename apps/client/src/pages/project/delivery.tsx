@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react';
-import { useSectionAction, useWorkspace, type Collection } from './context.tsx';
-import { RecordsSection } from './records-section.tsx';
+import { useCollection, useSectionAction, useWorkspace, type Collection } from './context.tsx';
+import { CreatePanel, RecordsSection } from './records-section.tsx';
 import { optional } from './format.ts';
 import { Input, Select, TextArea, type Choice } from './inputs.tsx';
 import type { Row } from './record-card.tsx';
@@ -14,8 +14,9 @@ export function RecordChoice({ label, name, empty, path, filter, retryId, retryT
   label: string; name: string; empty: string; path: CollectionPath; filter?: (row: Row) => boolean;
   retryId: string; retryText: string; unavailable: string;
 }) {
-  const { collection, load } = useWorkspace();
-  const records: Collection = collection(path);
+  const { load } = useWorkspace();
+  // The choices may come from another tab's records, so load them here if nothing has yet.
+  const records: Collection = useCollection(path);
   const rows = records.state === 'ready' ? records.rows.filter(filter ?? (() => true)) : [];
   const choices: Choice[] = [{ value: '', label: records.state === 'failed' ? unavailable : empty },
     ...rows.map(row => ({ value: row.id, label: String(row.title ?? row.id) }))];
@@ -27,9 +28,8 @@ export function RecordChoice({ label, name, empty, path, filter, retryId, retryT
   );
 }
 
-function Readiness() {
-  const { collection } = useWorkspace();
-  const deliverables = collection('deliverables'), feedback = collection('feedback');
+export function Readiness() {
+  const deliverables = useCollection('deliverables'), feedback = useCollection('feedback');
   let text: string;
   if (deliverables.state !== 'ready' || feedback.state !== 'ready') text = 'Readiness unavailable until both delivery sections load. Retry the failed section.';
   else {
@@ -88,18 +88,20 @@ function DeliverySection({ kind }: { kind: Kind }) {
       fields={kind === 'deliverables'
         ? ['title', 'milestoneId', 'artifactUrl', 'status', 'submittedAtIso', 'acceptedAtIso']
         : ['author', 'deliverableId', 'sentiment', 'message', 'status', 'receivedAtIso', 'addressedBy', 'addressedAtIso', 'responseNote']}
+      primary={kind === 'feedback' ? 'message' : undefined}
       form={kind === 'deliverables' ? (
-        <form id="create-deliverable" className="ws-form" hidden={!allowed} onSubmit={create}>
-          <h3>Submit deliverable</h3>
+        <CreatePanel summary="New deliverable" allowed={allowed}>
+        <form id="create-deliverable" className="ws-form" onSubmit={create}>
           <Input label="Title" name="title" maxLength={160} required />
           <Input label="HTTP(S) artifact URL" name="artifactUrl" type="url" maxLength={2048} required />
           <RecordChoice label="Milestone (optional)" name="milestoneId" empty="No milestone" path="milestones"
             retryId="retry-delivery-milestones" retryText="Retry milestone choices" unavailable="Milestones unavailable — retry to select" />
           <div className="form-actions"><button className="button button-primary" disabled={busy}>Submit deliverable</button></div>
         </form>
+        </CreatePanel>
       ) : (
-        <form id="create-feedback" className="ws-form" hidden={!allowed} onSubmit={create}>
-          <h3>Add feedback</h3>
+        <CreatePanel summary="New feedback" allowed={allowed}>
+        <form id="create-feedback" className="ws-form" onSubmit={create}>
           <RecordChoice label="Deliverable (optional)" name="deliverableId" empty="No deliverable" path="deliverables"
             retryId="retry-feedback-deliverables" retryText="Retry deliverable choices" unavailable="Deliverables unavailable — retry to select" />
           <Input label="Author/source" name="author" maxLength={120} required />
@@ -107,13 +109,14 @@ function DeliverySection({ kind }: { kind: Kind }) {
           <TextArea label="Message" name="message" maxLength={2000} rows={4} required />
           <div className="form-actions"><button className="button button-primary" disabled={busy}>Add feedback</button></div>
         </form>
+        </CreatePanel>
       )}
       actions={row => {
         if (!canAct || row.status !== (kind === 'deliverables' ? 'submitted' : 'open')) return null;
         return (
-          <form className="delivery-action ws-subform" onSubmit={event => act(row, event)}>
-            {kind === 'feedback' && <TextArea label="Response note (optional)" name="responseNote" maxLength={500} rows={2} />}
-            <div className="form-actions"><button className="button button-secondary" disabled={busy}>{kind === 'deliverables' ? 'Accept deliverable' : 'Address feedback'}</button></div>
+          <form className="delivery-action ws-action-form" onSubmit={event => act(row, event)}>
+            {kind === 'feedback' && <Input label="Response note (optional)" name="responseNote" maxLength={500} />}
+            <button className="button button-secondary" disabled={busy}>{kind === 'deliverables' ? 'Accept deliverable' : 'Address feedback'}</button>
           </form>
         );
       }}

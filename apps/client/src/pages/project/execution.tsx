@@ -1,6 +1,6 @@
 import type { FormEvent, ReactNode } from 'react';
 import { useSectionAction, useWorkspace } from './context.tsx';
-import { RecordsSection } from './records-section.tsx';
+import { CreatePanel, RecordsSection } from './records-section.tsx';
 import { optional } from './format.ts';
 import { Check, Input, LEVELS, Select, TextArea } from './inputs.tsx';
 import type { Row } from './record-card.tsx';
@@ -13,6 +13,8 @@ interface Spec {
   readonly label: string;
   readonly singular: string;
   readonly fields: readonly string[];
+  /** The field the record is known by, shown first and larger. */
+  readonly primary?: string;
   readonly create: string;
   readonly created: string;
   readonly form: ReactNode;
@@ -32,7 +34,7 @@ const SPECS: Readonly<Record<Kind, Spec>> = {
     body: (data, login) => ({ taskId: optional(data.get('taskId')), actor: login, minutes: Number(data.get('minutes')), billable: data.get('billable') === 'on', note: optional(data.get('note')) }),
   },
   notes: {
-    label: 'Notes', singular: 'note', create: 'Add note', created: 'Note added.',
+    label: 'Notes', singular: 'note', create: 'Add note', created: 'Note added.', primary: 'body',
     fields: ['author', 'visibility', 'body', 'status', 'createdAtIso', 'archivedBy', 'archivedAtIso'],
     form: <>
       <Select label="Visibility" name="visibility" choices={['internal', 'client']} defaultValue="internal" />
@@ -121,21 +123,22 @@ function ExecutionSection({ kind }: { kind: Kind }) {
 
   return (
     <RecordsSection path={kind} label={spec.label} help={help} helpId={`${id}-execution-help`}
-      statusId={`${id}-execution-status`} status={status} fields={spec.fields} recordClass="execution-record"
+      statusId={`${id}-execution-status`} status={status} fields={spec.fields} primary={spec.primary} recordClass="execution-record"
       form={
-        <form id={`create-${id}`} className="ws-form" hidden={!allowed} onSubmit={create}>
-          <h3>{spec.create}</h3>
-          {spec.form}
-          <div className="form-actions"><button className="button button-primary" disabled={busy}>{spec.create}</button></div>
-        </form>
+        <CreatePanel summary={`New ${spec.singular}${kind === 'documents' ? ' link' : ''}`} allowed={allowed}>
+          <form id={`create-${id}`} className="ws-form" onSubmit={create}>
+            {spec.form}
+            <div className="form-actions"><button className="button button-primary" disabled={busy}>{spec.create}</button></div>
+          </form>
+        </CreatePanel>
       }
       actions={row => {
         if (kind === 'work-logs' || !canAct || row.status !== ACTION[kind].open) return null;
         const action = ACTION[kind];
         return (
-          <form className="execution-action ws-subform" onSubmit={event => act(row, event)}>
-            {action.note && <TextArea label={action.note} name="actionNote" maxLength={500} rows={2} />}
-            <div className="form-actions"><button className="button button-secondary" disabled={busy}>{action.button}</button></div>
+          <form className="execution-action ws-action-form" onSubmit={event => act(row, event)}>
+            {action.note && <Input label={action.note} name="actionNote" maxLength={500} />}
+            <button className="button button-secondary" disabled={busy}>{action.button}</button>
           </form>
         );
       }}

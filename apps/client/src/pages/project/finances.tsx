@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react';
-import { useSectionAction, useWorkspace } from './context.tsx';
-import { RecordsSection } from './records-section.tsx';
+import { useCollection, useSectionAction, useWorkspace } from './context.tsx';
+import { CreatePanel, RecordsSection } from './records-section.tsx';
 import { RecordChoice } from './delivery.tsx';
 import { fromUtcInput, money, optional } from './format.ts';
 import { Check, Input, Select, TextArea } from './inputs.tsx';
@@ -13,22 +13,27 @@ const CATEGORIES: Readonly<Record<Kind, readonly (readonly [string, string])[]>>
   expenses: [['submitted', 'Submitted expenses'], ['approved', 'Approved expenses']],
 };
 
+/** "1.00 EUR; 5.00 USD" for the rows in a state, or '' when there are none. */
+export function sumByCurrency(rows: readonly Row[], state: string): string {
+  const sums = new Map<string, bigint>();
+  for (const row of rows) if (row.status === state) sums.set(String(row.currency), (sums.get(String(row.currency)) ?? 0n) + BigInt(row.amountCents as string));
+  return [...sums.keys()].sort().map(currency => money(sums.get(currency)!.toString(), currency)).join('; ');
+}
+
 /** Totals per currency and state. Currencies are never converted or added together. */
-function Totals() {
-  const { collection } = useWorkspace();
+export function Totals() {
+  const totals = { invoices: useCollection('invoices'), expenses: useCollection('expenses') };
   return (
     <section id="finance-totals" className="ws-section" aria-labelledby="finance-totals-title">
       <h2 id="finance-totals-title">Finance totals by currency</h2>
       <p className="ws-help">Each currency is reported separately. No currency conversion or combined total.</p>
       <div id="finance-totals-status" className="ws-totals" role="status" aria-live="polite">
         {(['invoices', 'expenses'] as const).flatMap(kind => CATEGORIES[kind].map(([state, title]) => {
-          const records = collection(kind);
+          const records = totals[kind];
           let text: string;
           if (records.state !== 'ready') text = `${title}: unavailable until ${kind} load. Retry the failed section.`;
           else {
-            const totals = new Map<string, bigint>();
-            for (const row of records.rows) if (row.status === state) totals.set(String(row.currency), (totals.get(String(row.currency)) ?? 0n) + BigInt(row.amountCents as string));
-            text = `${title}: ${[...totals.keys()].sort().map(currency => money(totals.get(currency)!.toString(), currency)).join('; ') || 'No recorded amounts'}`;
+            text = `${title}: ${sumByCurrency(records.rows, state) || 'No recorded amounts'}`;
           }
           return <p key={`${state}-${kind}`} data-total={`${state}-${kind}`}>{text}</p>;
         }))}
@@ -78,10 +83,10 @@ function FinanceSection({ kind }: { kind: Kind }) {
       statusId={`${singular}-finance-status`} status={status} recordClass="finance-record"
       fields={kind === 'invoices'
         ? ['invoiceNumber', 'deliverableId', 'amountCents', 'currency', 'status', 'issuedAtIso', 'dueAtIso', 'paidAtIso']
-        : ['category', 'description', 'vendor', 'amountCents', 'currency', 'reimbursable', 'receiptUrl', 'incurredAtIso', 'status', 'decidedBy', 'decidedAtIso', 'decisionNote']}
+        : ['description', 'category', 'vendor', 'amountCents', 'currency', 'reimbursable', 'receiptUrl', 'incurredAtIso', 'status', 'decidedBy', 'decidedAtIso', 'decisionNote']}
       form={kind === 'invoices' ? (
-        <form id="create-invoice" className="ws-form" hidden={!allowed} onSubmit={create}>
-          <h3>Issue invoice</h3>
+        <CreatePanel summary="New invoice" allowed={allowed}>
+        <form id="create-invoice" className="ws-form" onSubmit={create}>
           <Input label="Invoice number" name="invoiceNumber" maxLength={80} required />
           <Input label="Amount (integer cents)" name="amountCents" type="number" min={1} max={1_000_000_000} step={1} required />
           <Input label="Currency" name="currency" maxLength={3} required defaultValue={currency} className="input-short" />
@@ -91,9 +96,10 @@ function FinanceSection({ kind }: { kind: Kind }) {
           <Input label="Due date/time (UTC, optional)" name="dueAtIso" type="datetime-local" step={1} />
           <div className="form-actions"><button className="button button-primary" disabled={busy}>Issue invoice</button></div>
         </form>
+        </CreatePanel>
       ) : (
-        <form id="create-expense" className="ws-form" hidden={!allowed} onSubmit={create}>
-          <h3>Submit expense</h3>
+        <CreatePanel summary="New expense" allowed={allowed}>
+        <form id="create-expense" className="ws-form" onSubmit={create}>
           <Select label="Category" aria-label="Category" name="category" choices={['software', 'asset', 'service', 'travel', 'other']} defaultValue="other" />
           <TextArea label="Description" name="description" maxLength={500} required />
           <Input label="Vendor (optional)" name="vendor" maxLength={120} />
@@ -104,20 +110,19 @@ function FinanceSection({ kind }: { kind: Kind }) {
           <Input label="Incurred date/time (UTC, optional; defaults to now)" name="incurredAtIso" type="datetime-local" step={1} />
           <div className="form-actions"><button className="button button-primary" disabled={busy}>Submit expense</button></div>
         </form>
+        </CreatePanel>
       )}
       actions={row => {
         if (!canAct || row.status !== (kind === 'invoices' ? 'issued' : 'submitted')) return null;
         return (
-          <form className="finance-action ws-subform" onSubmit={event => act(row, event)}>
-            {kind === 'expenses' && <TextArea label="Decision note (optional)" name="decisionNote" maxLength={500} rows={2} />}
-            <div className="form-actions">
-              {kind === 'invoices'
-                ? <button className="button button-secondary" name="action" value="pay" disabled={busy}>Record payment</button>
-                : <>
-                  <button className="button button-secondary" name="action" value="approve" disabled={busy}>Approve expense</button>
-                  <button className="button button-quiet" name="action" value="reject" disabled={busy}>Reject expense</button>
-                </>}
-            </div>
+          <form className="finance-action ws-action-form" onSubmit={event => act(row, event)}>
+            {kind === 'expenses' && <Input label="Decision note (optional)" name="decisionNote" maxLength={500} />}
+            {kind === 'invoices'
+              ? <button className="button button-secondary" name="action" value="pay" disabled={busy}>Record payment</button>
+              : <div className="ws-actions">
+                <button className="button button-secondary" name="action" value="approve" disabled={busy}>Approve expense</button>
+                <button className="button button-quiet" name="action" value="reject" disabled={busy}>Reject expense</button>
+              </div>}
           </form>
         );
       }}

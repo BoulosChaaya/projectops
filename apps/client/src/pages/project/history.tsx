@@ -24,18 +24,17 @@ export function History() {
   }
 
   return (
-    <section id="activities" className="ws-section" aria-labelledby="activities-title">
-      <h2 id="activities-title">History</h2>
+    <section id="activities" className="ws-rail" aria-labelledby="activities-title">
+      <h2 id="activities-title">History{records.state === 'ready' && <span className="ws-count" aria-hidden="true">{records.rows.length}</span>}</h2>
       <p id="history-help" className="ws-help">{terminal
         ? 'History is retained. This project is read-only.'
         : 'Successful project actions are recorded automatically. Add an operator annotation for additional context.'}</p>
-      <form id="create-annotation" className="ws-form" hidden={terminal} onSubmit={annotate}>
-        <h3>Operator annotation</h3>
-        <TextArea label="Annotation summary" name="summary" required maxLength={500} />
-        <div className="form-actions"><button className="button button-primary" disabled={busy}>Add annotation</button></div>
+      <form id="create-annotation" className="ws-annotate" hidden={terminal} onSubmit={annotate}>
+        <TextArea label="Annotation summary" name="summary" required maxLength={500} rows={2} />
+        <button className="button button-secondary" disabled={busy}>Add annotation</button>
       </form>
       <p id="annotation-status" className="ws-status" role="status" aria-live="polite">{status}</p>
-      <div id="records-activities" className="ws-records ws-history" aria-live="polite">
+      <div id="records-activities" className="ws-history" aria-live="polite">
         {records.state === 'loading' && <p className="ws-muted">Loading history…</p>}
         {records.state === 'failed' && (
           <div className="ws-failed">
