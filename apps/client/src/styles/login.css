@@ -74,6 +74,18 @@
 }
 .login-form h1 { font-size: var(--text-2xl); margin-bottom: var(--space-2); }
 .login-form .button { width: 100%; margin-top: var(--space-2); }
+.login-main { align-content: center; gap: var(--space-6); }
+.login-demo {
+  width: 100%;
+  max-width: 22rem;
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--rule);
+}
+.login-demo h2 { font-size: var(--text-lg); }
+.login-demo p { color: var(--ink-soft); font-size: var(--text-sm); }
+.login-demo .button { width: 100%; }
 
 @media (max-width: 860px) {
   .login { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }

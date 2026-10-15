@@ -32,6 +32,8 @@ export interface Session {
   readonly login: string;
   readonly csrfToken: string;
   readonly defaults: OperatorDefaults;
+  /** Present for a demo visitor: their private sandbox, deleted at this time. */
+  readonly demo?: { readonly expiresAtIso: string };
 }
 
 /** A failed request: `message` is the server's own explanation, safe to show to the operator. */
@@ -83,6 +85,12 @@ export const api = {
   changeCredentials: (csrf: string, body: { newLogin: string; currentPassword: string; newPassword: string }) =>
     request<{ signedOut: true }>('POST', '/projectops/access/credentials', { body, csrf }),
   logout: (csrf: string) => request<{ signedOut: true }>('POST', '/projectops/access/logout', { body: {}, csrf }),
+  /** Whether this deployment offers the demo, and for how long a sandbox lives. */
+  demo: () => request<{ enabled: boolean; lifetimeMinutes?: number }>('GET', '/projectops/demo'),
+  /** Create a private demo sandbox and sign in to it. */
+  startDemo: () => request<{ csrfToken: string; expiresAtIso: string }>('POST', '/projectops/demo/start', { body: {} }),
+  /** Replace the sandbox's data with a fresh copy of the sample studio. */
+  resetDemo: (csrf: string) => request<{ reset: true }>('POST', '/projectops/demo/reset', { body: {}, csrf }),
   clients: (filter: { q: string; status: ClientListStatus; cursor?: string }) =>
     request<Page<ProjectOpsClient>>('GET', `/projectops/clients?${new URLSearchParams({ q: filter.q, status: filter.status, ...(filter.cursor ? { cursor: filter.cursor } : {}) })}`),
   client: (id: string) => request<ProjectOpsClient>('GET', `/projectops/clients/${encodeURIComponent(id)}`),
