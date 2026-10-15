@@ -67,7 +67,7 @@ The client directory loads 50 clients and offers **Load more clients**; a new se
 
 ## Web client
 
-Sign-in (`/projectops/login`) and settings (`/projectops/settings`) are pages of the React client in `apps/client`; the other pages are still server-rendered and are moving over one area at a time ([ADR-002](../decisions/ADR-002-react-client.md)). Run `pnpm build` before starting the server: it writes `apps/client/dist`, which the server serves from the same origin. Without a build those two pages answer 503 `CLIENT_NOT_BUILT`.
+Sign-in (`/projectops/login`), the dashboard (`/projectops`) and settings (`/projectops/settings`) are pages of the React client in `apps/client`; the other pages are still server-rendered and are moving over one area at a time ([ADR-002](../decisions/ADR-002-react-client.md)). Run `pnpm build` before starting the server: it writes `apps/client/dist`, which the server serves from the same origin. Without a build those pages answer 503 `CLIENT_NOT_BUILT`.
 
 - `index.html` is served for each client page with `Cache-Control: no-store` and a CSP that allows scripts, styles, fonts and API calls to this origin only. Settings, like every product page, redirects to sign-in without a session.
 - `GET /projectops/assets/:file` serves the build's hashed scripts, styles and fonts without a session (they contain no data). Only file names in Vite's form with a known extension are served, and only from `assets/`.

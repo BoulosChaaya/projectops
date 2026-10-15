@@ -1,6 +1,11 @@
 // Typed client for the ProjectOps JSON API. Same origin: the browser sends the HttpOnly session
 // cookie and the Origin header itself; writes add the session's CSRF token.
 
+import type { DashboardFilter, ProjectOpsDashboardView } from '../../../packages/projectops/src/dashboard.ts';
+
+// Response types come from the domain package itself, so the client and the server cannot drift.
+export type { ProjectOpsDashboardView } from '../../../packages/projectops/src/dashboard.ts';
+
 export type Priority = 'low' | 'medium' | 'high';
 
 /** Mirrors validateOperatorDefaults in packages/projectops/src/operator.ts. */
@@ -66,4 +71,7 @@ export const api = {
   changeCredentials: (csrf: string, body: { newLogin: string; currentPassword: string; newPassword: string }) =>
     request<{ signedOut: true }>('POST', '/projectops/access/credentials', { body, csrf }),
   logout: (csrf: string) => request<{ signedOut: true }>('POST', '/projectops/access/logout', { body: {}, csrf }),
+  /** The operational summary for active projects matching the filter, evaluated by the server's clock. */
+  dashboard: (filter: DashboardFilter) =>
+    request<ProjectOpsDashboardView>('GET', `/projectops/dashboard?${new URLSearchParams({ q: filter.q ?? '', status: filter.status ?? 'all' })}`),
 };

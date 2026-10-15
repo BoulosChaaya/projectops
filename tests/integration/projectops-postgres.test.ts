@@ -84,8 +84,9 @@ test('PostgreSQL application persists API data across shutdown and restart', asy
       assert.equal(summary.totalActiveRequests, 1);
       assert.equal(summary.openRisks, 1);
       assert.equal(summary.financeTotalsByCurrency?.USD.outstandingInvoiceAmountCents, '10000');
-      const html = await fetch(`${app.server.origin}/projectops`, { headers: session }).then(r => r.text());
-      assert.match(html, /Durable project/);
+      assert.deepEqual(summary.rows.map((row: { title: string }) => row.title), ['Durable project']);
+      // The dashboard page is the React client, which renders this summary.
+      assert.match(await fetch(`${app.server.origin}/projectops`, { headers: session }).then(r => r.text()), /<div id="root">/);
       assert.equal((await pool.query('SELECT * FROM projectops_schema_migrations')).rows.length, (await loadProjectOpsPostgresMigrations()).length);
     } finally { await app.close(); }
   });

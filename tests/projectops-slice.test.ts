@@ -84,7 +84,6 @@ import {
 } from '../packages/projectops/src/index.ts';
 import { createProjectOpsRoutes, type ProjectOpsApiService } from '../apps/api/src/projectops/routes.ts';
 import { startHttpListener } from '../apps/api/src/bootstrap/http-listener.ts';
-import { composeProjectOpsDashboardPage } from '../apps/web/src/projectops/dashboard-view.ts';
 
 const T0 = '2026-09-29T08:00:00.000Z';
 const T1 = '2026-09-29T09:00:00.000Z';
@@ -1027,8 +1026,8 @@ unitTest('PROJECTOPS-004: API route slice creates client, creates request, trans
   }
 });
 
-unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view model', () => {
-  const page = composeProjectOpsDashboardPage([
+unitTest('PROJECTOPS-005: the dashboard summary composes counts and the next deadline from rows', () => {
+  const summary = composeProjectOpsDashboard([
     {
       id: 'req-1',
       clientId: 'client-1',
@@ -1080,10 +1079,9 @@ unitTest('PROJECTOPS-005: web dashboard boundary exposes a product page view mod
     },
   ]);
 
-  assert.equal(page.title, 'ProjectOps Dashboard');
-  assert.equal(page.summary.totalActiveRequests, 1);
-  assert.equal(page.summary.byStatus.approved, 1);
-  assert.equal(page.summary.nextDeadline?.id, 'req-1');
+  assert.equal(summary.totalActiveRequests, 1);
+  assert.equal(summary.byStatus.approved, 1);
+  assert.equal(summary.nextDeadline?.id, 'req-1');
 });
 
 unitTest('PROJECTOPS-006: product domain rejects unsafe or malformed input', () => {

@@ -27,7 +27,7 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
    browser=await chromium.launch({headless:true});const context=await browser.newContext({timezoneId:'America/Los_Angeles',acceptDownloads:true}),page=await context.newPage();
    const errors:string[]=[];page.on('pageerror',()=>errors.push('page error'));
    await page.goto(app.server.origin+'/projectops');await page.getByLabel('Login',{exact:true}).fill('operator');await page.getByLabel('Password',{exact:true}).fill(secret);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.waitForURL('**/projectops');
-   await page.getByRole('link',{name:'Operator settings',exact:true}).click();await page.waitForFunction(()=>!(document.querySelector('#defaults button') as HTMLButtonElement).disabled);
+   await page.getByRole('link',{name:'Settings',exact:true}).click();await page.waitForFunction(()=>!(document.querySelector('#defaults button') as HTMLButtonElement).disabled);
    await page.locator('#defaults [name=defaultCurrency]').fill('GBP');await page.locator('#defaults [name=defaultPriority]').selectOption('high');await page.locator('#defaults [name=timezone]').fill('Asia/Beirut');await page.locator('#defaults button').click();await page.getByText('Defaults saved.',{exact:true}).waitFor();
    async function form(selector:string,fields:Record<string,string>,type?:string){
     for(const [key,value]of Object.entries(fields)){const input=page.locator(selector+' [name='+key+']');if(await input.evaluate(e=>e.tagName==='SELECT'))await input.selectOption(value);else await input.fill(value);}
@@ -62,9 +62,9 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
    await form('#tasks .planning-edit',{title:'Build deliverable',description:'',assignee:'operator',priority:'high',dueAtIso:''},'task_edited');assert.equal((await read('/tasks'))[0].description,null);
    await form('#tasks .planning-edit',{dueAtIso:'2026-10-03T09:30'},'task_edited');
    const review=await form('#create-task',{title:'Review task',dueAtIso:'2026-10-03T10:30'},'task_created');
-   now='2026-10-03T09:45:00.000Z';await page.goto(app.server.origin+'/projectops');await page.getByText(/1 open tasks\/milestones overdue/).waitFor();await page.getByText(/Final milestone/).first().waitFor();
+   now='2026-10-03T09:45:00.000Z';await page.goto(app.server.origin+'/projectops');await page.getByText(/1 overdue task or milestone/).waitFor();await page.getByText(/Final milestone/).first().waitFor();
    const dashboard=await context.request.get(app.server.origin+'/projectops/dashboard').then(r=>r.json());assert.equal(dashboard.overdueWorkCount,1);assert.ok(JSON.stringify(dashboard).includes(m.id));
-   await page.getByRole('link').filter({hasText:'· task: Build deliverable'}).click();await page.locator('#tasks').getByText('Build deliverable',{exact:true}).waitFor();
+   await page.locator('#overdue').getByRole('link',{name:'Build deliverable',exact:true}).click();await page.locator('#tasks').getByText('Build deliverable',{exact:true}).waitFor();
    await form('#create-work-log',{taskId:t.id,minutes:'45',note:'INTERNAL-WORK'},'work_log_added');
    async function childAction(button:any,type:string){const pending=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().includes('/'+root+'/'));await button.click();assert.equal((await pending).status(),200);await event(type);}
    for(const taskId of [t.id,review.id])await childAction(page.locator('#tasks [data-record-id="'+taskId+'"]').getByRole('button',{name:'Complete task',exact:true}),'task_completed');

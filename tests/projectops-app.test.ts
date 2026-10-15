@@ -5,6 +5,7 @@ import {
   type ProjectRequest,
 } from '../packages/projectops/src/index.ts';
 import { startProjectOpsApp } from '../apps/api/src/projectops/app.ts';
+import { clientFixture } from './client-fixture.ts';
 
 const T0 = '2026-09-29T08:00:00.000Z';
 
@@ -14,6 +15,7 @@ unitTest('PROJECTOPS-APP-001: composed app migrates storage and serves API plus 
     sql,
     port: 0,
     clock: () => T0,
+    clientDir: await clientFixture(),
   });
 
   try {
@@ -55,8 +57,8 @@ unitTest('PROJECTOPS-APP-001: composed app migrates storage and serves API plus 
     const html = await webRes.text();
     assert.equal(webRes.status, 200);
     assert.equal(webRes.headers.get('content-type'), 'text/html; charset=utf-8');
-    assert.match(html, /Composed ProjectOps app/);
-    assert.match(html, /Estimated/);
+    // The dashboard page is the React client, which renders the JSON read above.
+    assert.match(html, /<div id="root">/);
 
     assert.equal(sql.snapshot().projectRequests.length, 1);
   } finally {

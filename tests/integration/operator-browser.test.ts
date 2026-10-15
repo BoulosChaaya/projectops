@@ -26,7 +26,7 @@ test('Operator completes login, saved settings, credential change and logout in 
       await page.getByRole('status').filter({ hasText: 'Invalid login or password.' }).waitFor();
       await signIn('operator', 'browser-acceptance-password');
       await page.waitForURL('**/projectops');
-      await page.getByRole('link', { name: 'Operator settings' }).click();
+      await page.getByRole('link', { name: 'Settings', exact: true }).click();
       await page.waitForFunction(() => (document.querySelector('[name="defaultCurrency"]') as HTMLInputElement)?.value === 'USD');
       await page.getByLabel('Currency', { exact: true }).fill('EUR');
       await page.getByLabel('Priority', { exact: true }).selectOption('high');
@@ -43,7 +43,7 @@ test('Operator completes login, saved settings, credential change and logout in 
       await page.waitForURL('**/projectops/login');
       await signIn('updated', 'changed-browser-password');
       await page.waitForURL('**/projectops');
-      await page.getByRole('link', { name: 'Operator settings' }).click();
+      await page.getByRole('link', { name: 'Settings', exact: true }).click();
       await page.getByRole('button', { name: 'Sign out', exact: true }).click();
       await page.waitForURL('**/projectops/login');
       await page.goto(app.server.origin + '/projectops/settings');

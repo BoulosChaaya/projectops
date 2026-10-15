@@ -9,6 +9,7 @@ import { startProjectOpsApp } from '../apps/api/src/projectops/app.ts';
 import { DEFAULT_CLIENT_DIR, createClientApp } from '../apps/web/src/projectops/client-app.ts';
 import { ProjectOpsMemorySqlExecutor } from '../packages/projectops/src/index.ts';
 import { clientFixture } from './client-fixture.ts';
+import { serializeResponse } from '../apps/api/src/http/response.ts';
 
 test('Client assets are served by exact hashed name with their type, and nothing outside assets/ is reachable', async () => {
   const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), host: '127.0.0.1', port: 0, clientDir: await clientFixture() });
@@ -63,4 +64,13 @@ test('The production build loads only same-origin hashed assets, with no inline 
     assert.match(reference, /^\/projectops\/assets\/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8}\.(js|css)$/, reference);
     assert.ok(existsSync(path.join(DEFAULT_CLIENT_DIR, 'assets', path.basename(reference))), reference);
   }
+});
+
+test('Prepared HTML responses keep their own type, body and length through the serializer', () => {
+  const serialized = serializeResponse({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, body: '<h1>ProjectOps</h1>' }, { correlationId: 'corr-ui' });
+  assert.equal(serialized.status, 200);
+  assert.equal(serialized.headers['content-type'], 'text/html; charset=utf-8');
+  assert.equal(serialized.headers['content-length'], '19');
+  assert.equal(serialized.headers['x-correlation-id'], 'corr-ui');
+  assert.equal(serialized.body.toString('utf8'), '<h1>ProjectOps</h1>');
 });

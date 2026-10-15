@@ -3,9 +3,9 @@ import {
   applyProjectOpsMigrations,
   type ProjectOpsSqlExecutor,
 } from '../../../../packages/projectops/src/index.ts';
-import { createProjectOpsDashboardWebRoute } from '../../../web/src/projectops/dashboard-route.ts';
 import { startHttpListener, type HttpServer } from '../bootstrap/http-listener.ts';
 import type { RouteDefinition } from '../http/path-matching.ts';
+import type { KernelRouteHandler } from '../bootstrap/http-listener.ts';
 import type { HealthService } from '../health/health.service.ts';
 import type { Logger } from '../../../../packages/logger/src/index.ts';
 import { createProjectOpsRoutes } from './routes.ts';
@@ -38,13 +38,14 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
   await (config.migrate ?? applyProjectOpsMigrations)(config.sql);
 
   const service = createProjectOpsRepositoryService(config.sql);
+  const client = createClientApp(config.clientDir);
   const productRoutes = [
+    // Pages rendered by the React client; like every product page, they require a session.
+    { method: 'GET', path: '/projectops', handler: () => client.shell() } satisfies RouteDefinition<KernelRouteHandler>,
     ...createProjectOpsRoutes(service, config.clock),
-    createProjectOpsDashboardWebRoute(service, config.clock),
     ...createClientWebRoutes(),
     ...createProjectHandoffRoutes(service, config.clock ?? (() => new Date().toISOString())),
   ];
-  const client = createClientApp(config.clientDir);
   const routes = Object.freeze([
     ...(config.access ? [...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(() => client.shell())] : productRoutes),
     client.assetRoute,
