@@ -61,6 +61,16 @@ test('Client browser journey creates, searches, edits, resolves stale data and a
       await page.getByText('No clients found.', { exact: false }).waitFor();
       await page.getByLabel('Search', { exact: true }).fill('UPDATED'); await page.getByRole('button', { name: 'Search', exact: true }).click();
       await page.getByRole('link', { name: 'Updated studio', exact: true }).waitFor();
+      // The search lives in the address, so a reload or a shared link shows the same results.
+      assert.match(page.url(), /q=UPDATED&status=archived/);
+      await page.reload(); await page.getByRole('link', { name: 'Updated studio', exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Status', { exact: true }).inputValue(), 'archived');
+      await page.goBack(); await page.getByText('No clients found.', { exact: false }).waitFor();
+      await page.setViewportSize({ width: 375, height: 812 });
+      for (const path of ['/projectops/client-management', '/projectops/client-management/' + clientId]) {
+        await page.goto(app.server.origin + path); await page.locator('#client-status, #count').first().waitFor();
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, path + ' fits a phone');
+      }
       await page.goto(app.server.origin + '/projectops/client-management/missing'); await page.locator('#client-status').getByText('Client not found.', { exact: true }).waitFor();
       assert.deepEqual(errors, []);
     } finally { await browser?.close(); await app.close(); }

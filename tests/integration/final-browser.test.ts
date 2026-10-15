@@ -27,7 +27,7 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
    browser=await chromium.launch({headless:true});const context=await browser.newContext({timezoneId:'America/Los_Angeles',acceptDownloads:true}),page=await context.newPage();
    const errors:string[]=[];page.on('pageerror',()=>errors.push('page error'));
    await page.goto(app.server.origin+'/projectops');await page.getByLabel('Login',{exact:true}).fill('operator');await page.getByLabel('Password',{exact:true}).fill(secret);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.waitForURL('**/projectops');
-   await page.getByRole('link',{name:'Settings',exact:true}).click();await page.waitForFunction(()=>!(document.querySelector('#defaults button') as HTMLButtonElement).disabled);
+   await page.getByRole('link',{name:'Settings',exact:true}).click();await page.locator('#defaults button:enabled').first().waitFor();
    await page.locator('#defaults [name=defaultCurrency]').fill('GBP');await page.locator('#defaults [name=defaultPriority]').selectOption('high');await page.locator('#defaults [name=timezone]').fill('Asia/Beirut');await page.locator('#defaults button').click();await page.getByText('Defaults saved.',{exact:true}).waitFor();
    async function form(selector:string,fields:Record<string,string>,type?:string){
     for(const [key,value]of Object.entries(fields)){const input=page.locator(selector+' [name='+key+']');if(await input.evaluate(e=>e.tagName==='SELECT'))await input.selectOption(value);else await input.fill(value);}

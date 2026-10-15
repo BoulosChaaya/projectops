@@ -43,7 +43,7 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
     // Pages rendered by the React client; like every product page, they require a session.
     { method: 'GET', path: '/projectops', handler: () => client.shell() } satisfies RouteDefinition<KernelRouteHandler>,
     ...createProjectOpsRoutes(service, config.clock),
-    ...createClientWebRoutes(),
+    ...createClientWebRoutes(() => client.shell()),
     ...createProjectHandoffRoutes(service, config.clock ?? (() => new Date().toISOString())),
   ];
   const routes = Object.freeze([

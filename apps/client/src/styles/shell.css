@@ -66,6 +66,7 @@
 }
 .page-title { font-size: var(--text-2xl); margin-bottom: var(--space-6); }
 .page-lede { color: var(--ink-soft); max-width: 40rem; }
+.page-back { display: inline-block; margin-bottom: var(--space-2); font-size: var(--text-sm); }
 
 /* Narrow screens: the rail becomes a top bar. */
 @media (max-width: 760px) {

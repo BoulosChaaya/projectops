@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ProjectOpsMemorySqlExecutor, ProjectOpsRepository, applyProjectOpsMigrations } from '../packages/projectops/src/index.ts';
 import { startProjectOpsApp } from '../apps/api/src/projectops/app.ts';
+import { clientFixture } from './client-fixture.ts';
 
 const time = '2026-10-03T10:00:00.000Z';
 test('Client edits preserve identity, clear contacts, search literally, and reject stale writes', async () => {
@@ -37,7 +38,7 @@ test('Archiving retains project history and prevents new projects and edits', as
 });
 
 test('Client HTTP validation, conflicts, missing resources and protected-page markup', async () => {
-  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), port: 0 });
+  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), port: 0, clientDir: await clientFixture() });
   const origin = app.server.origin;
   const send = (path: string, body: unknown, method = 'POST') => fetch(origin + path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   try {
@@ -51,6 +52,7 @@ test('Client HTTP validation, conflicts, missing resources and protected-page ma
     const page = await fetch(origin + '/projectops/client-management');
     assert.equal(page.headers.get('cache-control'), 'no-store');
     assert.match(page.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
-    assert.match(await page.text(), /Create client/);
+    assert.match(await page.text(), /<div id="root">/, 'the directory is the React client');
+    assert.match(await (await fetch(origin + '/projectops/client-management/any-id')).text(), /<div id="root">/);
   } finally { await app.close(); }
 });

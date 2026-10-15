@@ -22,16 +22,9 @@ export const MAX_PAGE_LIMIT = 100;
 const MAX_CURSOR_LENGTH = 512;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
-export interface PageRequest {
-  readonly limit?: number;
-  readonly cursor?: string;
-}
-
-export interface Page<T> {
-  readonly items: readonly T[];
-  /** Pass back as `cursor` to read the next page; null on the last page. */
-  readonly nextCursor: string | null;
-}
+// Page shapes live in page.ts (platform-neutral, shared with the browser client); re-exported here.
+export type { PageRequest, Page } from './page.ts';
+import type { PageRequest, Page } from './page.ts';
 
 /** Position after the last client seen; clients sort by created_at DESC, id ASC. */
 export interface ClientPageKey {

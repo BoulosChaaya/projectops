@@ -25,7 +25,7 @@ test('Project browser journey creates, navigates every section, edits safely, re
       await send('access/settings', { defaultCurrency: 'EUR', defaultPriority: 'high', timezone: 'Asia/Beirut' });
       await send('clients', { id: 'workspace-client', name: 'Workspace client' });
       await page.goto(app.server.origin + '/projectops/client-management/workspace-client');
-      await page.waitForFunction(() => !(document.querySelector('#create-project button') as HTMLButtonElement)?.disabled);
+      await page.locator('#create-project button:enabled').first().waitFor();
       const create = page.locator('#create-project'); assert.equal(await create.getByLabel('Priority', { exact: true }).inputValue(), 'high');
       await create.getByLabel('Project title').fill('Project_one'); await create.getByLabel('Brief', { exact: true }).fill('<img src=x onerror=alert(1)> brief_one');
       await create.getByLabel('Budget range').fill('USD 100-200'); await create.getByLabel('Deadline (UTC)').fill('2026-11-01T12:00');

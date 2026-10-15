@@ -1,35 +1,5 @@
 /* Dashboard: filter, where projects are, what needs attention now, then the figures and the list. */
 
-.filter-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
-}
-.filter-field { display: grid; gap: var(--space-1); }
-.filter-field label { font-size: var(--text-sm); font-weight: 500; }
-.filter-search { flex: 1 1 16rem; max-width: 26rem; }
-.filter-field input,
-.filter-field select {
-  font: inherit;
-  width: 100%;
-  min-height: 2.5rem;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-control);
-  background: var(--sheet);
-  color: var(--ink);
-}
-.filter-reset { align-self: flex-end; line-height: 2.5rem; font-size: var(--text-sm); }
-
-.result-scope { color: var(--ink-soft); font-size: var(--text-sm); margin-bottom: var(--space-5); }
-.dashboard-loading { color: var(--ink-soft); }
-
-.notice { padding: var(--space-4); border-radius: var(--radius-sheet); display: grid; gap: var(--space-2); }
-.notice-error { background: var(--red-wash); color: var(--red); }
-.notice-error a { color: var(--red); font-weight: 500; }
-
 /* Pipeline: the lifecycle as one line of stations, each a filter. */
 .pipeline { margin-bottom: var(--space-6); }
 .pipeline ol {
@@ -76,17 +46,6 @@
 .pipeline a:hover .pipeline-label { color: var(--ink); text-decoration: underline; }
 .pipeline a[aria-current='true'] .pipeline-count { background: var(--green); color: #ffffff; }
 .pipeline a[aria-current='true'] .pipeline-label { color: var(--ink); font-weight: 600; }
-
-.empty-state {
-  padding: var(--space-5);
-  margin-bottom: var(--space-6);
-  border: 1px dashed var(--rule-strong);
-  border-radius: var(--radius-sheet);
-  display: grid;
-  gap: var(--space-2);
-}
-.empty-state h2 { font-size: var(--text-lg); }
-.empty-state p { color: var(--ink-soft); }
 
 /* Needs attention */
 .attention {
@@ -154,32 +113,11 @@
 .metric-value { font-size: var(--text-xl); font-weight: 600; }
 .metric-detail { font-size: var(--text-xs); color: var(--ink-faint); }
 
-.table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--radius-sheet); background: var(--sheet); }
-.table-scroll table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
-.table-scroll caption { text-align: left; padding: var(--space-3) var(--space-4) 0; color: var(--ink-faint); font-size: var(--text-xs); }
-.table-scroll th, .table-scroll td { text-align: left; vertical-align: top; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--rule); }
-.table-scroll thead th { border-top: 0; font-weight: 500; color: var(--ink-soft); white-space: nowrap; }
 .money-table td { white-space: nowrap; }
 .requests-table tbody th { font-weight: 400; min-width: 12rem; }
 .requests-table tbody th a { font-weight: 600; }
-.cell-detail { display: block; color: var(--ink-faint); font-size: var(--text-xs); }
-.cell-muted { color: var(--ink-faint); }
-.cell-flags { color: var(--red); }
 .requests-table td { white-space: nowrap; }
 .requests-table td:last-child { white-space: normal; min-width: 9rem; }
-
-.status-chip {
-  display: inline-block;
-  padding: 0.125rem var(--space-2);
-  border-radius: 999px;
-  background: var(--paper);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  white-space: nowrap;
-}
-.status-chip[data-status='in_progress'] { background: var(--green-wash); color: var(--green-deep); }
-.status-chip[data-status='on_hold'] { background: #fbefdc; color: var(--amber); }
-.status-chip[data-status='delivered'] { background: var(--ink); color: var(--on-ink); }
 
 @media (max-width: 1100px) {
   .attention { grid-template-columns: minmax(0, 1fr); }
@@ -187,5 +125,4 @@
 @media (max-width: 760px) {
   .pipeline ol { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: var(--space-4); }
   .pipeline ol::before { display: none; }
-  .filter-search { max-width: none; }
 }
