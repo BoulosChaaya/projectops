@@ -10,6 +10,9 @@ import { ProjectOpsRepository, ProjectOpsConnectionSqlExecutor, projectOpsPoolCo
 import { ProjectOpsOperatorStore } from '../../packages/projectops/src/operator.ts';
 import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgres-app.ts';
 import { seedExport, assertExport, AUDIT } from '../export-fixture.ts';
+import { Client } from 'pg';
+import { spawn } from 'node:child_process';
+import { ProjectOpsDemoSandboxes } from '../../packages/projectops/src/demo-sandboxes.ts';
 
 test('Real custom-format database backup restores source/settings/relationships/history/exact money and application into a different owned database',async()=>{
   await finalDatabaseFixture(async f=>{
@@ -17,6 +20,9 @@ test('Real custom-format database backup restores source/settings/relationships/
     const secret=randomBytes(24).toString('base64url');await new ProjectOpsOperatorStore(f.pool).provision('operator',secret);
     await new ProjectOpsOperatorStore(f.pool).saveDefaults({defaultCurrency:'GBP',defaultPriority:'high',timezone:'Asia/Beirut'});
     const repo=new ProjectOpsRepository(new ProjectOpsConnectionSqlExecutor(projectOpsPoolConnection(f.pool))).withHistory({actor:'operator',clock:()=>AUDIT});await repo.createClient({id:'c',name:'Recovery client',createdAtIso:'2026-10-01T00:00:00.000Z'});await seedExport(repo,'delivered','delivered');
+    // A live demo sandbox (a visitor's private copy) is neither backed up nor part of the fingerprint.
+    const sandboxes=new ProjectOpsDemoSandboxes({pool:f.pool,migrations:await loadProjectOpsPostgresMigrations(),openBuildClient:async()=>{const c=new Client({connectionString:f.databaseUrl});await c.connect();return c;}});
+    assert.notEqual(await sandboxes.start(),'busy');
     const before=await databaseFingerprint('service=source',f.env);
     const backup=await backupProjectOps({sourceService:'source',sourceIdentity:'acceptance-source',directory:path.join(f.directory,'backups'),env:f.env});
     assert.ok(backup.receipt.bytes>0);assert.equal(backup.receipt.migrationLedgerDigest,before.ledger);assert.equal((await stat(backup.archive)).mode&0o077,0);
@@ -36,6 +42,8 @@ test('Real custom-format database backup restores source/settings/relationships/
       }finally{await app.close();}
     }});
     assert.deepEqual(restored,{restored:true,applicationVerified:true,sourceUnchanged:true,schemaFingerprint:before.schema,migrationLedgerDigest:before.ledger});
+    const toc=await new Promise<string>((resolve,reject)=>{const child=spawn('pg_restore',['--list',backup.archive],{env:{...process.env,...f.env}});let out='';child.stdout.on('data',d=>out+=d);child.once('close',code=>code===0?resolve(out):reject(Error('pg_restore --list failed')));});
+    assert.doesNotMatch(toc,/demo_[a-f0-9]{24}/);assert.match(toc,/TABLE DATA \S+ projectops_clients /);assert.doesNotMatch(toc,/TABLE DATA \S+ projectops_demo_sandboxes /);
     assert.equal((await f.admin.query('SELECT 1 FROM pg_database WHERE datname=$1',[target])).rows.length,0);
     assert.deepEqual(await databaseFingerprint('service=source',f.env),before);
     // Existing even empty targets cannot be adopted/deleted. Corruption and source identity fail before writes.

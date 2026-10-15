@@ -34,6 +34,15 @@ test('The Render Blueprint deploys the tested runtime behind CI, with a private 
   assert.equal(value('startCommand')[0], 'node --experimental-strip-types scripts/projectops-render-start.mjs');
 });
 
+test('The demo is on in the blueprint, and the switch accepts only on or off', () => {
+  const blueprint = readFileSync('render.yaml', 'utf8');
+  assert.match(blueprint, /- key: PROJECTOPS_DEMO\n\s+value: "on"/);
+  const base = { DATABASE_URL: 'postgres://u@h/d' };
+  assert.equal(readProjectOpsRuntimeConfig({ ...base, PROJECTOPS_DEMO: 'on' }).demo, true);
+  for (const value of [undefined, '', 'off']) assert.equal('demo' in readProjectOpsRuntimeConfig({ ...base, PROJECTOPS_DEMO: value }), false, String(value));
+  for (const value of ['true', 'ON', '1']) assert.throws(() => readProjectOpsRuntimeConfig({ ...base, PROJECTOPS_DEMO: value }), /PROJECTOPS_DEMO/);
+});
+
 test('The running commit is reported by liveness only when it is a full Git SHA', () => {
   const base = { DATABASE_URL: 'postgres://u@h/d' };
   const sha = 'a'.repeat(40);
