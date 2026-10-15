@@ -14,6 +14,8 @@ body {
 
 h1, h2, h3 { margin: 0; line-height: 1.2; font-weight: 600; }
 p { margin: 0; }
+/* The hidden attribute always wins over a component's display rule. */
+[hidden] { display: none !important; }
 
 a { color: var(--green-deep); text-underline-offset: 0.15em; }
 a:hover { color: var(--green); }
@@ -34,6 +36,8 @@ a:hover { color: var(--green); }
 .button-primary { background: var(--green); color: #ffffff; }
 .button-primary:hover:not(:disabled) { background: var(--green-deep); }
 .button-quiet { background: transparent; color: inherit; border-color: currentColor; }
+.button-secondary { background: var(--sheet); color: var(--green-deep); border-color: var(--green); }
+.button-secondary:hover:not(:disabled) { background: var(--green-wash); }
 
 .page-error {
   padding: var(--space-3) var(--space-4);

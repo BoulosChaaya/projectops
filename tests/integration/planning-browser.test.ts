@@ -52,15 +52,17 @@ test('Planning browser journey creates, edits, reschedules, completes, reopens a
       assert.equal(await page.locator('#tasks img').count(), 0);
 
       let milestone = page.locator('#records-milestones article').filter({ hasText: '<b>Release milestone</b>' });
+      await milestone.getByText('Edit milestone', { exact: true }).click();
       await milestone.getByLabel('Edit milestone title').fill('Edited milestone');
       await milestone.getByLabel('Edit milestone due (UTC)').fill('2026-10-06T12:00');
       await milestone.getByRole('button', { name: 'Save milestone', exact: true }).click();
       milestone = page.locator('#records-milestones article').filter({ hasText: 'Edited milestone' }); await milestone.waitFor();
-      await milestone.getByLabel('Edit milestone due (UTC)').fill('');
+      await milestone.getByText('Edit milestone', { exact: true }).click(); await milestone.getByLabel('Edit milestone due (UTC)').fill('');
       await milestone.getByRole('button', { name: 'Save milestone', exact: true }).click();
       await page.locator('#milestone-planning-status').getByText('Milestone saved.', { exact: true }).waitFor();
 
       let task = page.locator('#records-tasks article').filter({ hasText: 'Initial task' });
+      await task.getByText('Edit task', { exact: true }).click();
       await task.getByLabel('Edit task title').fill('Edited task');
       await task.getByLabel('Edit task description').fill('Changed details');
       await task.getByLabel('Edit task assignee').fill('Planner');
@@ -68,15 +70,15 @@ test('Planning browser journey creates, edits, reschedules, completes, reopens a
       await task.getByLabel('Edit task due (UTC)').fill('2026-10-06T12:00');
       await task.getByRole('button', { name: 'Save task', exact: true }).click();
       task = page.locator('#records-tasks article').filter({ hasText: 'Edited task' }); await task.waitFor();
-      await task.getByLabel('Edit task description').fill(''); await task.getByLabel('Edit task assignee').fill(''); await task.getByLabel('Edit task due (UTC)').fill('');
+      await task.getByText('Edit task', { exact: true }).click(); await task.getByLabel('Edit task description').fill(''); await task.getByLabel('Edit task assignee').fill(''); await task.getByLabel('Edit task due (UTC)').fill('');
       await task.getByRole('button', { name: 'Save task', exact: true }).click();
       await page.locator('#task-planning-status').getByText('Task saved.', { exact: true }).waitFor();
 
       const stale = await context.newPage(); stale.on('pageerror', error => errors.push(error.message)); await stale.goto(page.url());
       const staleTask = stale.locator('#records-tasks article').filter({ hasText: 'Edited task' }); await staleTask.waitFor();
-      task = page.locator('#records-tasks article').filter({ hasText: 'Edited task' }); await task.getByLabel('Edit task title').fill('Fresh task');
+      task = page.locator('#records-tasks article').filter({ hasText: 'Edited task' }); await task.getByText('Edit task', { exact: true }).click(); await task.getByLabel('Edit task title').fill('Fresh task');
       await task.getByRole('button', { name: 'Save task', exact: true }).click(); await page.locator('#tasks').getByText('Fresh task', { exact: true }).waitFor();
-      await staleTask.getByLabel('Edit task title').fill('Stale task'); await staleTask.getByRole('button', { name: 'Save task', exact: true }).click();
+      await staleTask.getByText('Edit task', { exact: true }).click(); await staleTask.getByLabel('Edit task title').fill('Stale task'); await staleTask.getByRole('button', { name: 'Save task', exact: true }).click();
       await stale.locator('#task-planning-status').getByText(/Task changed/).waitFor(); assert.equal(await stale.getByRole('button', { name: 'Reload project', exact: true }).isVisible(), true); await stale.close();
 
       milestone = page.locator('#records-milestones article').filter({ hasText: 'Edited milestone' }); await milestone.getByRole('button', { name: 'Complete milestone', exact: true }).click();

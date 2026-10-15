@@ -2,7 +2,7 @@
 
 ProjectOps runs client projects from intake to payment in one application: clients, estimates and approval, planning, execution, delivery and acceptance, invoices and expenses, an automatic audit history, an operational dashboard, and project export.
 
-The backend is built on raw platform primitives: Node.js's own HTTP server and hand-written parameterized SQL on PostgreSQL, with `pg` as the only runtime dependency. The interface is moving, page by page, from server-rendered HTML to a React client built by Vite and served by the same server from the same origin ([ADR-002](docs/decisions/ADR-002-react-client.md)); sign-in, settings, the dashboard and clients are React pages so far; the project workspace is next. Node runs the TypeScript directly by stripping types, so `pnpm verify` runs the TypeScript compiler (strict, source and tests) to actually check them.
+The backend is built on raw platform primitives: Node.js's own HTTP server and hand-written parameterized SQL on PostgreSQL, with `pg` as the only runtime dependency. The interface is a React client built by Vite and served by the same server from the same origin ([ADR-002](docs/decisions/ADR-002-react-client.md)); every product page is a React page, and only the printable delivery summary stays server-rendered. Node runs the TypeScript directly by stripping types, so `pnpm verify` runs the TypeScript compiler (strict, source and tests) to actually check them.
 
 ## What it does
 
@@ -31,7 +31,7 @@ The product scope is fixed by the [roadmap](docs/projectops/roadmap.md). It serv
 apps/api/        HTTP kernel (routing, body parsing, timeouts, errors), health and
                  readiness, the ProjectOps routes, runtime and operator provisioning
 apps/client/     React client (Vite, TypeScript); `pnpm build` writes apps/client/dist
-apps/web/        server-rendered pages not yet migrated; serving of the built client
+apps/web/        the server-rendered delivery summary; serving of the built client
 packages/projectops/   domain rules, SQL, repository, migrations (packages/projectops/migrations)
 packages/db/     PostgreSQL connection handling and the migration runner
 packages/auth/   scrypt password hashing
