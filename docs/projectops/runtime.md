@@ -428,15 +428,15 @@ ProjectOps runs on Render as one native Node web service with one managed Postgr
 | Build | `corepack pnpm install --frozen-lockfile && corepack pnpm build && corepack pnpm install --prod --frozen-lockfile --config.confirmModulesPurge=false` | pnpm 9.12.0 from `packageManager`. Builds the React client with dev dependencies, then leaves only `pg` installed. The purge flag stops pnpm asking for confirmation, which would end the build without a terminal |
 | Start | `node --experimental-strip-types scripts/projectops-render-start.mjs` | Sets `PUBLIC_ORIGIN` from `RENDER_EXTERNAL_URL` (the generated `https://…onrender.com` origin), then starts the app |
 | Health check | `/health/ready` | A new instance receives traffic only once PostgreSQL answers |
-| Deploys | `autoDeployTrigger: checksPass` | A commit on `main` deploys only after its GitHub Actions checks pass. `main` changes only through reviewed, merged pull requests, so merging is the deploy approval |
+| Deploys | `autoDeployTrigger: "off"`, plus the CI `deploy` job | Render never deploys on its own. For each push to `main` (a merged pull request), CI's `deploy` job runs after `verify` and `acceptance` pass, calls the service's deploy hook with that exact commit, and waits until `/health/live` reports it; the job fails if it never does. Merging is the deploy approval, every deploy is a visible step in GitHub, and manually started workflows (the deployed smoke) neither start nor block deploys |
 
 Prices are from Render's pricing page in October 2026; Render shows the exact plan before you apply the Blueprint.
 
 ### How a deploy behaves
 
-1. Render builds the new commit and starts a new instance next to the running one.
+1. CI's `deploy` job (`scripts/projectops-deploy.mjs`) calls the Render deploy hook with the merged commit. If Render answers that another deploy is in progress, it asks again until this one starts. Render builds the commit and starts a new instance next to the running one.
 2. On start, the app applies pending migrations in a transaction under a PostgreSQL advisory lock (verifying the checksums of applied ones), then binds HTTP. A failed migration rolls back and the instance never becomes healthy.
-3. When `/health/ready` passes, traffic moves to the new instance. About 60 seconds later the old instance receives SIGTERM, closes its HTTP server and database pool, and exits within Render's 30-second shutdown limit.
+3. When `/health/ready` passes, traffic moves to the new instance, and the `deploy` job sees `/health/live` report the new commit and passes (it fails after 20 minutes otherwise). About 60 seconds later the old instance receives SIGTERM, closes its HTTP server and database pool, and exits within Render's 30-second shutdown limit.
 
 Because old and new code overlap for about a minute, **a migration must stay compatible with the previous release**: add columns and tables freely; rename or drop only in a later release, after no deployed code uses them.
 
@@ -445,6 +445,7 @@ A failed build, failed migration or failing health check leaves the previous ver
 ### First deployment
 
 1. In Render: **New → Blueprint**, select this repository and `main`. Review the two resources, plans and region, then apply. The first deploy starts immediately.
+1. Copy the service's **Deploy Hook** URL (Settings) into the GitHub repository secret `RENDER_DEPLOY_HOOK_URL`, and set the repository variable `PROJECTOPS_ORIGIN` to the service's `https://…onrender.com` origin. Without them, the `deploy` job fails and nothing is deployed. The hook URL is a secret: anyone holding it can start deploys; regenerate it in Render if it leaks.
 2. When the service shows **Live**, open its **Shell** tab and create the operator. The command needs only `DATABASE_URL`, which the service environment already has:
    ```bash
    node --experimental-strip-types apps/api/src/projectops/provision-operator.ts
@@ -459,7 +460,7 @@ A failed build, failed migration or failing health check leaves the previous ver
 The **Deployed smoke** GitHub Actions workflow (`.github/workflows/deployed-smoke.yml`, started by hand) runs `scripts/projectops-deployed-smoke.mjs` against the live service. It needs repository secrets `PROJECTOPS_OPERATOR_LOGIN` and `PROJECTOPS_OPERATOR_PASSWORD` and the repository variable `PROJECTOPS_ORIGIN`.
 
 - **initial** first checks that the live commit equals `main`'s head (run it after the deploy finishes). It then checks health, page and API access control, the `__Host-` Secure/HttpOnly/SameSite=Strict session cookie, Origin/CSRF/JSON rejection, `no-store` and `nosniff` headers, and the workspace CSP. It runs one project through estimate, approval, start, delivery, feedback, an EUR invoice payment, a USD expense approval, delivery and archive in Chromium, then checks the 14 history events, exact totals, export, handoff summary, dashboard and dashboard search (which needs PostgreSQL's `C.utf8` collation). It writes one archived client and project named "ProjectOps deployed acceptance" and saves a JSON receipt with their ids and a snapshot digest as the run artifact `smoke-receipt` (also printed in the log, where GitHub masks secret values, so do not copy it from there).
-- **after-restart**: redeploy the service in Render (Manual Deploy → Deploy latest commit; do not pick a specific commit, which turns auto-deploy off), wait until it is Live, then run the workflow with this phase. It downloads the receipt artifact of the latest successful initial run, re-reads the archived project and saved settings and compares them with the receipt. It writes nothing.
+- **after-restart**: redeploy the service in Render (Manual Deploy → Deploy latest commit), wait until it is Live, then run the workflow with this phase. It downloads the receipt artifact of the latest successful initial run, re-reads the archived project and saved settings and compares them with the receipt. It writes nothing.
 
 Failures name the check that failed; credentials are never printed. The workflow log is public on a public repository, and the receipt contains only ids, a digest and the operator's saved defaults.
 
