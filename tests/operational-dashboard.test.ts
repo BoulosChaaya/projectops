@@ -4,6 +4,7 @@ import { ProjectOpsRepository, ProjectOpsMemorySqlExecutor, applyProjectOpsMigra
 import { startProjectOpsApp } from '../apps/api/src/projectops/app.ts';
 import { ProjectOpsAccess } from '../apps/api/src/projectops/access.ts';
 import { seedDashboard, assertDashboardContract, CREATED, NOW, FUTURE, BEFORE } from './dashboard-fixture.ts';
+import { clientFixture } from './client-fixture.ts';
 
 async function fixture() {
   const sql = new ProjectOpsMemorySqlExecutor(); await applyProjectOpsMigrations(sql);
@@ -44,10 +45,10 @@ test('Operational classification uses strict instant boundaries, stable ties, no
   assert.deepEqual(validateDashboardFilter({q:'  TITLE ',status:'on_hold'}),{q:'title',status:'on_hold'});
 });
 
-test('Protected dashboard GET owns one clock, shares validation, timezone and no-store, and renders safe failures', async () => {
+test('Protected dashboard GET owns one clock, validates filters, keeps no-store and fails without leaking internals', async () => {
   const { sql,repo } = await fixture(); let samples=0,fail=false,reads=0;
   const session={login:'operator',csrfToken:'token',tokenHash:'hash',defaults:{defaultCurrency:'USD',defaultPriority:'low' as const,timezone:'Asia/Beirut'}};
-  const app=await startProjectOpsApp({sql:{query:async statement=>{if(statement.sql.includes('dashboard_scope')){reads++;if(fail)throw Error('Private SQL detail');}return sql.query(statement);},transaction:run=>sql.transaction(run)},port:0,clock:()=>{samples++;return NOW;},access:new ProjectOpsAccess({resolve:async (token:string)=>token==='valid'?session:null} as any)});
+  const app=await startProjectOpsApp({sql:{query:async statement=>{if(statement.sql.includes('dashboard_scope')){reads++;if(fail)throw Error('Private SQL detail');}return sql.query(statement);},transaction:run=>sql.transaction(run)},port:0,clock:()=>{samples++;return NOW;},clientDir:await clientFixture(),access:new ProjectOpsAccess({resolve:async (token:string)=>token==='valid'?session:null} as any)});
   try {
     const headers={cookie:'projectops_session=valid'};
     assert.equal((await fetch(app.server.origin+'/projectops',{redirect:'manual'})).status,302);
@@ -55,12 +56,12 @@ test('Protected dashboard GET owns one clock, shares validation, timezone and no
     const before=await repo.listProjectActivities('approved'); const revision=(await repo.getProjectRequest('approved'))!.revision;
     const response=await fetch(app.server.origin+'/projectops/dashboard?q=project%20approved&status=approved&evaluationNow=2000-01-01T00:00:00Z',{headers});
     assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store'); const data=await response.json();assert.equal(data.evaluationNow,NOW);assert.equal(samples,1);assert.equal(reads,1);
-    const html=await fetch(app.server.origin+'/projectops?q=studio&status=on_hold',{headers}).then(r=>r.text());
-    assert.match(html,/Asia\/Beirut/);assert.match(html,/On Hold/);assert.match(html,/1 matching projects/);assert.ok(!html.includes('<img src=x'));assert.ok(!html.includes('<script>alert(1)'));
-    for(const url of ['/projectops?status=archived','/projectops/dashboard?status=cancelled','/projectops/dashboard?q='+ 'a'.repeat(121)])assert.equal((await fetch(app.server.origin+url,{headers})).status,400);
-    const empty=await fetch(app.server.origin+'/projectops?q=none',{headers}).then(r=>r.text());assert.match(empty,/No matching projects/);
-    fail=true; const failure=await fetch(app.server.origin+'/projectops?q=studio&status=on_hold',{headers});assert.equal(failure.status,500);const unavailable=await failure.text();assert.match(unavailable,/Dashboard unavailable/);assert.match(unavailable,/q=studio&amp;status=on_hold/);assert.ok(!unavailable.includes('Private SQL'));assert.ok(!unavailable.includes('class="metric"'));
-    assert.equal((await fetch(app.server.origin+'/projectops/dashboard',{headers})).status,500);fail=false;
+    // The page is the React client's shell, served only with a session; it reads the JSON below.
+    const page=await fetch(app.server.origin+'/projectops?q=studio&status=on_hold',{headers});assert.equal(page.status,200);assert.match(await page.text(),/<div id="root">/);
+    const filtered=await fetch(app.server.origin+'/projectops/dashboard?q=studio&status=on_hold',{headers}).then(r=>r.json());assert.equal(filtered.rows.length,1);assert.deepEqual(filtered.filter,{q:'studio',status:'on_hold'});
+    for(const url of ['/projectops/dashboard?status=archived','/projectops/dashboard?status=cancelled','/projectops/dashboard?q='+ 'a'.repeat(121)]){const invalid=await fetch(app.server.origin+url,{headers});assert.equal(invalid.status,400,url);assert.equal(typeof (await invalid.json()).message,'string');}
+    const empty=await fetch(app.server.origin+'/projectops/dashboard?q=none',{headers}).then(r=>r.json());assert.deepEqual([empty.rows.length,empty.hasEligibleProjects],[0,true]);
+    fail=true; const failure=await fetch(app.server.origin+'/projectops/dashboard?q=studio&status=on_hold',{headers});assert.equal(failure.status,500);const unavailable=await failure.text();assert.ok(!unavailable.includes('Private SQL'));assert.equal(JSON.parse(unavailable).code,'INTERNAL_SERVER_ERROR');fail=false;
     assert.deepEqual(await repo.listProjectActivities('approved'),before);assert.equal((await repo.getProjectRequest('approved'))!.revision,revision);
   } finally{await app.close();}
 });

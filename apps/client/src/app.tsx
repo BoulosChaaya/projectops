@@ -1,4 +1,5 @@
 import type { JSX } from 'react';
+import { DashboardPage } from './pages/dashboard.tsx';
 import { LoginPage } from './pages/login.tsx';
 import { SettingsPage } from './pages/settings.tsx';
 import { NotFoundPage } from './pages/not-found.tsx';
@@ -6,6 +7,7 @@ import { NotFoundPage } from './pages/not-found.tsx';
 // Pages move to the client one area at a time. The API server serves this app for each migrated
 // path; every other path is still a server-rendered page, reached by an ordinary link.
 const pages: Record<string, { readonly title: string; readonly Page: () => JSX.Element }> = {
+  '/projectops': { title: 'Dashboard', Page: DashboardPage },
   '/projectops/login': { title: 'Sign in', Page: LoginPage },
   '/projectops/settings': { title: 'Settings', Page: SettingsPage },
 };

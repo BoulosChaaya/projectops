@@ -17,7 +17,7 @@ Read this before changing anything. ProjectOps is a client and project operation
 ## Repository layout
 
 - `apps/api`: HTTP kernel, health and readiness, ProjectOps routes, PostgreSQL runtime (`src/projectops/postgres-app.ts`), entry point `src/projectops/main.ts`
-- `apps/client`: React client (Vite); pages migrate here one area at a time, starting with sign-in and settings. `pnpm build` writes `apps/client/dist`, which the server serves
+- `apps/client`: React client (Vite); pages migrate here one area at a time, so far sign-in, settings and the dashboard. API response types come from the domain package (`import type`), never hand-copied. `pnpm build` writes `apps/client/dist`, which the server serves
 - `apps/web/src/projectops`: server-rendered pages not yet migrated, and `client-app.ts`, which serves the built client
 - `packages/projectops`: domain rules, SQL, repository, migrations, export and dashboard logic
 - `packages/db`: PostgreSQL connection handling and the migration runner
