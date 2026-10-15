@@ -47,6 +47,11 @@ export async function loadProjectOpsPostgresMigrations(): Promise<readonly Migra
     name: 'list_pagination_indexes',
     upSql: await readFile(new URL('../migrations/0008_list_pagination_indexes.sql', import.meta.url), 'utf8'),
     reversible: false,
+  }, {
+    version: '0009',
+    name: 'demo_sandboxes',
+    upSql: await readFile(new URL('../migrations/0009_demo_sandboxes.sql', import.meta.url), 'utf8'),
+    reversible: false,
   }];
 }
 

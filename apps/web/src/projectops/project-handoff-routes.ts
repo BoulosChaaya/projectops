@@ -1,11 +1,14 @@
 import type { RouteDefinition } from '../../../api/src/http/path-matching.ts';
 import type { KernelRouteHandler } from '../../../api/src/bootstrap/http-listener.ts';
+import type { RequestContext } from '../../../api/src/http/request-context/context.ts';
 import type { ProjectOpsApiService } from '../../../api/src/projectops/routes.ts';
 import { ProjectOpsOperationError, ProjectOpsValidationError } from '../../../../packages/projectops/src/domain.ts';
 import { createProjectExportArtifact, projectExportFilename, validateExportIdentifier } from '../../../../packages/projectops/src/project-export.ts';
 import { renderDeliverySummary, renderHandoffUnavailable } from './project-handoff.ts';
 
-export function createProjectHandoffRoutes(service: Pick<ProjectOpsApiService,'getProjectExportSnapshot'>,clock:()=>string): RouteDefinition<KernelRouteHandler>[] {
+type ExportService=Pick<ProjectOpsApiService,'getProjectExportSnapshot'>;
+/** `serviceFor` picks the data a request may use (a demo session's sandbox); by default `service`. */
+export function createProjectHandoffRoutes(service: ExportService,clock:()=>string,serviceFor:(context:RequestContext)=>ExportService=()=>service): RouteDefinition<KernelRouteHandler>[] {
   return [false,true].map(summary=>({method:'GET',path:summary?'/projectops/projects/:id/delivery-summary':'/projectops/project-requests/:id/export',handler:async(request,context,params)=>{
     const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'};
     try {
@@ -13,7 +16,7 @@ export function createProjectHandoffRoutes(service: Pick<ProjectOpsApiService,'g
       if(Object.keys(request.query).length)throw new ProjectOpsValidationError('INVALID_PROJECTOPS_EXPORT_QUERY','Export and summary do not accept query overrides.');
       const operator=context.get<{login:string;defaults:{timezone:string}}>('projectops.operator');
       if(!operator)return {status:401,headers,body:JSON.stringify({message:'Sign in required.'})};
-      const artifact=createProjectExportArtifact(await service.getProjectExportSnapshot(params.id),operator.login,clock());
+      const artifact=createProjectExportArtifact(await serviceFor(context).getProjectExportSnapshot(params.id),operator.login,clock());
       if(summary)return renderDeliverySummary(artifact,operator.defaults.timezone);
       // Complete encoding before attaching download headers; failures never masquerade as files.
       const body=JSON.stringify(artifact,null,2);

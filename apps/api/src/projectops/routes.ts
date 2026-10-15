@@ -230,13 +230,16 @@ export interface ProjectOpsApiService {
 
 export function createProjectOpsRoutes(
   service: ProjectOpsApiService,
-  clock: () => string = () => new Date().toISOString()
+  clock: () => string = () => new Date().toISOString(),
+  /** The data a request may use: a demo session's sandbox, else `service` (app.ts). */
+  serviceFor: (context: RequestContext) => ProjectOpsApiService = () => service
 ): readonly RouteDefinition<KernelRouteHandler>[] {
   const requestService = (context: RequestContext): ProjectOpsApiService => {
+    const base = serviceFor(context);
     const operator = context.get<{ login: string }>('projectops.operator');
-    if (!operator) return service; // Unprotected injected contract harness; never the durable runtime.
-    if (!service.withHistory) throw new Error('Protected ProjectOps workflows require transactional history support.');
-    return service.withHistory({ actor: operator.login, clock });
+    if (!operator) return base; // Unprotected injected contract harness; never the durable runtime.
+    if (!base.withHistory) throw new Error('Protected ProjectOps workflows require transactional history support.');
+    return base.withHistory({ actor: operator.login, clock });
   };
   const routes: RouteDefinition<KernelRouteHandler>[] = [
     {
@@ -740,7 +743,7 @@ export function createProjectOpsRoutes(
     if (/\/:id\/(deliverables|feedback|invoices|expenses|activities)(\/|$)/.test(route.path)) return route;
     if (route.method === 'GET' || !route.path.startsWith('/projectops/project-requests/:id') || ['/status','/control'].some(suffix => route.path.endsWith(suffix))) return route;
     return { ...route, handler: async (request, context, params) => {
-      const project = await requireFound(service.getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND');
+      const project = await requireFound(serviceFor(context).getProjectRequest(params.id), 'PROJECTOPS_REQUEST_NOT_FOUND');
       if (['archived','cancelled'].includes(project.status)) throw new HttpError(409, 'PROJECTOPS_PROJECT_READ_ONLY', 'Cancelled and archived projects are read-only.');
       return await route.handler(request, context, params);
     } };
