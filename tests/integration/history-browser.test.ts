@@ -19,7 +19,7 @@ test('Chromium completed workflows automatically refresh trusted history, annota
       const read = (path: string) => context.request.get(app.server.origin + '/projectops/' + path).then(r => r.json());
       await send('access/settings', { defaultCurrency: 'EUR', defaultPriority: 'medium', timezone: 'Europe/Paris' });
       await send('clients', { id: 'c', name: 'History client' }); await page.goto(app.server.origin + '/projectops/client-management/c');
-      await page.waitForFunction(() => !(document.querySelector('#create-project button') as HTMLButtonElement).disabled);
+      await page.locator('#create-project button:enabled').first().waitFor();
       await page.locator('#create-project [name=title]').fill('History project'); await page.locator('#create-project [name=brief]').fill('Brief'); await page.locator('#create-project button').click(); await page.waitForURL('**/projects/*');
       const projectId = page.url().split('/').at(-1)!, root = 'project-requests/' + projectId;
       let count = 0;

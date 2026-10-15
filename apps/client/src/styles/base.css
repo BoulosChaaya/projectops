@@ -45,3 +45,6 @@ a:hover { color: var(--green); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+.button-danger { background: var(--red); color: #ffffff; }
+.button-danger:hover:not(:disabled) { background: #8f1d17; }

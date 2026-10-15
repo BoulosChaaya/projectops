@@ -1,0 +1,50 @@
+/* Client directory and client page. */
+
+.clients-layout,
+.client-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+  gap: var(--space-6);
+  align-items: start;
+}
+.clients-create h2,
+.new-project h2,
+.client-main h2,
+.contact h2 { font-size: var(--text-lg); }
+.clients-create .form-grid h2 { margin-bottom: var(--space-1); }
+.list-more-button { margin-top: var(--space-4); color: var(--ink); }
+.clients-table tbody td:first-child a { font-weight: 600; }
+
+.client-status { color: var(--ink-soft); margin-top: calc(-1 * var(--space-5)); margin-bottom: var(--space-3); }
+.client-status-archived { color: var(--amber); font-weight: 500; }
+.page-message { min-height: 1.5em; margin-bottom: var(--space-3); font-size: var(--text-sm); color: var(--ink-soft); }
+
+.client-main { display: grid; gap: var(--space-6); }
+.client-main section > h2 { margin-bottom: var(--space-3); }
+.new-project h2 { margin-bottom: var(--space-3); }
+
+.contact { display: grid; gap: var(--space-4); }
+.contact-list { margin: 0; display: grid; gap: var(--space-2); }
+.contact-list div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: var(--space-2); }
+.contact-list dt { color: var(--ink-soft); font-size: var(--text-sm); }
+.contact-list dd { margin: 0; overflow-wrap: anywhere; }
+.contact-archived { color: var(--ink-soft); font-size: var(--text-sm); }
+.archive-zone { border-top: 1px solid var(--rule); padding-top: var(--space-4); }
+.confirm p { font-size: var(--text-sm); margin-bottom: var(--space-2); }
+.confirm .form-actions { padding-top: 0; }
+
+.field textarea {
+  font: inherit;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-control);
+  background: var(--sheet);
+  color: var(--ink);
+  resize: vertical;
+}
+
+@media (max-width: 1000px) {
+  .clients-layout,
+  .client-layout { grid-template-columns: minmax(0, 1fr); }
+}

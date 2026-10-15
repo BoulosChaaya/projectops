@@ -5,6 +5,7 @@ import '@fontsource/ibm-plex-sans/latin-500.css';
 import '@fontsource/ibm-plex-sans/latin-600.css';
 import './styles/tokens.css';
 import './styles/base.css';
+import './styles/components.css';
 import { App } from './app.tsx';
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

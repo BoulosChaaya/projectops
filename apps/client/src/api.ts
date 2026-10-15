@@ -2,9 +2,21 @@
 // cookie and the Origin header itself; writes add the session's CSRF token.
 
 import type { DashboardFilter, ProjectOpsDashboardView } from '../../../packages/projectops/src/dashboard.ts';
+import type { ClientStatus, ProjectOpsClient, ProjectPriority, ProjectRequest } from '../../../packages/projectops/src/domain.ts';
+import type { Page } from '../../../packages/projectops/src/page.ts';
 
 // Response types come from the domain package itself, so the client and the server cannot drift.
 export type { ProjectOpsDashboardView } from '../../../packages/projectops/src/dashboard.ts';
+export type { ProjectOpsClient, ProjectRequest } from '../../../packages/projectops/src/domain.ts';
+export type { Page } from '../../../packages/projectops/src/page.ts';
+
+export type ClientListStatus = ClientStatus | 'all';
+/** Optional text fields are sent as undefined when blank: the server stores no value, never an empty string. */
+export interface ClientInput { readonly name: string; readonly contactName?: string; readonly email?: string }
+export interface ProjectInput {
+  readonly title: string; readonly brief: string; readonly budgetRange?: string;
+  readonly priority: ProjectPriority; readonly deadlineIso?: string;
+}
 
 export type Priority = 'low' | 'medium' | 'high';
 
@@ -39,9 +51,9 @@ const FALLBACK: Record<number, string> = {
   503: 'ProjectOps is temporarily unavailable. Try again shortly.',
 };
 
-async function request<T>(method: 'GET' | 'POST', path: string, options: { body?: unknown; csrf?: string } = {}): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PUT', path: string, options: { body?: unknown; csrf?: string } = {}): Promise<T> {
   const headers: Record<string, string> = { accept: 'application/json' };
-  if (method === 'POST') headers['content-type'] = 'application/json';
+  if (method !== 'GET') headers['content-type'] = 'application/json';
   if (options.csrf) headers['x-csrf-token'] = options.csrf;
   let response: Response;
   try {
@@ -71,6 +83,19 @@ export const api = {
   changeCredentials: (csrf: string, body: { newLogin: string; currentPassword: string; newPassword: string }) =>
     request<{ signedOut: true }>('POST', '/projectops/access/credentials', { body, csrf }),
   logout: (csrf: string) => request<{ signedOut: true }>('POST', '/projectops/access/logout', { body: {}, csrf }),
+  clients: (filter: { q: string; status: ClientListStatus; cursor?: string }) =>
+    request<Page<ProjectOpsClient>>('GET', `/projectops/clients?${new URLSearchParams({ q: filter.q, status: filter.status, ...(filter.cursor ? { cursor: filter.cursor } : {}) })}`),
+  client: (id: string) => request<ProjectOpsClient>('GET', `/projectops/clients/${encodeURIComponent(id)}`),
+  clientProjects: (id: string) => request<ProjectRequest[]>('GET', `/projectops/clients/${encodeURIComponent(id)}/projects`),
+  createClient: (csrf: string, id: string, input: ClientInput) =>
+    request<ProjectOpsClient>('POST', '/projectops/clients', { body: { id, ...input }, csrf }),
+  /** Optimistic concurrency: the edit applies only if the client is still at `expectedRevision` (else 409). */
+  editClient: (csrf: string, id: string, input: ClientInput, expectedRevision: number) =>
+    request<ProjectOpsClient>('PUT', `/projectops/clients/${encodeURIComponent(id)}`, { body: { ...input, expectedRevision }, csrf }),
+  archiveClient: (csrf: string, id: string, expectedRevision: number) =>
+    request<ProjectOpsClient>('POST', `/projectops/clients/${encodeURIComponent(id)}/archive`, { body: { expectedRevision }, csrf }),
+  createProject: (csrf: string, id: string, clientId: string, input: ProjectInput) =>
+    request<ProjectRequest>('POST', '/projectops/project-requests', { body: { id, clientId, ...input }, csrf }),
   /** The operational summary for active projects matching the filter, evaluated by the server's clock. */
   dashboard: (filter: DashboardFilter) =>
     request<ProjectOpsDashboardView>('GET', `/projectops/dashboard?${new URLSearchParams({ q: filter.q ?? '', status: filter.status ?? 'all' })}`),

@@ -39,7 +39,7 @@ export async function runDeployedSmoke(config) {
     const sessionResponse = await context.request.get(origin + '/projectops/access/session'); check(sessionResponse.headers()['cache-control'] === 'no-store', 'session cache');
     const session = await sessionResponse.json(); check(session.login === config.login, 'session identity');
     await page.goto(origin + '/projectops/settings'); await page.getByLabel('Timezone', { exact: true }).waitFor();
-    await page.waitForFunction(() => !(document.querySelector('#defaults button')).disabled);
+    await page.locator('#defaults button:enabled').first().waitFor();
     check(await page.getByLabel('Timezone', { exact: true }).inputValue() === session.defaults.timezone, 'saved timezone');
     const headers = { origin, 'x-csrf-token': session.csrfToken };
     for (const [extra, expected] of [[{origin:'https://invalid.example'},403],[{'x-csrf-token':'invalid'},403],[{'content-type':'text/plain'},415]]) {
@@ -62,7 +62,7 @@ export async function runDeployedSmoke(config) {
     await page.goto(origin + '/projectops/client-management');
     await page.locator('#create [name=name]').fill('ProjectOps deployed acceptance'); await page.locator('#create button').click(); await page.waitForURL('**/client-management/*');
     const clientId = page.url().split('/').at(-1);
-    await page.waitForFunction(() => !(document.querySelector('#create-project button')).disabled);
+    await page.locator('#create-project button:enabled').first().waitFor();
     await page.locator('#create-project [name=title]').fill('ProjectOps deployed acceptance'); await page.locator('#create-project [name=brief]').fill('Authorized deployed verification'); await page.locator('#create-project button').click(); await page.waitForURL('**/projects/*');
     const projectId = page.url().split('/').at(-1), root = '/projectops/project-requests/' + projectId;
     const response = await context.request.get(origin + root); check(response.status() === 200 && response.headers()['cache-control'] === 'no-store', 'persistent project');

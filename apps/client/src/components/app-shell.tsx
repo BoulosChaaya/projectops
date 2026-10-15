@@ -3,15 +3,19 @@ import { api, type Session } from '../api.ts';
 import { Mark } from './mark.tsx';
 import '../styles/shell.css';
 
-// Dashboard and Clients are still server-rendered pages, so they are ordinary links.
+// Ordinary links: each page is its own load, whether the client or the server renders it.
 const NAV = [
   { href: '/projectops', label: 'Dashboard' },
   { href: '/projectops/client-management', label: 'Clients' },
   { href: '/projectops/settings', label: 'Settings' },
 ] as const;
 
-export function AppShell({ session, title, children }: { session: Session | null; title: string; children: ReactNode }) {
+export function AppShell({ session, title, back, children }: {
+  session: Session | null; title: string; back?: { href: string; label: string }; children: ReactNode;
+}) {
   const here = window.location.pathname;
+  // A section stays current on its sub-pages (a client's page is under Clients).
+  const current = (href: string) => href === '/projectops' ? here === href : here === href || here.startsWith(`${href}/`);
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState('');
   async function signOut() {
@@ -26,7 +30,7 @@ export function AppShell({ session, title, children }: { session: Session | null
         <a className="shell-brand" href="/projectops"><Mark /><span>ProjectOps</span></a>
         <nav className="shell-nav" aria-label="Main">
           {NAV.map(item => (
-            <a key={item.href} href={item.href} aria-current={here === item.href ? 'page' : undefined}>{item.label}</a>
+            <a key={item.href} href={item.href} aria-current={current(item.href) ? 'page' : undefined}>{item.label}</a>
           ))}
         </nav>
         <div className="shell-operator">
@@ -36,6 +40,7 @@ export function AppShell({ session, title, children }: { session: Session | null
         </div>
       </header>
       <main className="shell-main">
+        {back && <a className="page-back" href={back.href}>{back.label}</a>}
         <h1 className="page-title">{title}</h1>
         {children}
       </main>
