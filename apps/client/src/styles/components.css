@@ -77,3 +77,6 @@
 @media (max-width: 760px) {
   .filter-search { max-width: none; }
 }
+
+/* A page's status line for the result of its last action. */
+.page-message { min-height: 1.5em; margin-bottom: var(--space-3); font-size: var(--text-sm); color: var(--ink-soft); }

@@ -1,0 +1,113 @@
+/* Project workspace: a sticky section index beside one column of sections. Each section is a
+   sheet; records inside it are separated by rules, and their forms sit on a tinted panel. */
+
+.ws-head { display: grid; gap: var(--space-2); margin-top: calc(-1 * var(--space-4)); margin-bottom: var(--space-5); }
+.ws-head #project-status { color: var(--ink-soft); }
+.ws-head .page-message { margin-bottom: 0; }
+.ws-head #reload { justify-self: start; }
+
+.ws-layout { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.ws-jump {
+  position: sticky;
+  top: var(--space-5);
+  display: grid;
+  gap: 0.125rem;
+  max-height: calc(100vh - 2 * var(--space-5));
+  overflow-y: auto;
+  font-size: var(--text-sm);
+}
+.ws-jump a { padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); color: var(--ink-soft); text-decoration: none; }
+.ws-jump a:hover { color: var(--ink); background: var(--sheet); }
+.ws-main { display: grid; gap: var(--space-5); min-width: 0; }
+
+.ws-section {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sheet);
+  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-3);
+  scroll-margin-top: var(--space-4);
+  min-width: 0;
+}
+.ws-section > h2 { font-size: var(--text-lg); }
+.ws-help { color: var(--ink-soft); font-size: var(--text-sm); }
+.ws-muted { color: var(--ink-faint); font-size: var(--text-sm); }
+.ws-status { min-height: 1.25em; font-size: var(--text-sm); color: var(--green-deep); }
+.ws-status:empty { min-height: 0; }
+.ws-brief { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 46rem; }
+.ws-readonly { color: var(--amber); font-weight: 500; }
+
+.ws-facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-3) var(--space-4); }
+.ws-facts div { display: grid; gap: 0.125rem; }
+.ws-facts dt { font-size: var(--text-xs); color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.ws-facts dd { margin: 0; overflow-wrap: anywhere; }
+
+.ws-edit summary { cursor: pointer; font-weight: 500; font-size: var(--text-sm); color: var(--green-deep); }
+.ws-edit[open] summary { margin-bottom: var(--space-3); }
+
+/* Forms: fields flow into as many columns as fit, so a form is a few rows high, not a column of
+   full-width boxes. Headings, long text and actions take a whole row. Create forms open the
+   section; record forms are a tinted panel under their record. */
+.ws-form, .ws-subform {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-3) var(--space-4);
+  align-items: start;
+}
+.ws-form > h3, .ws-form > .form-actions, .ws-subform > .form-actions,
+.ws-form > .field:has(textarea), .ws-subform > .field:has(textarea),
+.ws-form > .field-check, .ws-subform > .field-check { grid-column: 1 / -1; }
+.ws-form > .field:has(textarea) textarea, .ws-subform > .field:has(textarea) textarea { max-width: 48rem; }
+.ws-form > h3 { font-size: var(--text-md); }
+.ws-form .form-actions, .ws-subform .form-actions { padding-top: 0; }
+.ws-form { padding-bottom: var(--space-4); border-bottom: 1px solid var(--rule); }
+.ws-form-inline { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); border-bottom: 0; padding-bottom: 0; }
+.ws-subform { margin-top: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--paper); border-radius: var(--radius-control); }
+.ws-form .field input, .ws-subform .field input { min-width: 0; }
+.ws-record-edit { margin-top: var(--space-3); }
+.ws-record-edit > summary { cursor: pointer; width: fit-content; font-size: var(--text-sm); font-weight: 500; color: var(--green-deep); }
+.ws-record-edit[open] > summary { margin-bottom: var(--space-2); }
+.ws-record-edit > .ws-subform { margin-top: 0; }
+.field-with-extra { display: grid; gap: var(--space-2); justify-items: start; }
+.field-with-extra > .field { width: 100%; }
+#overview .ws-form { grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); border-bottom: 0; padding-bottom: 0; }
+#overview .ws-form > .field:has(textarea) { grid-column: 1 / -1; }
+
+.ws-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.ws-confirm { padding: var(--space-3) var(--space-4); border: 1px solid var(--amber); border-radius: var(--radius-control); background: #fdf6ea; display: grid; gap: var(--space-2); }
+.ws-confirm p { font-size: var(--text-sm); }
+
+/* Records */
+.ws-records { display: grid; }
+.ws-records > article > .ws-actions { margin-top: var(--space-3); }
+.ws-records > article { padding: var(--space-4) 0; border-top: 1px solid var(--rule); min-width: 0; }
+.ws-records > article:first-child { border-top: 0; padding-top: var(--space-1); }
+.ws-failed { display: grid; gap: var(--space-2); justify-items: start; color: var(--red); font-size: var(--text-sm); }
+.ws-failed .button { color: var(--ink); }
+.record-fields { margin: 0; display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: var(--space-1) var(--space-4); font-size: var(--text-sm); }
+.record-fields div { display: contents; }
+.record-fields dt { color: var(--ink-faint); }
+.record-fields dt::first-letter { text-transform: uppercase; }
+.record-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.record-fields div:first-child dd { font-weight: 600; font-size: var(--text-md); }
+.record-fields div:first-child dt { padding-top: 0.125rem; }
+
+.ws-readiness { padding: var(--space-3) var(--space-4); border-radius: var(--radius-control); background: #fdf6ea; color: var(--amber); font-weight: 500; }
+.ws-readiness-ready { background: var(--green-wash); color: var(--green-deep); }
+.ws-totals { display: grid; gap: var(--space-1); font-variant-numeric: tabular-nums; }
+
+.ws-history > article h3 { font-size: var(--text-md); }
+.ws-history > article p { overflow-wrap: anywhere; }
+.history-metadata { color: var(--ink-faint); font-size: var(--text-xs); margin-top: var(--space-1); }
+
+@media (max-width: 1000px) {
+  .ws-layout { grid-template-columns: minmax(0, 1fr); }
+  .ws-jump { position: static; display: flex; overflow-x: auto; max-height: none; padding-bottom: var(--space-1); }
+  .ws-jump a { white-space: nowrap; }
+}
+@media (max-width: 600px) {
+  .ws-section { padding: var(--space-4); }
+  .record-fields { grid-template-columns: minmax(0, 1fr); }
+  .record-fields dd { margin-bottom: var(--space-2); }
+}

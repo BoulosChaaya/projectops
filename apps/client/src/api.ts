@@ -96,6 +96,12 @@ export const api = {
     request<ProjectOpsClient>('POST', `/projectops/clients/${encodeURIComponent(id)}/archive`, { body: { expectedRevision }, csrf }),
   createProject: (csrf: string, id: string, clientId: string, input: ProjectInput) =>
     request<ProjectRequest>('POST', '/projectops/project-requests', { body: { id, clientId, ...input }, csrf }),
+  project: (id: string) => request<ProjectRequest>('GET', `/projectops/project-requests/${encodeURIComponent(id)}`),
+  /** One of a project's record collections (tasks, notes, invoices, history and so on). */
+  projectCollection: <T,>(id: string, path: string) => request<T[]>('GET', `/projectops/project-requests/${encodeURIComponent(id)}/${path}`),
+  /** A write under /project-requests/:id ('' for the project itself, else a sub-path such as 'tasks' or 'control'). */
+  projectWrite: <T,>(csrf: string, method: 'POST' | 'PUT', id: string, path: string, body: unknown) =>
+    request<T>(method, `/projectops/project-requests/${encodeURIComponent(id)}${path ? `/${path}` : ''}`, { body, csrf }),
   /** The operational summary for active projects matching the filter, evaluated by the server's clock. */
   dashboard: (filter: DashboardFilter) =>
     request<ProjectOpsDashboardView>('GET', `/projectops/dashboard?${new URLSearchParams({ q: filter.q ?? '', status: filter.status ?? 'all' })}`),

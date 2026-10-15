@@ -17,7 +17,6 @@
 
 .client-status { color: var(--ink-soft); margin-top: calc(-1 * var(--space-5)); margin-bottom: var(--space-3); }
 .client-status-archived { color: var(--amber); font-weight: 500; }
-.page-message { min-height: 1.5em; margin-bottom: var(--space-3); font-size: var(--text-sm); color: var(--ink-soft); }
 
 .client-main { display: grid; gap: var(--space-6); }
 .client-main section > h2 { margin-bottom: var(--space-3); }
@@ -32,17 +31,6 @@
 .archive-zone { border-top: 1px solid var(--rule); padding-top: var(--space-4); }
 .confirm p { font-size: var(--text-sm); margin-bottom: var(--space-2); }
 .confirm .form-actions { padding-top: 0; }
-
-.field textarea {
-  font: inherit;
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-control);
-  background: var(--sheet);
-  color: var(--ink);
-  resize: vertical;
-}
 
 @media (max-width: 1000px) {
   .clients-layout,

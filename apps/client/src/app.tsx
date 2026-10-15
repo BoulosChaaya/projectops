@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { DashboardPage } from './pages/dashboard.tsx';
 import { ClientsPage } from './pages/clients.tsx';
 import { ClientPage } from './pages/client.tsx';
+import { ProjectPage } from './pages/project/project.tsx';
 import { LoginPage } from './pages/login.tsx';
 import { SettingsPage } from './pages/settings.tsx';
 import { NotFoundPage } from './pages/not-found.tsx';
@@ -14,6 +15,7 @@ const routes: readonly Route[] = [
   { path: /^\/projectops$/, title: 'Dashboard', Page: DashboardPage },
   { path: /^\/projectops\/client-management$/, title: 'Clients', Page: ClientsPage },
   { path: /^\/projectops\/client-management\/([^/]+)$/, title: 'Client', Page: ClientPage },
+  { path: /^\/projectops\/projects\/([^/]+)$/, title: 'Project', Page: ProjectPage },
   { path: /^\/projectops\/login$/, title: 'Sign in', Page: LoginPage },
   { path: /^\/projectops\/settings$/, title: 'Settings', Page: SettingsPage },
 ];
