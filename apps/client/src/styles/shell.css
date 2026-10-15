@@ -1,0 +1,93 @@
+/* Application frame: an ink navigation rail and a paper work area. */
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  /* The rail's column stays ink below the sticky rail on long pages. */
+  background: linear-gradient(to right, var(--ink) 15rem, var(--paper) 15rem);
+}
+
+.shell-rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-5) var(--space-4);
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+.shell-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  color: var(--on-ink);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  text-decoration: none;
+}
+.shell-brand:hover { color: #ffffff; }
+.mark-paid { fill: #4cc3a5; }
+
+.shell-nav { display: grid; gap: var(--space-1); }
+.shell-nav a {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  color: var(--on-ink-soft);
+  text-decoration: none;
+  font-weight: 500;
+}
+.shell-nav a:hover { color: var(--on-ink); background: rgb(255 255 255 / 0.06); }
+.shell-nav a[aria-current='page'] {
+  color: #ffffff;
+  background: rgb(255 255 255 / 0.1);
+  box-shadow: inset 3px 0 0 #4cc3a5;
+}
+
+.shell-operator {
+  margin-top: auto;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-2) 0;
+  border-top: 1px solid rgb(255 255 255 / 0.12);
+}
+.shell-login { color: var(--on-ink-soft); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.shell-operator .button { justify-self: start; color: var(--on-ink); }
+.shell-error { color: #ffb4ab; font-size: var(--text-sm); }
+.shell-rail :focus-visible { box-shadow: 0 0 0 2px var(--ink), 0 0 0 4px #4cc3a5; }
+
+.shell-main {
+  width: 100%;
+  max-width: 64rem;
+  padding: var(--space-7) var(--space-6);
+}
+.page-title { font-size: var(--text-2xl); margin-bottom: var(--space-6); }
+.page-lede { color: var(--ink-soft); max-width: 40rem; }
+
+/* Narrow screens: the rail becomes a top bar. */
+@media (max-width: 760px) {
+  .shell { grid-template-columns: minmax(0, 1fr); background: var(--paper); }
+  .shell-rail {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+  .shell-nav { grid-auto-flow: column; justify-content: start; order: 3; width: 100%; overflow-x: auto; }
+  .shell-nav a[aria-current='page'] { box-shadow: inset 0 -3px 0 #4cc3a5; }
+  .shell-operator {
+    margin: 0 0 0 auto;
+    padding: 0;
+    border: 0;
+    grid-auto-flow: column;
+    align-items: center;
+  }
+  .shell-main { padding: var(--space-5) var(--space-4) var(--space-7); }
+  .page-title { font-size: var(--text-xl); margin-bottom: var(--space-5); }
+}

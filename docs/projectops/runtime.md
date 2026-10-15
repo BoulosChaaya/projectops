@@ -65,6 +65,14 @@ Pagination is keyset-based. Clients are ordered by creation time (newest first, 
 
 The client directory loads 50 clients and offers **Load more clients**; a new search starts again from the first page.
 
+## Web client
+
+Sign-in (`/projectops/login`) and settings (`/projectops/settings`) are pages of the React client in `apps/client`; the other pages are still server-rendered and are moving over one area at a time ([ADR-002](../decisions/ADR-002-react-client.md)). Run `pnpm build` before starting the server: it writes `apps/client/dist`, which the server serves from the same origin. Without a build those two pages answer 503 `CLIENT_NOT_BUILT`.
+
+- `index.html` is served for each client page with `Cache-Control: no-store` and a CSP that allows scripts, styles, fonts and API calls to this origin only. Settings, like every product page, redirects to sign-in without a session.
+- `GET /projectops/assets/:file` serves the build's hashed scripts, styles and fonts without a session (they contain no data). Only file names in Vite's form with a known extension are served, and only from `assets/`.
+- The client calls the same JSON API as everything else, with the session cookie and, for writes, the session's CSRF token.
+
 ## Errors and logs
 
 Error responses are `{ code, message, status, correlationId }` and never include stack traces, SQL or internal messages. Client errors keep their specific code (400 validation, 401 session, 403 origin or CSRF, 404, 409 conflicts). An unexpected failure returns 500 `INTERNAL_SERVER_ERROR`. When PostgreSQL cannot be reached (connection refused or dropped, server shutting down, pool connect timeout, too many connections) requests return 503 `SERVICE_UNAVAILABLE` with `Retry-After: 5` instead of 500, and `/health/ready` returns 503 `SERVICE_NOT_READY`; the pool reconnects on its own when the database returns, without restarting the process.
@@ -417,7 +425,7 @@ ProjectOps runs on Render as one native Node web service with one managed Postgr
 | Region | `frankfurt` for both | Closest to the owner; the service reaches the database over Render's private network only within one region. Fixed at creation |
 | Database access | `ipAllowList: []` and the internal `connectionString` | No connections from the internet at all |
 | Node | `NODE_VERSION=24.19.0` | The version CI runs acceptance on |
-| Build | `corepack pnpm install --prod --frozen-lockfile` | pnpm 9.12.0 from `packageManager`; installs only `pg` |
+| Build | `corepack pnpm install --frozen-lockfile && corepack pnpm build && corepack pnpm install --prod --frozen-lockfile --config.confirmModulesPurge=false` | pnpm 9.12.0 from `packageManager`. Builds the React client with dev dependencies, then leaves only `pg` installed. The purge flag stops pnpm asking for confirmation, which would end the build without a terminal |
 | Start | `node --experimental-strip-types scripts/projectops-render-start.mjs` | Sets `PUBLIC_ORIGIN` from `RENDER_EXTERNAL_URL` (the generated `https://…onrender.com` origin), then starts the app |
 | Health check | `/health/ready` | A new instance receives traffic only once PostgreSQL answers |
 | Deploys | `autoDeployTrigger: checksPass` | A commit on `main` deploys only after its GitHub Actions checks pass. `main` changes only through reviewed, merged pull requests, so merging is the deploy approval |

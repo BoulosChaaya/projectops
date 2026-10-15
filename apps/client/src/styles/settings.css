@@ -1,0 +1,15 @@
+/* Each settings group: what it is on the left, the form on the right. */
+.settings-section {
+  display: grid;
+  grid-template-columns: minmax(12rem, 18rem) minmax(0, 32rem);
+  gap: var(--space-5) var(--space-6);
+  padding: var(--space-6) 0;
+  border-top: 1px solid var(--rule);
+}
+.settings-section:first-of-type { border-top: 0; padding-top: 0; }
+.settings-intro h2 { font-size: var(--text-lg); margin-bottom: var(--space-2); }
+.settings-intro p { color: var(--ink-soft); font-size: var(--text-sm); }
+
+@media (max-width: 900px) {
+  .settings-section { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+}

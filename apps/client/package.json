@@ -1,0 +1,7 @@
+{
+  "name": "@projectops/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ProjectOps browser client: React single-page app built by Vite and served by the API server from the same origin"
+}

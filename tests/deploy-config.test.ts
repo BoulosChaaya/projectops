@@ -23,7 +23,8 @@ test('The Render Blueprint deploys the tested runtime behind CI, with a private 
   assert.equal(regions.length, 2); assert.equal(new Set(regions).size, 1, 'service and database share a region');
   assert.deepEqual(value('diskSizeGB'), ['1']);
   assert.deepEqual(value('healthCheckPath'), ['/health/ready']);
-  assert.match(value('buildCommand')[0]!, /--prod --frozen-lockfile$/);
+  // Build the client with dev dependencies, then leave only production dependencies installed.
+  assert.match(value('buildCommand')[0]!, /pnpm install --frozen-lockfile && corepack pnpm build && .*pnpm install --prod --frozen-lockfile --config.confirmModulesPurge=false$/);
   assert.equal(value('startCommand')[0], 'node --experimental-strip-types scripts/projectops-render-start.mjs');
 });
 

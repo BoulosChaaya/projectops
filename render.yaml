@@ -9,8 +9,10 @@ services:
     plan: 0.5c-512mb
     # Frankfurt: closest Render region to the owner. Fixed at creation; must match the database for the private network.
     region: frankfurt
-    # Corepack runs the pnpm version pinned in package.json; production dependencies only (pg).
-    buildCommand: COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm install --prod --frozen-lockfile
+    # Corepack runs the pnpm version pinned in package.json. Install everything, build the React
+    # client (Vite), then reinstall production dependencies only, so the running service has just pg.
+    # confirmModulesPurge=false: pnpm would otherwise ask before relinking, and stop without a terminal.
+    buildCommand: COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm install --frozen-lockfile && corepack pnpm build && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm install --prod --frozen-lockfile --config.confirmModulesPurge=false
     # Applies pending migrations under an advisory lock, then binds; sets PUBLIC_ORIGIN from RENDER_EXTERNAL_URL.
     startCommand: node --experimental-strip-types scripts/projectops-render-start.mjs
     # New instances receive traffic only once PostgreSQL answers; deploys are zero-downtime.

@@ -18,5 +18,8 @@
     "apps/**/*.ts",
     "packages/**/*.ts",
     "tests/**/*.ts"
+  ],
+  "exclude": [
+    "apps/client/src/**"
   ]
 }

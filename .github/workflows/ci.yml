@@ -66,6 +66,8 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       # pg_dump/pg_restore matching the server, for the backup/restore drill.
+      # The server serves the built React client; the browser suites need it.
+      - run: pnpm build
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
       - run: pnpm test:postgres
