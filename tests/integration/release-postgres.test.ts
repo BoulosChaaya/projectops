@@ -33,6 +33,9 @@ test('Isolated source-runtime release installs frozen production dependencies, s
   let app=await start();
   try{
     for(const route of ['/health/live','/health/ready'])assert.equal((await fetch(app.origin+route)).status,200);
+    // The release carries the built web client: sign-in is served from it.
+    const signIn=await fetch(app.origin+'/projectops/login');assert.equal(signIn.status,200);const shell=await signIn.text();assert.match(shell,/<div id="root">/);
+    assert.equal((await fetch(app.origin+shell.match(/src="([^"]+\.js)"/)![1])).status,200);
     assert.equal((await fetch(app.origin+'/projectops/dashboard')).status,401);
     const login=await fetch(app.origin+'/projectops/access/login',{method:'POST',headers:{origin:app.origin,'content-type':'application/json'},body:JSON.stringify({login:'operator',password:secret})});assert.equal(login.status,200);
     const credentials=await login.json(),headers={origin:app.origin,cookie:login.headers.get('set-cookie')!.split(';')[0],'content-type':'application/json','x-csrf-token':credentials.csrfToken};

@@ -75,11 +75,17 @@ for (const pkgDir of workspacePackages) {
 console.log(`  [PASS] Hygiene checks passed for ${allFiles.length} files.`);
 
 // Node strips types without checking them, so the compiler is the only thing that does.
-banner('2. Type check (tsc, strict, source and tests)');
+banner('2. Type check (tsc, strict: server, tests and the React client)');
 run('node', [path.join('node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.json']);
+run('node', [path.join('node_modules', 'typescript', 'bin', 'tsc'), '-p', path.join('apps', 'client', 'tsconfig.json')]);
 console.log('  [PASS] No type errors.');
 
-banner('3. Native TypeScript test suites');
+// The server serves the built client, and native tests check the build output.
+banner('3. Build the web client (vite)');
+run('node', [path.join('node_modules', 'vite', 'bin', 'vite.js'), 'build', '--config', path.join('apps', 'client', 'vite.config.ts'), '--logLevel', 'warn']);
+console.log('  [PASS] Client built.');
+
+banner('4. Native TypeScript test suites');
 run('node', ['--experimental-strip-types', '--test', 'tests/*.test.ts']);
 
 console.log('\n[PROJECTOPS VERIFY: PASS]');

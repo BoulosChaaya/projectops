@@ -17,7 +17,9 @@ export async function createRuntimeRelease({ root, destination = path.join(tmpdi
     if (info.isSymbolicLink()) throw Error('Release source symlinks are not supported.');
     if (info.isDirectory()) {
       for (const name of (await readdir(source)).sort()) {
-        if (['node_modules', 'dist', 'coverage', '.git'].includes(name) || name.startsWith('.env')) continue;
+        // Build output is excluded, except the built web client, which the server serves at runtime.
+        const builtClient = name === 'dist' && relative === path.join('apps', 'client');
+        if (['node_modules', 'coverage', '.git'].includes(name) || (name === 'dist' && !builtClient) || name.startsWith('.env')) continue;
         await copy(path.join(relative, name));
       }
     } else if (info.isFile()) {

@@ -5,6 +5,7 @@ import { startProjectOpsApp } from '../apps/api/src/projectops/app.ts';
 import { ProjectOpsMemorySqlExecutor } from '../packages/projectops/src/index.ts';
 import { validateOperatorDefaults, validateOperatorLogin, validateOperatorPassword } from '../packages/projectops/src/operator.ts';
 import { validateProjectOpsOrigin } from '../apps/api/src/projectops/postgres-app.ts';
+import { clientFixture } from './client-fixture.ts';
 
 test('Operator boundaries reject invalid defaults, weak credentials and insecure public origins', () => {
   assert.equal(validateOperatorLogin(' Operator '), 'operator');
@@ -28,11 +29,11 @@ test('All product routes require a session and writes enforce Origin, JSON and C
     async saveDefaults(value) { return validateOperatorDefaults(value); },
     async changeCredentials() { return true; },
   });
-  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), host: 'localhost', port: 0, access });
+  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), host: 'localhost', port: 0, access, clientDir: await clientFixture() });
   const origin = app.server.origin;
   assert.equal(new URL(origin).hostname, 'localhost');
   try {
-    for (const route of app.routes.filter(r => !r.path.includes('/access/') && r.path !== '/projectops/login')) {
+    for (const route of app.routes.filter(r => !r.path.includes('/access/') && r.path !== '/projectops/login' && r.path !== '/projectops/assets/:file')) {
       const method = typeof route.method === 'string' ? route.method : route.method[0];
       const response = await fetch(origin + route.path.replaceAll(/:[^/]+/g, 'probe'), { method, redirect: 'manual', ...(method !== 'GET' ? { headers: { 'content-type': 'application/json' }, body: '{}' } : {}) });
       assert.equal(response.status, (['/projectops', '/projectops/settings'].includes(route.path) || route.path.startsWith('/projectops/client-management') || route.path.startsWith('/projectops/projects/')) ? 302 : 401, route.path);
@@ -48,10 +49,11 @@ test('All product routes require a session and writes enforce Origin, JSON and C
     assert.equal(response.status, 200);
     assert.equal((await response.json()).priority, 'high');
     const login = await fetch(origin + '/projectops/login');
-    assert.match(login.headers.get('content-security-policy')!, /script-src 'nonce-/);
+    assert.match(login.headers.get('content-security-policy')!, /script-src 'self'/);
+    assert.match(await login.text(), /<div id="root">/, 'sign-in is the React client');
     const settings = await fetch(origin + '/projectops/settings', { headers });
     assert.equal(settings.headers.get('cache-control'), 'no-store');
-    assert.match(await settings.text(), /Change credentials/);
+    assert.match(await settings.text(), /<div id="root">/, 'settings is the React client, served only with a session');
     assert.equal((await fetch(origin + '/projectops/access/logout', { method: 'POST', headers, body: '{}' })).status, 200);
     assert.equal((await fetch(origin + '/projectops/clients', { headers })).status, 401);
   } finally { await app.close(); }

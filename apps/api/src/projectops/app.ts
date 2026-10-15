@@ -12,6 +12,7 @@ import { createProjectOpsRoutes } from './routes.ts';
 import { createProjectOpsRepositoryService } from './service.ts';
 import type { ProjectOpsAccess } from './access.ts';
 import { createClientWebRoutes } from '../../../web/src/projectops/client-routes.ts';
+import { createClientApp } from '../../../web/src/projectops/client-app.ts';
 
 export interface ProjectOpsAppConfig {
   readonly sql: ProjectOpsSqlExecutor;
@@ -23,6 +24,8 @@ export interface ProjectOpsAppConfig {
   readonly access?: ProjectOpsAccess;
   /** Structured log destination; defaults to JSON lines on stdout. */
   readonly logger?: Logger;
+  /** Directory of the built React client (index.html and assets/); defaults to apps/client/dist. */
+  readonly clientDir?: string;
 }
 
 export interface ProjectOpsApp {
@@ -41,9 +44,11 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
     ...createClientWebRoutes(),
     ...createProjectHandoffRoutes(service, config.clock ?? (() => new Date().toISOString())),
   ];
-  const routes = Object.freeze(config.access ? [
-    ...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(),
-  ] : productRoutes);
+  const client = createClientApp(config.clientDir);
+  const routes = Object.freeze([
+    ...(config.access ? [...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(() => client.shell())] : productRoutes),
+    client.assetRoute,
+  ]);
   const listener = await startHttpListener({
     responseHeaders: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
     host: config.host,

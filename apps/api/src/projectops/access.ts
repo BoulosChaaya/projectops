@@ -1,12 +1,11 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { ProjectOpsOperatorStore, OperatorSession } from '../../../../packages/projectops/src/operator.ts';
 import { validateOperatorDefaults, validateOperatorLogin, validateOperatorPassword } from '../../../../packages/projectops/src/operator.ts';
-import { renderAccessPage } from '../../../web/src/projectops/access-pages.ts';
 import type { KernelRouteHandler } from '../bootstrap/http-listener.ts';
 import type { ParsedRequest } from '../http/request.ts';
 import type { RouteDefinition } from '../http/path-matching.ts';
 import { HttpError } from '../http/errors/classify.ts';
-import { isDirectHttpResponse } from '../http/response.ts';
+import { isDirectHttpResponse, type DirectHttpResponse } from '../http/response.ts';
 
 type AccessStore = Pick<ProjectOpsOperatorStore, 'login' | 'resolve' | 'logout' | 'saveDefaults' | 'changeCredentials'>;
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => ({ status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers }, body: JSON.stringify(body) });
@@ -57,10 +56,11 @@ export class ProjectOpsAccess {
       return json(result);
     } };
   }
-  routes(): RouteDefinition<KernelRouteHandler>[] {
+  /** `page` serves the React client's shell for the sign-in and settings pages. */
+  routes(page: () => Promise<DirectHttpResponse>): RouteDefinition<KernelRouteHandler>[] {
     const protectedRoute = (method: string, path: string, handler: KernelRouteHandler) => this.protect({ method, path, handler });
     return [
-      { method: 'GET', path: '/projectops/login', handler: () => renderAccessPage('login') },
+      { method: 'GET', path: '/projectops/login', handler: () => page() },
       { method: 'POST', path: '/projectops/access/login', handler: async request => {
         this.mutation(request);
         const body = request.body as Record<string, unknown> | null;
@@ -70,7 +70,7 @@ export class ProjectOpsAccess {
         if (!result) return json({ message: 'Invalid login or password.' }, 401);
         return json({ csrfToken: result.csrfToken }, 200, { 'set-cookie': this.cookie(result.rawToken) });
       } },
-      protectedRoute('GET', '/projectops/settings', () => renderAccessPage('settings')),
+      protectedRoute('GET', '/projectops/settings', () => page()),
       protectedRoute('GET', '/projectops/access/session', (_request, context) => {
         const s = context.get<OperatorSession>('projectops.operator')!;
         return json({ login: s.login, csrfToken: s.csrfToken, defaults: s.defaults });

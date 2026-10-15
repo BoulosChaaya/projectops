@@ -2,7 +2,7 @@
 
 ProjectOps runs client projects from intake to payment in one application: clients, estimates and approval, planning, execution, delivery and acceptance, invoices and expenses, an automatic audit history, an operational dashboard, and project export.
 
-It is built on raw platform primitives: Node.js's own HTTP server, hand-written parameterized SQL on PostgreSQL, and server-rendered pages. `pg` is the only runtime dependency. Node runs the TypeScript directly by stripping types, so `pnpm verify` runs the TypeScript compiler (strict, source and tests) to actually check them.
+The backend is built on raw platform primitives: Node.js's own HTTP server and hand-written parameterized SQL on PostgreSQL, with `pg` as the only runtime dependency. The interface is moving, page by page, from server-rendered HTML to a React client built by Vite and served by the same server from the same origin ([ADR-002](docs/decisions/ADR-002-react-client.md)); sign-in and settings are the first React pages. Node runs the TypeScript directly by stripping types, so `pnpm verify` runs the TypeScript compiler (strict, source and tests) to actually check them.
 
 ## What it does
 
@@ -30,7 +30,8 @@ The product scope is fixed by the [roadmap](docs/projectops/roadmap.md). It serv
 ```text
 apps/api/        HTTP kernel (routing, body parsing, timeouts, errors), health and
                  readiness, the ProjectOps routes, runtime and operator provisioning
-apps/web/        server-rendered pages and browser scripts
+apps/client/     React client (Vite, TypeScript); `pnpm build` writes apps/client/dist
+apps/web/        server-rendered pages not yet migrated; serving of the built client
 packages/projectops/   domain rules, SQL, repository, migrations (packages/projectops/migrations)
 packages/db/     PostgreSQL connection handling and the migration runner
 packages/auth/   scrypt password hashing
@@ -48,6 +49,7 @@ Requires Node.js 22.6+ (production uses 24.19.0), pnpm 9.12 (via Corepack) and P
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
+pnpm build                              # the React client, served by the API server
 export DATABASE_URL='postgres://user:password@127.0.0.1:5432/projectops'
 pnpm operator:create < operator.json   # private file: {"login": "...", "password": "..."}
 pnpm start                              # http://127.0.0.1:3000/projectops/login
@@ -58,7 +60,7 @@ The [runtime guide](docs/projectops/runtime.md) covers configuration, HTTPS orig
 ## Verify
 
 ```bash
-pnpm verify                                   # repository hygiene + strict type check + native tests
+pnpm verify                                   # hygiene + strict type check + client build + native tests
 export PROJECTOPS_TEST_DATABASE_URL='postgres://user:password@127.0.0.1:5432/projectops_test'
 pnpm test:postgres                            # PostgreSQL acceptance
 pnpm exec playwright install chromium

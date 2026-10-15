@@ -1,0 +1,84 @@
+/* Sign-in: the project lifecycle on the ink side, the form on the paper side. */
+.login {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+}
+
+.login-story {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-7) clamp(var(--space-5), 5vw, 5rem);
+  background: var(--ink);
+  color: var(--on-ink);
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+.login-lede { font-size: var(--text-lg); color: var(--on-ink-soft); max-width: 22rem; }
+
+/* The lifecycle: one continuous line through six stations, ending in the paid green. */
+.lifecycle {
+  list-style: none;
+  margin: auto 0;
+  padding: 0;
+  display: grid;
+}
+.lifecycle li {
+  position: relative;
+  display: grid;
+  gap: 0.125rem;
+  padding: 0 0 var(--space-5) var(--space-6);
+}
+.lifecycle li::before {
+  content: '';
+  position: absolute;
+  left: 0.4375rem;
+  top: 0.75rem;
+  bottom: -0.25rem;
+  width: 2px;
+  background: rgb(255 255 255 / 0.18);
+}
+.lifecycle li:last-child { padding-bottom: 0; }
+.lifecycle li:last-child::before { display: none; }
+.lifecycle li::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.3125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  border: 2px solid var(--on-ink-soft);
+  background: var(--ink);
+}
+.lifecycle li:last-child::after { border-color: #4cc3a5; background: #4cc3a5; }
+.lifecycle-stage { font-weight: 600; }
+.lifecycle-detail { font-size: var(--text-sm); color: var(--on-ink-soft); }
+
+.login-main {
+  display: grid;
+  place-items: center;
+  padding: var(--space-7) var(--space-5);
+}
+.login-form {
+  width: 100%;
+  max-width: 22rem;
+  display: grid;
+  gap: var(--space-4);
+}
+.login-form h1 { font-size: var(--text-2xl); margin-bottom: var(--space-2); }
+.login-form .button { width: 100%; margin-top: var(--space-2); }
+
+@media (max-width: 860px) {
+  .login { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .login-story { padding: var(--space-5) var(--space-4); gap: var(--space-3); }
+  .login-lede { font-size: var(--text-md); }
+  .lifecycle { display: none; }
+  .login-main { place-items: start center; padding: var(--space-6) var(--space-4); }
+}
