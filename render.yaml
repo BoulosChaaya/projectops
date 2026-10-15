@@ -17,9 +17,10 @@ services:
     startCommand: node --experimental-strip-types scripts/projectops-render-start.mjs
     # New instances receive traffic only once PostgreSQL answers; deploys are zero-downtime.
     healthCheckPath: /health/ready
-    # Deploy a commit on main only after its GitHub Actions checks pass. main changes only through
-    # reviewed, merged pull requests, so merging is the deploy approval.
-    autoDeployTrigger: checksPass
+    # Render does not deploy on its own. The CI workflow's deploy job calls this service's deploy
+    # hook for each merged commit once its checks pass, then waits until /health/live reports it.
+    # main changes only through reviewed, merged pull requests, so merging is the deploy approval.
+    autoDeployTrigger: "off"
     envVars:
       - key: NODE_VERSION
         value: 24.19.0

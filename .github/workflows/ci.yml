@@ -11,10 +11,11 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same branch or PR supersedes the running check.
+# A newer push to the same branch or PR supersedes the running check. On main nothing is
+# cancelled: a merge's run, including its deploy, finishes before the next one starts.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
@@ -73,3 +74,27 @@ jobs:
       - run: pnpm test:postgres
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:browser
+
+  # Production deploy: only for a push to main (a merged pull request), only after both jobs
+  # above pass. Render's own auto-deploy is off, so this job is the one place a deploy starts,
+  # and it fails unless the live service ends up running this exact commit.
+  deploy:
+    name: deploy (render)
+    needs: [verify, acceptance]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # One production deploy at a time; a newer merge waits instead of cancelling a running deploy.
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+      - name: Deploy this commit and wait until it is live
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          PROJECTOPS_ORIGIN: ${{ vars.PROJECTOPS_ORIGIN }}
+        run: node scripts/projectops-deploy.mjs

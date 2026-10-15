@@ -12,7 +12,13 @@ const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url),
 const value = (key: string) => [...blueprint.matchAll(new RegExp(`^\\s*(?:- )?${key}:\\s*"?([^"\\n#]*?)"?\\s*(?:#.*)?$`, 'gm'))].map(match => match[1]);
 
 test('The Render Blueprint deploys the tested runtime behind CI, with a private database', () => {
-  assert.deepEqual(value('autoDeployTrigger'), ['checksPass'], 'deploys wait for GitHub checks');
+  // Deploys start only from CI's deploy job, after the checks on a merged commit pass.
+  assert.deepEqual(value('autoDeployTrigger'), ['off'], 'Render never deploys on its own');
+  const deployJob = ci.slice(ci.indexOf('\n  deploy:'));
+  assert.match(deployJob, /needs: \[verify, acceptance\]/);
+  assert.match(deployJob, /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(deployJob, /RENDER_DEPLOY_HOOK_URL: \$\{\{ secrets\.RENDER_DEPLOY_HOOK_URL \}\}/);
+  assert.match(deployJob, /run: node scripts\/projectops-deploy\.mjs/);
   assert.match(blueprint, /key: NODE_VERSION\n\s+value: 24\.19\.0\n/);
   assert.match(ci, /node-version: 24\.19\.0/, 'CI acceptance runs the production Node version');
   assert.deepEqual(value('postgresMajorVersion'), ['16']);
