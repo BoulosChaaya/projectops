@@ -31,7 +31,7 @@ test('Chromium completed workflows automatically refresh trusted history, annota
         assert.deepEqual(await page.locator('#records-activities article').evaluateAll(elements => elements.map(e => (e as HTMLElement).dataset.activityId)), rows.map((r: any) => r.id));
         assert.match((await page.locator('.history-metadata').first().textContent())!, /operator.*Europe\/Paris/);
       };
-      const submit = async (selector: string, fields: Record<string, string>, type: string) => { for (const [name, value] of Object.entries(fields)) await page.locator(selector + ' [name=' + name + ']').fill(value); await page.locator(selector + ' button').click(); await event(type); };
+      const submit = async (selector: string, fields: Record<string, string>, type: string) => { if (selector.endsWith('.planning-edit')) await page.locator(selector.replace('.planning-edit', 'details:has(.planning-edit) > summary')).click(); for (const [name, value] of Object.entries(fields)) await page.locator(selector + ' [name=' + name + ']').fill(value); await page.locator(selector + ' button').click(); await event(type); };
       const control = async (button: string, confirm: string) => { await page.getByRole('button', { name: button, exact: true }).click(); await page.getByRole('button', { name: confirm, exact: true }).click(); await event(button === 'Approve estimate' ? 'request_approved' : 'status_changed'); };
       await event('request_created');
       await submit('#edit-project', { title: 'Edited history project' }, 'request_edited');
@@ -64,11 +64,12 @@ test('Chromium completed workflows automatically refresh trusted history, annota
       page.on('request', request => { if (request.method() === 'POST' && request.url().endsWith('/tasks')) taskWrites++; });
       await page.locator('#create-task [name=title]').fill('Committed despite history GET failure'); await page.locator('#create-task button').click(); await page.locator('#task-planning-status').filter({ hasText: 'Task created.' }).waitFor(); await page.getByRole('button', { name: 'Retry history', exact: true }).waitFor(); assert.equal(taskWrites, 1); assert.equal((await read(root + '/activities')).length, count + 1);
       await page.getByRole('button', { name: 'Retry history', exact: true }).click(); await event('task_created'); assert.equal(taskWrites, 1); await page.unroute('**/projectops/' + root + '/activities');
-      // An older GET deliberately returns its old snapshot after the new annotation refresh.
+      // An older GET deliberately returns its old snapshot after the new annotation refresh: the
+      // refresh after a task write is held, the annotation's refresh completes, then the old one lands.
       let signal!: () => void, resume!: () => void, done!: () => void, intercept = true;
       const reached = new Promise<void>(resolve => signal = resolve), proceed = new Promise<void>(resolve => resume = resolve), delivered = new Promise<void>(resolve => done = resolve);
       await page.route('**/projectops/' + root + '/activities', async route => { if (route.request().method() === 'GET' && intercept) { intercept = false; const response = await route.fetch(), rows = await response.json(); signal(); await proceed; await route.fulfill({ response, json: rows }); done(); } else await route.continue(); });
-      await page.evaluate(() => { void (window as any).loadHistory(); }); await reached;
+      await page.locator('#create-task [name=title]').fill('Task whose history refresh is held'); await page.locator('#create-task button').click(); await reached; count++;
       await submit('#create-annotation', { summary: 'Newest annotation survives old GET' }, 'operator_annotation'); resume(); await delivered;
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve))); await page.locator('#activities').getByText('Newest annotation survives old GET', { exact: true }).waitFor(); assert.equal(await page.locator('#records-activities article').count(), count); await page.unroute('**/projectops/' + root + '/activities');
       await page.reload(); await page.waitForFunction(expected => document.querySelectorAll('#records-activities article').length === expected, count);

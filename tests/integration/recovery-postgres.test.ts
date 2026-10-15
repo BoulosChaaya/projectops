@@ -31,7 +31,7 @@ test('Real custom-format database backup restores source/settings/relationships/
         assert.equal((await fetch(origin+'/health/ready')).status,200);
         const root='/projectops/project-requests/delivered';const artifact=await fetch(origin+root+'/export',{headers}).then(r=>r.json());assertExport(artifact,'delivered');assert.equal(artifact.collections.activities.length,(await repo.listProjectActivities('delivered')).length);
         for(const section of ['invoices','expenses','activities','tasks','deliverables'])assert.ok((await fetch(origin+root+'/'+section,{headers}).then(r=>r.json())).length>0);
-        const workspace=await fetch(origin+'/projectops/projects/delivered',{headers});assert.equal(workspace.status,200);assert.match(await workspace.text(),/Project workspace/);
+        const workspace=await fetch(origin+'/projectops/projects/delivered',{headers});assert.equal(workspace.status,200);assert.match(await workspace.text(),/<div id="root">/);
         const handoff=await fetch(origin+'/projectops/projects/delivered/delivery-summary',{headers});assert.equal(handoff.status,200);assert.doesNotMatch(await handoff.text(),/INTERNAL-BRIEF/);
       }finally{await app.close();}
     }});

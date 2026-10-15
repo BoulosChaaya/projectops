@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ProjectOpsMemorySqlExecutor, ProjectOpsRepository, applyProjectOpsMigrations } from '../packages/projectops/src/index.ts';
 import { startProjectOpsApp } from '../apps/api/src/projectops/app.ts';
-import { projectSections, renderProjectPage } from '../apps/web/src/projectops/project-page.ts';
+import { projectSections } from '../apps/client/src/pages/project/sections.ts';
+import { clientFixture } from './client-fixture.ts';
 
 const time = '2026-10-03T10:00:00.000Z';
 const later = '2026-10-03T11:00:00.000Z';
@@ -31,12 +32,10 @@ test('Project edits validate details, clear optional fields, preserve workflow m
   await assert.rejects(() => repo.editProject('missing', input, later), /not found/);
 });
 
-test('Project workspace exposes all section links and HTTP editing rejects invalid and stale inputs', async () => {
-  const page = renderProjectPage();
-  assert.match(page.headers['content-security-policy'], /script-src 'nonce-/);
-  for (const section of projectSections) assert.ok(String(page.body).includes(`href="#${section.path}"`));
-  assert.equal(projectSections.length, 13);
-  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), port: 0, clock: () => later });
+test('Project workspace is the client app with every record section, and HTTP editing rejects invalid and stale inputs', async () => {
+  assert.deepEqual(projectSections.map(section => section.path), ['milestones', 'tasks', 'work-logs', 'notes', 'documents', 'issues', 'risks',
+    'deliverables', 'feedback', 'invoices', 'expenses', 'change-requests', 'activities']);
+  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), port: 0, clock: () => later, clientDir: await clientFixture() });
   const send = (path: string, body: unknown, method = 'POST') => fetch(app.server.origin + '/projectops/' + path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   try {
     await send('clients', { id: 'c', name: 'Client' });
@@ -46,6 +45,7 @@ test('Project workspace exposes all section links and HTTP editing rejects inval
     assert.equal((await send('project-requests/r', input, 'PUT')).status, 409);
     assert.equal((await send('project-requests/missing', input, 'PUT')).status, 404);
     const result = await fetch(app.server.origin + '/projectops/projects/r'); assert.equal(result.status, 200);
-    assert.match(await result.text(), /Edit project details/);
+    assert.match(result.headers.get('content-security-policy') ?? '', /script-src 'self'(;|$)/);
+    assert.match(await result.text(), /<div id="root">/);
   } finally { await app.close(); }
 });

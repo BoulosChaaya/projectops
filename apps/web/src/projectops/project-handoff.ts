@@ -2,26 +2,6 @@ import { randomBytes } from 'node:crypto';
 import type { DirectHttpResponse } from '../../../api/src/http/response.ts';
 import type { ProjectExportArtifact, ExportRecord } from '../../../../packages/projectops/src/project-export.ts';
 
-export const projectHandoff = `<section id="handoff"><h2>Export and handoff</h2>
-  <p>Project information is an internal operator export. The delivery summary includes only accepted deliverables, active client notes and active handoff documents.</p>
-  <button id="export-project" type="button">Export project information</button>
-  <a id="view-delivery-summary">View delivery summary</a>
-  <p id="export-status" role="status" aria-live="polite"></p>
-  <button id="retry-export" type="button" hidden>Retry export</button>
-</section>`;
-export const projectHandoffScript = `
-const exportButton=document.getElementById('export-project'),exportStatus=document.getElementById('export-status'),exportRetry=document.getElementById('retry-export');
-function renderHandoffAccess(){document.getElementById('view-delivery-summary').href='/projectops/projects/'+id+'/delivery-summary';}
-async function downloadProject(){exportButton.disabled=true;exportRetry.hidden=true;exportStatus.textContent='Preparing internal project export…';let url;try{
-  const response=await fetch('/projectops/project-requests/'+id+'/export',{headers:{accept:'application/json'}});
-  if(!response.ok){const data=await response.json();if(response.status===401)location.assign('/projectops/login');throw Error(data.message||'Project export unavailable.');}
-  const disposition=response.headers.get('content-disposition')||'',match=/^attachment; filename="(projectops-project-[A-Za-z0-9_-]+\\.json)"$/.exec(disposition);
-  if(!match||!response.headers.get('content-type')?.startsWith('application/json'))throw Error('Project export unavailable.');
-  const blob=await response.blob();url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=match[1];document.body.append(link);link.click();link.remove();exportStatus.textContent='Project information exported (internal use).';
-}catch(error){exportStatus.textContent=error.message||'Project export unavailable.';exportRetry.hidden=false;}finally{if(url)setTimeout(()=>URL.revokeObjectURL(url),1000);exportButton.disabled=false;}}
-exportButton.addEventListener('click',downloadProject);exportRetry.addEventListener('click',downloadProject);
-`;
-
 const escape = (value: unknown) => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 function safeLink(value: unknown): string {
   try { const url=new URL(String(value)); if(['http:','https:'].includes(url.protocol)&&!url.username&&!url.password) return `<a href="${escape(url.href)}" target="_blank" rel="noopener noreferrer">${escape(value)}</a>`; } catch {}

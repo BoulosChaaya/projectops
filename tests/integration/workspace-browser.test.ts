@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 import { operatorFixture } from './operator-fixture.ts';
 import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgres-app.ts';
 import { ProjectOpsOperatorStore } from '../../packages/projectops/src/operator.ts';
-import { projectSections } from '../../apps/web/src/projectops/project-page.ts';
+import { projectSections } from '../../apps/client/src/pages/project/sections.ts';
 
 test('Project browser journey creates, navigates every section, edits safely, retries failures and preserves archived views', async () => {
   await operatorFixture(async (databaseUrl, pool) => {

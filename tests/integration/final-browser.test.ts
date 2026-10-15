@@ -30,6 +30,8 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
    await page.getByRole('link',{name:'Settings',exact:true}).click();await page.locator('#defaults button:enabled').first().waitFor();
    await page.locator('#defaults [name=defaultCurrency]').fill('GBP');await page.locator('#defaults [name=defaultPriority]').selectOption('high');await page.locator('#defaults [name=timezone]').fill('Asia/Beirut');await page.locator('#defaults button').click();await page.getByText('Defaults saved.',{exact:true}).waitFor();
    async function form(selector:string,fields:Record<string,string>,type?:string){
+    // A record's edit form sits in a closed disclosure until the operator opens it.
+    if(selector.endsWith('.planning-edit'))await page.locator(selector.replace('.planning-edit','details:has(.planning-edit) > summary')).click();
     for(const [key,value]of Object.entries(fields)){const input=page.locator(selector+' [name='+key+']');if(await input.evaluate(e=>e.tagName==='SELECT'))await input.selectOption(value);else await input.fill(value);}
     const response=page.waitForResponse(r=>['POST','PUT'].includes(r.request().method())&&r.url().includes('/projectops/'));
     await page.locator(selector+' button').first().click();const result=await response;assert.equal(result.status(),200);const row=['#create','#create-project'].includes(selector)?undefined:await result.json();if(type)await event(type);return row;
