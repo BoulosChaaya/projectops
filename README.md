@@ -2,6 +2,8 @@
 
 ProjectOps runs client projects from intake to payment in one application: clients, estimates and approval, planning, execution, delivery and acceptance, invoices and expenses, an automatic audit history, an operational dashboard, and project export.
 
+**Try it:** the deployed sign-in page has **Explore the demo**: a private, fully working copy of a sample studio, yours for two hours, no account needed ([how it is isolated](docs/decisions/ADR-003-demo-sandboxes.md)).
+
 The backend is built on raw platform primitives: Node.js's own HTTP server and hand-written parameterized SQL on PostgreSQL, with `pg` as the only runtime dependency. The interface is a React client built by Vite and served by the same server from the same origin ([ADR-002](docs/decisions/ADR-002-react-client.md)); every product page is a React page, and only the printable delivery summary stays server-rendered. Node runs the TypeScript directly by stripping types, so `pnpm verify` runs the TypeScript compiler (strict, source and tests) to actually check them.
 
 ## What it does

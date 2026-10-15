@@ -418,6 +418,17 @@ Five dedicated native tests cover exact all-model inclusion/strict disclosure, a
 No final failures/skips/environment blockers. Initial focused PostgreSQL fixture ordering attempted intake after client archival; moving its setup before archival preserved and continued testing the established archived-client intake rejection. No assertion was weakened or skipped. Limitations: complete current project artifacts are buffered in memory, not streaming/live feeds/persisted historical reports; larger project tests prove no silent truncation but do not claim unbounded resource capacity. No CSV/PDF/ZIP, remote files, public/client sharing, stored reports/jobs/notifications, automatic change-request history, new finance features, strict sequencing/idempotency, deployment/backup/restore/final real-project acceptance or production-readiness claim. Slice 14 pre-deployment evidence is recorded below; actual deployment remains pending.
 
 
+## Demo sandboxes
+
+With `PROJECTOPS_DEMO=on`, the sign-in page offers **Explore the demo**: no account needed. Each visitor gets a private copy of a fictional studio (6 clients, 8 projects covering every lifecycle state, with tasks, deliverables, invoices in EUR and USD, and history) in a PostgreSQL schema of their own. They can use every feature; the owner's data and other visitors' sandboxes are out of reach. Design and guarantees: [ADR-003](../decisions/ADR-003-demo-sandboxes.md).
+
+- Every page shows a banner with the time the sandbox is deleted, **Reset sample data** (a fresh copy, at most every 30 seconds; the deletion time does not move) and **Leave demo** (deletes it now).
+- A sandbox is deleted two hours after it starts. A sweeper runs at start-up and every five minutes and drops expired sandboxes, builds that never finished and demo schemas without a record.
+- At most 30 sandboxes exist at once and 20 are created per 10 minutes; past that, starting one answers 503 with `Retry-After: 300` and the page says to try again in a few minutes.
+- In a sandbox the visitor's settings are their own; changing sign-in credentials answers 403.
+- `GET /projectops/demo` says whether the demo is offered (public); `POST /projectops/demo/start` (same-origin JSON) starts one; `POST /projectops/demo/reset` resets the caller's sandbox.
+- Backups leave sandboxes out (see [Backup and restore drill](#backup-and-restore-drill)).
+
 ## Deploying on Render
 
 ProjectOps runs on Render as one native Node web service with one managed PostgreSQL database, both declared in [`render.yaml`](../../render.yaml) (a Render Blueprint). `tests/deploy-config.test.ts` keeps the Blueprint tied to what CI tests.
@@ -431,6 +442,7 @@ ProjectOps runs on Render as one native Node web service with one managed Postgr
 | Region | `frankfurt` for both | Closest to the owner; the service reaches the database over Render's private network only within one region. Fixed at creation |
 | Database access | `ipAllowList: []` and the internal `connectionString` | No connections from the internet at all |
 | Node | `NODE_VERSION=24.19.0` | The version CI runs acceptance on |
+| Demo | `PROJECTOPS_DEMO=on` | Visitors can open a private demo sandbox from the sign-in page; `off` removes it |
 | Build | `corepack pnpm install --frozen-lockfile && corepack pnpm build && corepack pnpm install --prod --frozen-lockfile --config.confirmModulesPurge=false` | pnpm 9.12.0 from `packageManager`. Builds the React client with dev dependencies, then leaves only `pg` installed. The purge flag stops pnpm asking for confirmation, which would end the build without a terminal |
 | Start | `node --experimental-strip-types scripts/projectops-render-start.mjs` | Sets `PUBLIC_ORIGIN` from `RENDER_EXTERNAL_URL` (the generated `https://…onrender.com` origin), then starts the app |
 | Health check | `/health/ready` | A new instance receives traffic only once PostgreSQL answers |
@@ -465,7 +477,7 @@ A failed build, failed migration or failing health check leaves the previous ver
 
 The **Deployed smoke** GitHub Actions workflow (`.github/workflows/deployed-smoke.yml`, started by hand) runs `scripts/projectops-deployed-smoke.mjs` against the live service. It needs repository secrets `PROJECTOPS_OPERATOR_LOGIN` and `PROJECTOPS_OPERATOR_PASSWORD` and the repository variable `PROJECTOPS_ORIGIN`.
 
-- **initial** first checks that the live commit equals `main`'s head (run it after the deploy finishes). It then checks health, page and API access control, the `__Host-` Secure/HttpOnly/SameSite=Strict session cookie, Origin/CSRF/JSON rejection, `no-store` and `nosniff` headers, and the workspace CSP. It runs one project through estimate, approval, start, delivery, feedback, an EUR invoice payment, a USD expense approval, delivery and archive in Chromium, then checks the 14 history events, exact totals, export, handoff summary, dashboard and dashboard search (which needs PostgreSQL's `C.utf8` collation). It writes one archived client and project named "ProjectOps deployed acceptance" and saves a JSON receipt with their ids and a snapshot digest as the run artifact `smoke-receipt` (also printed in the log, where GitHub masks secret values, so do not copy it from there).
+- **initial** first checks that the live commit equals `main`'s head (run it after the deploy finishes). It then checks health, page and API access control, the `__Host-` Secure/HttpOnly/SameSite=Strict session cookie, Origin/CSRF/JSON rejection, `no-store` and `nosniff` headers, and the workspace CSP. It runs one project through estimate, approval, start, delivery, feedback, an EUR invoice payment, a USD expense approval, delivery and archive in Chromium, then checks the 14 history events, exact totals, export, handoff summary, dashboard and dashboard search (which needs PostgreSQL's `C.utf8` collation). It writes one archived client and project named "ProjectOps deployed acceptance" and saves a JSON receipt with their ids and a snapshot digest as the run artifact `smoke-receipt` (also printed in the log, where GitHub masks secret values, so do not copy it from there). It also opens a demo sandbox as a cookie-less visitor, checks the sample studio appears and that the owner's data does not contain it, then leaves the demo (deleting the sandbox).
 - **after-restart**: redeploy the service in Render (Manual Deploy → Deploy latest commit), wait until it is Live, then run the workflow with this phase. It downloads the receipt artifact of the latest successful initial run, re-reads the archived project and saved settings and compares them with the receipt. It writes nothing.
 
 Failures name the check that failed; credentials are never printed. The workflow log is public on a public repository, and the receipt contains only ids, a digest and the operator's saved defaults.
@@ -488,6 +500,8 @@ node --experimental-strip-types scripts/projectops-recovery.mjs < "$PROJECTOPS_R
 
 - **Backup** (`action: "backup"`, `sourceService`, `sourceIdentity`, optional private `directory` outside a checkout, optional 40-hex `checkpoint`): writes a new 0600 archive (never overwriting), checks it lists and hashes correctly, fingerprints the source before and after, and writes a receipt with versions, size, SHA-256 and schema/ledger/data digests. It refuses a source that changed during the backup.
 - **Restore drill** (`action: "restore-drill"`, `sourceService`, `maintenanceService`, `archive`, `targetDatabase`): the target must be a fresh `projectops_restore_` + 32 hex name (from `newRestoreDatabaseName`). It creates that database from `template0` (an existing database, even an empty one, is never adopted), restores with `--exit-on-error --single-transaction --no-owner --no-acl` (never `--clean`), compares the schema, migration ledger and every row with the source, and drops only the database it created. The CLI returns `applicationVerified: false`; `restoreDisposableBackup` accepts a `verifyApplication` callback that starts the real application against the restored database before cleanup, which the recovery acceptance tests use.
+
+Demo sandboxes are visitors' temporary copies: their schemas and the sandbox registry's rows are left out of the archive and of the integrity fingerprint, so a visitor starting a demo during a backup does not fail it.
 
 Archives contain all application data, operator password hashes and session records, and compression is not encryption: keep them in private, access-controlled storage and never commit them.
 

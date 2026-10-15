@@ -19,7 +19,7 @@ Read this before changing anything. ProjectOps is a client and project operation
 - `apps/api`: HTTP kernel, health and readiness, ProjectOps routes, PostgreSQL runtime (`src/projectops/postgres-app.ts`), entry point `src/projectops/main.ts`
 - `apps/client`: React client (Vite); every product page: sign-in, settings, the dashboard, clients and the project workspace (`src/pages/project`, one component per area sharing a workspace context). API response types come from the domain package (`import type`), never hand-copied. `pnpm build` writes `apps/client/dist`, which the server serves
 - `apps/web/src/projectops`: the server-rendered delivery summary (`project-handoff.ts`, printable, no script beyond print), and `client-app.ts`, which serves the built client
-- `packages/projectops`: domain rules, SQL, repository, migrations, export and dashboard logic
+- `packages/projectops`: domain rules, SQL, repository, migrations, export and dashboard logic; `demo-sandboxes.ts` and `demo-seed.ts` give each demo visitor a private seeded schema (ADR-003). Application SQL must keep naming tables without a schema: sandbox isolation depends on the search_path
 - `packages/db`: PostgreSQL connection handling and the migration runner
 - `packages/auth`: scrypt password hashing
 - `packages/logger`: structured JSON logging
