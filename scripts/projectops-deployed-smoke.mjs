@@ -58,6 +58,20 @@ export async function runDeployedSmoke(config) {
       check((await page.goto(origin + '/projectops')).status() === 200, 'dashboard'); await page.locator('.metric').first().waitFor(); check(errors.length === 0, 'unexpected browser errors');
       return {passed:true,checkpoint:config.checkpoint,projectId:config.projectId,clientId:config.clientId,snapshotSha256:config.snapshotSha256,operatorDefaults:session.defaults,restartVerified:true,externalRestart:'operator-verified Render action'};
     }
+    // The public demo: a visitor (no cookies of ours) opens a private sandbox, sees the sample
+    // studio, and leaves, which deletes it. The owner's data never contains the sample.
+    check((await (await context.request.get(origin + '/projectops/demo')).json()).enabled === true, 'demo offered');
+    const visitorContext = await browser.newContext();
+    try {
+      const visitor = await visitorContext.newPage();
+      visitor.on('pageerror', () => errors.push('demo page error'));
+      await visitor.goto(origin + '/projectops/login'); await visitor.getByRole('button', { name: 'Explore the demo', exact: true }).click();
+      await visitor.waitForURL(origin + '/projectops'); await visitor.locator('#demo-banner').waitFor();
+      await visitor.getByRole('link', { name: 'Online ordering for Harbor & Finch', exact: true }).first().waitFor();
+      const leak = await (await context.request.get(origin + '/projectops/clients?status=all&q=' + encodeURIComponent('Harbor & Finch'))).json();
+      check(Array.isArray(leak.items) && leak.items.length === 0, 'demo isolated from the owner');
+      await visitor.getByRole('button', { name: 'Leave demo', exact: true }).click(); await visitor.waitForURL(origin + '/projectops/login');
+    } finally { await visitorContext.close(); }
     // Production smoke writes only the explicitly authorized representative acceptance dataset.
     await page.goto(origin + '/projectops/client-management');
     await page.locator('#create [name=name]').fill('ProjectOps deployed acceptance'); await page.locator('#create button').click(); await page.waitForURL('**/client-management/*');

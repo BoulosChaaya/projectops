@@ -22,9 +22,9 @@ export function SettingsPage() {
       <section className="settings-section" aria-labelledby="credentials-title">
         <div className="settings-intro">
           <h2 id="credentials-title">Sign-in credentials</h2>
-          <p>Changing them signs out every session, including this one.</p>
+          <p>{session?.demo ? 'The demo has no sign-in of its own; the owner\u2019s credentials cannot be changed from here.' : 'Changing them signs out every session, including this one.'}</p>
         </div>
-        <CredentialsForm key={session ? 'ready' : 'loading'} login={session?.login ?? ''} csrf={session?.csrfToken ?? null} />
+        {!session?.demo && <CredentialsForm key={session ? 'ready' : 'loading'} login={session?.login ?? ''} csrf={session?.csrfToken ?? null} />}
       </section>
     </AppShell>
   );

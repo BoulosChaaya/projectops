@@ -42,10 +42,41 @@ export function AppShell({ session, title, back, wide, children }: {
         </div>
       </header>
       <main className={`shell-main${wide ? ' shell-main-wide' : ''}`}>
+        {session?.demo && <DemoBanner csrf={session.csrfToken} expiresAtIso={session.demo.expiresAtIso} onLeave={signOut} leaving={signingOut} />}
         {back && <a className="page-back" href={back.href}>{back.label}</a>}
         <h1 className="page-title">{title}</h1>
         {children}
       </main>
     </div>
+  );
+}
+
+/**
+ * Shown on every page of a demo sandbox: whose data this is, when it goes, and the two ways out
+ * of it (a fresh copy, or leaving, which deletes it now).
+ */
+function DemoBanner({ csrf, expiresAtIso, onLeave, leaving }: {
+  csrf: string; expiresAtIso: string; onLeave: () => void; leaving: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  // The visitor's own clock, not the sandbox's settings: "when does my copy go" is about them.
+  const time = new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(new Date(expiresAtIso));
+  const minutes = Math.max(0, Math.round((Date.parse(expiresAtIso) - Date.now()) / 60_000));
+  const left = minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
+  async function reset() {
+    setBusy(true); setError('');
+    try { await api.resetDemo(csrf); window.location.reload(); }
+    catch (failure) { setError((failure as Error).message); setBusy(false); }
+  }
+  return (
+    <section id="demo-banner" className="demo-banner" aria-label="Demo sandbox">
+      <p><strong>Demo sandbox.</strong> This sample studio is your private copy: change anything. It is deleted at {time} (in {left}).</p>
+      <div className="demo-banner-actions">
+        <button type="button" className="button button-quiet" onClick={reset} disabled={busy || leaving}>Reset sample data</button>
+        <button type="button" className="button button-quiet" onClick={onLeave} disabled={busy || leaving}>Leave demo</button>
+      </div>
+      {error && <p className="demo-banner-error" role="alert">{error}</p>}
+    </section>
   );
 }

@@ -45,13 +45,17 @@ async function run(tool, args, env) {
     child.once('close', code => code === 0 ? resolve(output.trim()) : reject(Error('PostgreSQL recovery command failed.')));
   });
 }
+const DEMO_REGISTRY = 'projectops_demo_sandboxes';
 async function query(connection, sql, env) { return JSON.parse(await run('psql', ['--no-psqlrc', '--tuples-only', '--no-align', '--set=ON_ERROR_STOP=1', '--dbname=' + connection, '--command=' + sql], env)); }
 async function identity(connection, env) { return await query(connection, "SELECT jsonb_build_object('database',current_database(),'address',inet_server_addr(),'port',inet_server_port())", env); }
 export async function databaseFingerprint(connection, env) {
-  const tables = await query(connection, "SELECT COALESCE(jsonb_agg(jsonb_build_object('schema',schemaname,'name',tablename) ORDER BY schemaname,tablename),'[]') FROM pg_tables WHERE tablename LIKE 'projectops\\_%' ESCAPE '\\'", env);
-  if (tables.length !== 19 || new Set(tables.map(t => t.schema)).size !== 1) throw Error('A complete unambiguous ProjectOps database is required.');
+  const tables = await query(connection, "SELECT COALESCE(jsonb_agg(jsonb_build_object('schema',schemaname,'name',tablename) ORDER BY schemaname,tablename),'[]') FROM pg_tables WHERE tablename LIKE 'projectops\\_%' ESCAPE '\\' AND schemaname !~ '^demo_[a-f0-9]{24}$'", env);
+  if (tables.length !== 20 || new Set(tables.map(t => t.schema)).size !== 1) throw Error('A complete unambiguous ProjectOps database is required.');
   const records = {}, quote = text => '"' + text.replaceAll('"', '""') + '"';
   for (const table of tables) {
+    // Demo sandboxes are visitors' temporary copies, not the owner's data: their registry changes
+    // whenever a visitor arrives or leaves, so it is neither backed up nor part of the fingerprint.
+    if (table.name === DEMO_REGISTRY) continue;
     const rows = await query(connection, `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') FROM ${quote(table.schema)}.${quote(table.name)} t`, env);
     records[table.name] = hash(JSON.stringify(rows));
   }
@@ -61,7 +65,7 @@ export async function databaseFingerprint(connection, env) {
     'indexes',(SELECT jsonb_agg(jsonb_build_object('table',tablename,'name',indexname,'definition',indexdef) ORDER BY tablename,indexname) FROM pg_indexes WHERE schemaname='${tables[0].schema.replaceAll("'", "''")}' AND tablename LIKE 'projectops\\_%' ESCAPE '\\'))`, env);
   const ledger = await query(connection, 'SELECT jsonb_agg(to_jsonb(t) ORDER BY version) FROM (SELECT version,name,checksum FROM projectops_schema_migrations) t', env);
   const expected = (await loadProjectOpsPostgresMigrations()).map(m => ({ version: m.version, name: m.name, checksum: hash(m.upSql) }));
-  if (JSON.stringify(ledger.map(r => [r.version,r.name,r.checksum])) !== JSON.stringify(expected.map(r => [r.version,r.name,r.checksum]))) throw Error('Migration ledger does not match frozen migrations 0001–0007.');
+  if (JSON.stringify(ledger.map(r => [r.version,r.name,r.checksum])) !== JSON.stringify(expected.map(r => [r.version,r.name,r.checksum]))) throw Error('Migration ledger does not match the frozen migrations.');
   const business = Object.fromEntries(Object.entries(records).filter(([name]) => !['projectops_operator_sessions','projectops_login_limit'].includes(name)));
   return { full: hash(JSON.stringify({ records, schema })), business: hash(JSON.stringify({ records: business, schema })), schema: hash(JSON.stringify(schema)), ledger: hash(JSON.stringify(ledger)) };
 }
@@ -107,7 +111,7 @@ export async function backupProjectOps({ sourceService, sourceIdentity, director
   try {
     const pgDumpVersion = await run('pg_dump', ['--version'], env), pgRestoreVersion = await run('pg_restore', ['--version'], env);
     const serverVersion = await query(connection, 'SELECT to_jsonb(current_setting(\'server_version\'))', env);
-    await run('pg_dump', ['--dbname=' + connection, '--format=custom', '--file=' + archive], env);
+    await run('pg_dump', ['--dbname=' + connection, '--format=custom', '--exclude-schema=demo_*', '--exclude-table-data=' + DEMO_REGISTRY, '--file=' + archive], env);
     const content = await readFile(archive); if (!content.length) throw Error('Backup archive is empty.');
     const toc = await run('pg_restore', ['--list', archive], env); if (!toc.includes('projectops_schema_migrations')) throw Error('Archive is missing migration data.');
     if ((await databaseFingerprint(connection, env)).full !== before.full) throw Error('Source changed during backup; quiesce the acceptance source.');

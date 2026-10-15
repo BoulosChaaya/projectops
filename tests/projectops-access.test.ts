@@ -33,7 +33,12 @@ test('All product routes require a session and writes enforce Origin, JSON and C
   const origin = app.server.origin;
   assert.equal(new URL(origin).hostname, 'localhost');
   try {
-    for (const route of app.routes.filter(r => !r.path.includes('/access/') && r.path !== '/projectops/login' && r.path !== '/projectops/assets/:file')) {
+    // The only sessionless product routes: whether a demo is offered, and starting one (absent here).
+    const publicDemo = ['/projectops/demo', '/projectops/demo/start'];
+    assert.deepEqual(app.routes.filter(r => r.path.startsWith('/projectops/demo')).map(r => r.path).sort(), [...publicDemo, '/projectops/demo/reset'].sort());
+    assert.deepEqual(await fetch(origin + '/projectops/demo').then(r => r.json()), { enabled: false });
+    assert.equal((await fetch(origin + '/projectops/demo/start', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: '{}' })).status, 404);
+    for (const route of app.routes.filter(r => !r.path.includes('/access/') && r.path !== '/projectops/login' && r.path !== '/projectops/assets/:file' && !publicDemo.includes(r.path))) {
       const method = typeof route.method === 'string' ? route.method : route.method[0];
       const response = await fetch(origin + route.path.replaceAll(/:[^/]+/g, 'probe'), { method, redirect: 'manual', ...(method !== 'GET' ? { headers: { 'content-type': 'application/json' }, body: '{}' } : {}) });
       assert.equal(response.status, (['/projectops', '/projectops/settings'].includes(route.path) || route.path.startsWith('/projectops/client-management') || route.path.startsWith('/projectops/projects/')) ? 302 : 401, route.path);

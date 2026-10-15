@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { ProjectOpsConnectionSqlExecutor, projectOpsPoolConnection } from '../../../../packages/projectops/src/executor.ts';
 import {
   loadProjectOpsPostgresMigrations,
@@ -8,6 +8,8 @@ import { startProjectOpsApp, type ProjectOpsApp } from './app.ts';
 import { HealthService } from '../health/health.service.ts';
 import { ProjectOpsOperatorStore } from '../../../../packages/projectops/src/operator.ts';
 import { ProjectOpsAccess } from './access.ts';
+import { ProjectOpsDemoSandboxes, type DemoSandboxLimits } from '../../../../packages/projectops/src/demo-sandboxes.ts';
+import { ProjectOpsRepository } from '../../../../packages/projectops/src/repository.ts';
 import { createLogger, describeError, type Logger } from '../../../../packages/logger/src/index.ts';
 
 export interface ProjectOpsRuntimeConfig {
@@ -26,6 +28,8 @@ export interface ProjectOpsRuntimeConfig {
   readonly logger?: Logger;
   /** Git commit of the running code, reported by GET /health/live (Render sets RENDER_GIT_COMMIT). */
   readonly commit?: string;
+  /** Offer private demo sandboxes on the sign-in page (PROJECTOPS_DEMO=on). Tests may tighten the limits. */
+  readonly demo?: boolean | Partial<DemoSandboxLimits>;
 }
 
 export function validateProjectOpsOrigin(host: string, value?: string): string | undefined {
@@ -61,8 +65,9 @@ export function readProjectOpsRuntimeConfig(
   if (!host.trim()) throw new Error('Invalid HOST.');
   // The commit is informational; anything but a full SHA is ignored rather than echoed publicly.
   const commit = /^[0-9a-f]{40}$/.test(env.RENDER_GIT_COMMIT ?? '') ? env.RENDER_GIT_COMMIT : undefined;
+  if (![undefined, '', 'on', 'off'].includes(env.PROJECTOPS_DEMO)) throw new Error('PROJECTOPS_DEMO must be "on" or "off".');
   return Object.freeze({ databaseUrl, host, port: Number(rawPort), publicOrigin: validateProjectOpsOrigin(host, env.PUBLIC_ORIGIN),
-    ...(commit ? { commit } : {}) });
+    ...(commit ? { commit } : {}), ...(env.PROJECTOPS_DEMO === 'on' ? { demo: true } : {}) });
 }
 
 export async function startProjectOpsPostgresApp(
@@ -82,15 +87,28 @@ export async function startProjectOpsPostgresApp(
   // an outage. describeError redacts connection-string credentials.
   pool.on('error', error => logger.error('db.pool.error', { error: describeError(error, { stack: false }) }));
   let app: ProjectOpsApp | undefined;
+  let sweeper: ReturnType<typeof setInterval> | undefined;
   try {
     const sql = new ProjectOpsConnectionSqlExecutor(projectOpsPoolConnection(pool));
+    const demo = config.demo ? new ProjectOpsDemoSandboxes({
+      pool,
+      migrations: await loadProjectOpsPostgresMigrations(),
+      limits: typeof config.demo === 'object' ? config.demo : undefined,
+      async openBuildClient() {
+        const client = new Client({ connectionString: config.databaseUrl, statement_timeout: 60000 });
+        client.on('error', error => logger.error('demo.build.connection.error', { error: describeError(error, { stack: false }) }));
+        await client.connect();
+        return client;
+      },
+    }) : undefined;
     app = await startProjectOpsApp({
       sql,
       host: config.host,
       port: config.port,
       clock: config.clock,
       logger,
-      access: new ProjectOpsAccess(new ProjectOpsOperatorStore(pool), config.publicOrigin),
+      access: new ProjectOpsAccess(new ProjectOpsOperatorStore(pool), config.publicOrigin, demo),
+      ...(demo ? { sandboxService: (schema: string) => new ProjectOpsRepository(demo.executor(schema)) } : {}),
       healthService: new HealthService([{
         name: 'postgres',
         async check() {
@@ -106,12 +124,22 @@ export async function startProjectOpsPostgresApp(
       },
     });
     const started = app;
+    if (demo) {
+      // Expired sandboxes are dropped every five minutes, and once now for any left by a restart.
+      const sweep = () => demo.sweep()
+        .then(dropped => { if (dropped.length) logger.info('demo.sweep', { dropped: dropped.length }); })
+        .catch(error => logger.error('demo.sweep.failed', { error: describeError(error, { stack: false }) }));
+      void sweep();
+      sweeper = setInterval(sweep, 5 * 60_000);
+      sweeper.unref();
+    }
     let closing: Promise<void> | undefined;
     return Object.freeze({
       server: started.server,
       routes: started.routes,
       close() {
         closing ??= (async () => {
+          clearInterval(sweeper);
           try { await started.close(); } finally { await pool.end(); }
         })();
         return closing;

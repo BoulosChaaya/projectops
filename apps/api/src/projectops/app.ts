@@ -8,7 +8,8 @@ import type { RouteDefinition } from '../http/path-matching.ts';
 import type { KernelRouteHandler } from '../bootstrap/http-listener.ts';
 import type { HealthService } from '../health/health.service.ts';
 import type { Logger } from '../../../../packages/logger/src/index.ts';
-import { createProjectOpsRoutes } from './routes.ts';
+import { createProjectOpsRoutes, type ProjectOpsApiService } from './routes.ts';
+import type { RequestContext } from '../http/request-context/context.ts';
 import { createProjectOpsRepositoryService } from './service.ts';
 import type { ProjectOpsAccess } from './access.ts';
 import { createClientWebRoutes } from '../../../web/src/projectops/client-routes.ts';
@@ -26,6 +27,8 @@ export interface ProjectOpsAppConfig {
   readonly logger?: Logger;
   /** Directory of the built React client (index.html and assets/); defaults to apps/client/dist. */
   readonly clientDir?: string;
+  /** The data of a demo sandbox, by schema (postgres-app.ts). Without it, demo sessions are refused. */
+  readonly sandboxService?: (schema: string) => ProjectOpsApiService;
 }
 
 export interface ProjectOpsApp {
@@ -38,13 +41,21 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
   await (config.migrate ?? applyProjectOpsMigrations)(config.sql);
 
   const service = createProjectOpsRepositoryService(config.sql);
+  // A demo session's requests use its sandbox, and only its sandbox. A session marked as a
+  // sandbox is never served the main data, even if no sandbox service is configured.
+  const serviceFor = (context: RequestContext): ProjectOpsApiService => {
+    const schema = context.get<string>('projectops.sandbox');
+    if (schema === undefined) return service;
+    if (!config.sandboxService) throw new Error('Demo sandbox requested without sandbox support.');
+    return config.sandboxService(schema);
+  };
   const client = createClientApp(config.clientDir);
   const productRoutes = [
     // Pages rendered by the React client; like every product page, they require a session.
     { method: 'GET', path: '/projectops', handler: () => client.shell() } satisfies RouteDefinition<KernelRouteHandler>,
-    ...createProjectOpsRoutes(service, config.clock),
+    ...createProjectOpsRoutes(service, config.clock, serviceFor),
     ...createClientWebRoutes(() => client.shell()),
-    ...createProjectHandoffRoutes(service, config.clock ?? (() => new Date().toISOString())),
+    ...createProjectHandoffRoutes(service, config.clock ?? (() => new Date().toISOString()), serviceFor),
   ];
   const routes = Object.freeze([
     ...(config.access ? [...productRoutes.map(route => config.access!.protect(route)), ...config.access.routes(() => client.shell())] : productRoutes),
