@@ -32,6 +32,8 @@ a:hover { color: var(--green); }
   border: 1px solid transparent;
   cursor: pointer;
 }
+a.button { display: inline-flex; align-items: center; text-decoration: none; }
+a.button-quiet { color: var(--ink); }
 .button:disabled { cursor: not-allowed; opacity: 0.55; }
 .button-primary { background: var(--green); color: #ffffff; }
 .button-primary:hover:not(:disabled) { background: var(--green-deep); }

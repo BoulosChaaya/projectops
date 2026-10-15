@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
+import { openTab, reveal } from './workspace-ui.ts';
 import { operatorFixture } from './operator-fixture.ts';
 import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgres-app.ts';
 import { ProjectOpsOperatorStore } from '../../packages/projectops/src/operator.ts';
@@ -29,9 +30,12 @@ test('Execution workspace manages five resource types, conflicts and read-only l
       await send('project-requests', { id: 'execution-project', clientId: 'execution-client', title: 'Execution project', brief: 'Brief' });
       await page.goto(app.server.origin + '/projectops/projects/execution-project');
       await page.getByRole('heading', { name: 'Execution project', exact: true }).waitFor();
-      assert.equal(await page.locator('#create-note').isVisible(), true);
-      for (const selector of ['#create-work-log', '#create-document', '#create-issue', '#create-risk']) assert.equal(await page.locator(selector).isVisible(), false);
-      await page.locator('#create-note').getByLabel('Note', { exact: true }).fill('New-state note');
+      // A create form is offered when its "New …" control is shown (the form opens from it).
+      const offered = (selector: string) => page.locator('details.ws-create:has(' + selector + ') > summary').isVisible();
+      await openTab(page, 'Work');
+      assert.equal(await offered('#create-note'), true);
+      for (const selector of ['#create-work-log', '#create-document', '#create-issue', '#create-risk']) assert.equal(await offered(selector), false);
+      await reveal(page, '#create-note'); await page.locator('#create-note').getByLabel('Note', { exact: true }).fill('New-state note');
       await page.locator('#create-note').getByRole('button', { name: 'Add note', exact: true }).click();
       await page.locator('#notes').getByText('New-state note', { exact: true }).waitFor();
 
@@ -52,7 +56,7 @@ test('Execution workspace manages five resource types, conflicts and read-only l
       await page.getByRole('button', { name: 'Retry risks', exact: true }).click();
       await page.locator('#records-risks').getByText('No risks recorded.', { exact: true }).waitFor();
 
-      const issueForm = page.locator('#create-issue');
+      await reveal(page, '#create-issue'); const issueForm = page.locator('#create-issue');
       await issueForm.getByLabel('Title', { exact: true }).fill(' '); await issueForm.getByLabel('Description', { exact: true }).fill('Description');
       const invalidIssue = page.waitForResponse(response => response.url().endsWith('/issues') && response.request().method() === 'POST');
       await issueForm.getByRole('button', { name: 'Add issue', exact: true }).click(); assert.equal((await invalidIssue).status(), 400);
@@ -62,20 +66,20 @@ test('Execution workspace manages five resource types, conflicts and read-only l
       await issueForm.getByRole('button', { name: 'Add issue', exact: true }).click();
       await page.locator('#issues').getByText('<b>Production issue</b>', { exact: true }).waitFor(); assert.equal(await page.locator('#issues b').count(), 0);
 
-      const workForm = page.locator('#create-work-log');
+      await reveal(page, '#create-work-log'); const workForm = page.locator('#create-work-log');
       await workForm.getByLabel('Task ID (optional)').fill('task-link'); await workForm.getByLabel('Minutes').fill('45'); await workForm.getByLabel('Billable').uncheck(); await workForm.getByLabel('Note', { exact: true }).fill('Implemented execution');
       await workForm.getByRole('button', { name: 'Log work', exact: true }).click(); await page.locator('#work-logs').getByText('Implemented execution', { exact: true }).waitFor();
 
-      const noteForm = page.locator('#create-note');
+      await reveal(page, '#create-note'); const noteForm = page.locator('#create-note');
       await noteForm.getByLabel('Visibility').selectOption('client'); await noteForm.getByLabel('Note', { exact: true }).fill('<img src=x onerror=alert(1)> Client note');
       await noteForm.getByRole('button', { name: 'Add note', exact: true }).click(); await page.locator('#notes').getByText('<img src=x onerror=alert(1)> Client note', { exact: true }).waitFor(); assert.equal(await page.locator('#notes img').count(), 0);
 
-      const documentForm = page.locator('#create-document');
+      await reveal(page, '#create-document'); const documentForm = page.locator('#create-document');
       await documentForm.getByLabel('Title', { exact: true }).fill('Handoff link'); await documentForm.getByLabel('Type').selectOption('handoff'); await documentForm.getByLabel('HTTP(S) URL').fill('https://example.test/handoff'); await documentForm.getByLabel('Deliverable ID (optional)').fill('deliverable-link');
       await documentForm.getByRole('button', { name: 'Add document link', exact: true }).click();
       const link = page.locator('#documents a', { hasText: 'https://example.test/handoff' }); await link.waitFor(); assert.equal(await link.getAttribute('rel'), 'noopener noreferrer'); assert.equal(await link.getAttribute('target'), '_blank');
 
-      const riskForm = page.locator('#create-risk');
+      await reveal(page, '#create-risk'); const riskForm = page.locator('#create-risk');
       await riskForm.getByLabel('Title', { exact: true }).fill('Delivery risk'); await riskForm.getByLabel('Description', { exact: true }).fill('Risk description'); await riskForm.getByLabel('Probability').selectOption('high'); await riskForm.getByLabel('Impact').selectOption('high'); await riskForm.getByLabel('Mitigation plan').fill('Mitigate carefully'); await riskForm.getByLabel('Owner', { exact: true }).fill('Owner');
       await riskForm.getByRole('button', { name: 'Add risk', exact: true }).click(); await page.locator('#risks').getByText('Delivery risk', { exact: true }).waitFor();
 
@@ -100,14 +104,14 @@ test('Execution workspace manages five resource types, conflicts and read-only l
 
       let project = await read('project-requests/execution-project'); project = await send('project-requests/execution-project/control', { action: 'start', expectedRevision: project.revision }); project = await send('project-requests/execution-project/control', { action: 'hold', expectedRevision: project.revision });
       await page.reload(); await page.locator('#risks').getByText('Delivery risk', { exact: true }).waitFor();
-      assert.equal(await page.locator('#create-work-log').isVisible(), false);
-      for (const selector of ['#create-note', '#create-document', '#create-issue', '#create-risk']) assert.equal(await page.locator(selector).isVisible(), true);
+      assert.equal(await offered('#create-work-log'), false);
+      for (const selector of ['#create-note', '#create-document', '#create-issue', '#create-risk']) assert.equal(await offered(selector), true);
       project = await send('project-requests/execution-project/control', { action: 'cancel', expectedRevision: project.revision });
-      await page.reload(); await page.getByText('Cancelled projects are read-only.', { exact: true }).waitFor();
-      for (const selector of ['#create-work-log', '#create-note', '#create-document', '#create-issue', '#create-risk']) assert.equal(await page.locator(selector).isVisible(), false);
+      await page.reload(); await openTab(page, 'Overview'); await page.getByText('Cancelled projects are read-only.', { exact: true }).waitFor(); await openTab(page, 'Work');
+      for (const selector of ['#create-work-log', '#create-note', '#create-document', '#create-issue', '#create-risk']) assert.equal(await offered(selector), false);
       assert.equal(await page.locator('.execution-action').count(), 0); await page.locator('#work-logs').getByText('Implemented execution', { exact: true }).waitFor();
       project = await send('project-requests/execution-project/control', { action: 'archive', expectedRevision: project.revision }); assert.equal(project.status, 'archived');
-      await page.reload(); await page.getByText('Archived projects are read-only.', { exact: true }).waitFor(); await page.locator('#documents').getByText('Handoff link', { exact: true }).waitFor();
+      await page.reload(); await openTab(page, 'Overview'); await page.getByText('Archived projects are read-only.', { exact: true }).waitFor(); await openTab(page, 'Work'); await page.locator('#documents').getByText('Handoff link', { exact: true }).waitFor();
       assert.deepEqual(errors, []);
     } finally { await browser.close(); await app.close(); }
   });

@@ -10,8 +10,10 @@ const NAV = [
   { href: '/projectops/settings', label: 'Settings' },
 ] as const;
 
-export function AppShell({ session, title, back, children }: {
-  session: Session | null; title: string; back?: { href: string; label: string }; children: ReactNode;
+export function AppShell({ session, title, back, wide, children }: {
+  session: Session | null; title: string; back?: { href: string; label: string };
+  /** Wider work area, for pages with a side column (the project workspace). */
+  wide?: boolean; children: ReactNode;
 }) {
   const here = window.location.pathname;
   // A section stays current on its sub-pages (a client's page is under Clients).
@@ -39,7 +41,7 @@ export function AppShell({ session, title, back, children }: {
           {error && <p className="shell-error" role="alert">{error}</p>}
         </div>
       </header>
-      <main className="shell-main">
+      <main className={`shell-main${wide ? ' shell-main-wide' : ''}`}>
         {back && <a className="page-back" href={back.href}>{back.label}</a>}
         <h1 className="page-title">{title}</h1>
         {children}

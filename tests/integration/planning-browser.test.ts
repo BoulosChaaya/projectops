@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import { operatorFixture } from './operator-fixture.ts';
 import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgres-app.ts';
 import { ProjectOpsOperatorStore } from '../../packages/projectops/src/operator.ts';
+import { openTab, reveal } from './workspace-ui.ts';
 
 test('Planning browser journey creates, edits, reschedules, completes, reopens and preserves read-only records', async () => {
   await operatorFixture(async (databaseUrl, pool) => {
@@ -30,7 +31,7 @@ test('Planning browser journey creates, edits, reschedules, completes, reopens a
       await page.goto(app.server.origin + '/projectops/projects/planning-project');
       await page.getByRole('heading', { name: 'Planning project', exact: true }).waitFor();
 
-      const milestoneCreate = page.locator('#create-milestone');
+      await reveal(page, '#create-milestone'); const milestoneCreate = page.locator('#create-milestone');
       await milestoneCreate.getByLabel('Milestone title').fill('Invalid milestone');
       await milestoneCreate.getByLabel('Milestone due (UTC)').fill('2020-01-01T00:00');
       await milestoneCreate.getByRole('button', { name: 'Create milestone', exact: true }).click();
@@ -41,7 +42,7 @@ test('Planning browser journey creates, edits, reschedules, completes, reopens a
       await page.locator('#milestones').getByText('<b>Release milestone</b>', { exact: true }).waitFor();
       assert.equal(await page.locator('#milestones b').count(), 0);
 
-      const taskCreate = page.locator('#create-task');
+      await reveal(page, '#create-task'); const taskCreate = page.locator('#create-task');
       await taskCreate.getByLabel('Task title').fill('Initial task');
       await taskCreate.getByLabel('Task description').fill('<img src=x onerror=alert(1)> details');
       await taskCreate.getByLabel('Task assignee').fill('Operator');
@@ -98,10 +99,10 @@ test('Planning browser journey creates, edits, reschedules, completes, reopens a
       let project = await read('project-requests/planning-project'); project = await send('project-requests/planning-project/control', { action: 'start', expectedRevision: project.revision }); project = await send('project-requests/planning-project/control', { action: 'hold', expectedRevision: project.revision });
       await page.reload(); await page.locator('#milestones').getByText('Edited milestone', { exact: true }).waitFor();
       assert.equal(await page.locator('#create-milestone').isVisible(), false); assert.equal(await page.locator('#milestones .planning-edit').count(), 0); assert.equal(await page.getByRole('button', { name: 'Complete milestone', exact: true }).count(), 1);
-      assert.equal(await page.locator('#create-task').isVisible(), true); assert.equal(await page.locator('#tasks .planning-edit').count(), 1);
+      assert.equal(await page.locator('#tasks').getByText('New task', { exact: true }).isVisible(), true); assert.equal(await page.locator('#tasks .planning-edit').count(), 1);
 
       project = await send('project-requests/planning-project/control', { action: 'cancel', expectedRevision: project.revision }); assert.equal(project.status, 'cancelled');
-      await page.reload(); await page.getByText('Cancelled projects are read-only.', { exact: true }).waitFor();
+      await page.reload(); await openTab(page, 'Overview'); await page.getByText('Cancelled projects are read-only.', { exact: true }).waitFor(); await openTab(page, 'Plan');
       await page.locator('#milestones').getByText('Edited milestone', { exact: true }).waitFor(); await page.locator('#tasks').getByText('Fresh task', { exact: true }).waitFor();
       assert.equal(await page.locator('#milestones form,#tasks form').count(), 2); // hidden create forms remain in the document
       assert.equal(await page.locator('#milestones form:visible,#tasks form:visible').count(), 0);

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
+import { openTab } from './workspace-ui.ts';
 import { operatorFixture } from './operator-fixture.ts';
 import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgres-app.ts';
 import { ProjectOpsOperatorStore } from '../../packages/projectops/src/operator.ts';
@@ -46,7 +47,7 @@ test('Browser estimates, confirmed lifecycle decisions, stale tabs and cancelled
       await page.goto(app.server.origin + '/projectops/projects/cancel'); await page.getByRole('heading', { name: 'Controls cancel', exact: true }).waitFor();
       await page.getByRole('button', { name: 'Cancel project', exact: true }).click(); await page.getByRole('button', { name: 'Keep current state', exact: true }).click(); assert.equal((await read('cancel')).status, 'new');
       await action('Cancel project', 'Confirm cancellation', 'Project cancelled.'); await page.getByText('Cancelled projects are read-only.', { exact: true }).waitFor();
-      await page.locator('#notes').getByText('Retained after cancellation', { exact: true }).waitFor(); assert.equal(await page.getByRole('button', { name: 'Save project', exact: true }).isVisible(), false);
+      await openTab(page, 'Work'); await page.locator('#notes').getByText('Retained after cancellation', { exact: true }).waitFor(); assert.equal(await page.getByRole('button', { name: 'Save project', exact: true }).isVisible(), false);
       await page.getByRole('link', { name: 'Dashboard', exact: true }).click(); assert.equal(await page.getByRole('link', { name: 'Controls cancel', exact: true }).count(), 0);
       await page.goto(app.server.origin + '/projectops/client-management/c'); await page.getByRole('link', { name: 'Controls cancel', exact: true }).click(); await page.getByText('Cancelled projects are read-only.', { exact: true }).waitFor();
       await action('Archive project', 'Confirm archive', 'Project archived.'); assert.equal((await read('cancel')).status, 'archived'); assert.deepEqual(errors, []);

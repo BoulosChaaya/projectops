@@ -6,6 +6,7 @@ import { formatDateTime, formatHours, plural, statusLabel } from '../format.ts';
 import { dashboardStatuses, type DashboardFilter, type DashboardOperationalItem, type ProjectOpsDashboardRow } from '../../../../packages/projectops/src/dashboard.ts';
 import { formatFinanceCents, financeTotalKeys, type ProjectFinanceTotals, type ProjectFinanceTotalsByCurrency } from '../../../../packages/projectops/src/finances.ts';
 import '../styles/dashboard.css';
+import { tabForSection } from './project/sections.ts';
 
 type Status = NonNullable<DashboardFilter['status']>;
 type Load =
@@ -20,7 +21,8 @@ function filterFromAddress(): { q: string; status: Status } {
   return { q: query.get('q') ?? '', status: (query.get('status') ?? 'all') as Status };
 }
 const dashboardHref = (filter: { q: string; status: string }) => `/projectops?${new URLSearchParams(filter)}`;
-const projectHref = (id: string, section?: string) => `/projectops/projects/${encodeURIComponent(id)}${section ? `#${section}` : ''}`;
+// A section link opens the workspace tab that shows it, scrolled to the section.
+const projectHref = (id: string, section?: string) => `/projectops/projects/${encodeURIComponent(id)}${section ? `?tab=${tabForSection(section)}#${section}` : ''}`;
 
 export function DashboardPage() {
   const [loaded] = useSession();

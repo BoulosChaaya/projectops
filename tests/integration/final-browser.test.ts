@@ -13,6 +13,8 @@ import { startProjectOpsPostgresApp } from '../../apps/api/src/projectops/postgr
 import { ProjectOpsAccess } from '../../apps/api/src/projectops/access.ts';
 import { backupProjectOps, restoreDisposableBackup, newRestoreDatabaseName } from '../../scripts/projectops-recovery.mjs';
 import { exportCollections } from '../../packages/projectops/src/project-export.ts';
+import { openTab, reveal } from './workspace-ui.ts';
+import { workspaceTabs } from '../../apps/client/src/pages/project/sections.ts';
 
 test('Final real-project Chromium journey runs intake to payment/delivery/archive, restarts, exports and verifies real backup/restored application', {timeout:120000},async()=>{
  await finalDatabaseFixture(async f=>{
@@ -30,6 +32,7 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
    await page.getByRole('link',{name:'Settings',exact:true}).click();await page.locator('#defaults button:enabled').first().waitFor();
    await page.locator('#defaults [name=defaultCurrency]').fill('GBP');await page.locator('#defaults [name=defaultPriority]').selectOption('high');await page.locator('#defaults [name=timezone]').fill('Asia/Beirut');await page.locator('#defaults button').click();await page.getByText('Defaults saved.',{exact:true}).waitFor();
    async function form(selector:string,fields:Record<string,string>,type?:string){
+    await reveal(page,selector);
     // A record's edit form sits in a closed disclosure until the operator opens it.
     if(selector.endsWith('.planning-edit'))await page.locator(selector.replace('.planning-edit','details:has(.planning-edit) > summary')).click();
     for(const [key,value]of Object.entries(fields)){const input=page.locator(selector+' [name='+key+']');if(await input.evaluate(e=>e.tagName==='SELECT'))await input.selectOption(value);else await input.fill(value);}
@@ -69,7 +72,7 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
    await page.locator('#overdue').getByRole('link',{name:'Build deliverable',exact:true}).click();await page.locator('#tasks').getByText('Build deliverable',{exact:true}).waitFor();
    await form('#create-work-log',{taskId:t.id,minutes:'45',note:'INTERNAL-WORK'},'work_log_added');
    async function childAction(button:any,type:string){const pending=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().includes('/'+root+'/'));await button.click();assert.equal((await pending).status(),200);await event(type);}
-   for(const taskId of [t.id,review.id])await childAction(page.locator('#tasks [data-record-id="'+taskId+'"]').getByRole('button',{name:'Complete task',exact:true}),'task_completed');
+   await openTab(page,'Plan');for(const taskId of [t.id,review.id])await childAction(page.locator('#tasks [data-record-id="'+taskId+'"]').getByRole('button',{name:'Complete task',exact:true}),'task_completed');
    await childAction(page.getByRole('button',{name:'Complete milestone',exact:true}),'milestone_completed');
    await form('#create-note',{body:'INTERNAL-ACCEPTANCE',visibility:'internal'},'note_added');await childAction(page.getByRole('button',{name:'Archive note',exact:true}),'note_archived');
    await form('#create-note',{body:'<b>Client handoff note</b>',visibility:'client'},'note_added');
@@ -102,7 +105,8 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
    await page.evaluate(()=>{(window as any).print=()=>{(window as any).printed=true;};});await page.getByRole('button',{name:'Print summary',exact:true}).click();assert.equal(await page.evaluate(()=>(window as any).printed),true);
    await page.getByRole('link',{name:'Return to project',exact:true}).click();
    await form('#create-feedback',{author:'Client follow-up',message:'Post-delivery review'},'feedback_added');await action('Archive project','Confirm archive','status_changed',409);await childAction(page.getByRole('button',{name:'Address feedback',exact:true}),'feedback_addressed');await action('Archive project','Confirm archive');
-   for(const selector of ['#create-task','#create-milestone','#create-work-log','#create-note','#create-document','#create-deliverable','#create-feedback','#create-invoice','#create-expense','#create-annotation'])assert.equal(await page.locator(selector).isVisible(),false);
+   // Archived: no tab offers a "New …" form, and the history takes no annotations.
+   for(const tab of workspaceTabs){await openTab(page,tab.label);assert.equal(await page.locator('details.ws-create > summary:visible').count(),0);}assert.equal(await page.locator('#create-annotation').isVisible(),false);
    await page.reload();await page.waitForFunction(n=>document.querySelectorAll('#records-activities article').length===n,count);assert.deepEqual((await repo.getProjectExportSnapshot(p.id)).financeTotalsByCurrency,totals);
    await page.goto(app.server.origin+'/projectops');await page.getByText('No active project requests yet',{exact:false}).waitFor();
    await page.goto(app.server.origin+'/projectops/client-management/'+c.id);await page.getByRole('button',{name:'Archive client',exact:true}).click();await page.getByRole('button',{name:'Confirm archive',exact:true}).click();await page.locator('#message').filter({hasText:'Client archived.'}).waitFor();

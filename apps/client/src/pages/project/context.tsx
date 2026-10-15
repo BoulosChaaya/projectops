@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError, type ProjectRequest, type Session } from '../../api.ts';
 import type { Row } from './record-card.tsx';
 import type { CollectionPath } from './sections.ts';
@@ -24,6 +24,8 @@ export interface Workspace {
   write<T>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<T>;
   collection(path: CollectionPath): Collection;
   load(path: CollectionPath): Promise<void>;
+  /** Load a collection once, unless something on the page already loaded it. */
+  ensure(path: CollectionPath): void;
   /** Bumped after each successful write; the history section reloads when it changes. */
   readonly writes: number;
 }
@@ -65,6 +67,13 @@ export function useSectionAction(...reload: CollectionPath[]) {
   return { status, busy, run };
 }
 
+/** Another area's records, for figures and choices: loaded on first use, then kept current by that area. */
+export function useCollection(path: CollectionPath): Collection {
+  const { collection, ensure } = useWorkspace();
+  useEffect(() => { ensure(path); }, [ensure, path]);
+  return collection(path);
+}
+
 export function WorkspaceProvider({ id, project, session, setProject, report, onConflict, children }: {
   id: string; project: ProjectRequest; session: Session;
   setProject: (project: ProjectRequest) => void; report: (message: string) => void; onConflict: () => void;
@@ -99,9 +108,13 @@ export function WorkspaceProvider({ id, project, session, setProject, report, on
     }
   }, [id, session.csrfToken]);
 
+  const ensure = useCallback((path: CollectionPath) => {
+    if (generations.current[path] === undefined) void load(path);
+  }, [load]);
+
   const conflict = (error: unknown) => { if (error instanceof ApiError && error.status === 409) onConflict(); };
   const value: Workspace = {
-    id, project, session, setProject, report, write, load, writes, conflict,
+    id, project, session, setProject, report, write, load, ensure, writes, conflict,
     failed: error => { report((error as Error).message); conflict(error); },
     collection: path => collections[path] ?? { state: 'loading' },
   };

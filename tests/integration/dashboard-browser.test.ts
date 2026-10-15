@@ -118,13 +118,13 @@ test('Operational dashboard Chromium journey searches, filters, navigates, retri
       assert.ok(!(await text(upcoming)).includes('Project deadline'), 'a delivered project has no project deadline left');
 
       const planningLink = overdue.locator('li').filter({ hasText: 'Task in' }).first().getByRole('link');
-      assert.equal(await planningLink.getAttribute('href'), '/projectops/projects/delivered#tasks');
+      assert.equal(await planningLink.getAttribute('href'), '/projectops/projects/delivered?tab=plan#tasks');
       await planningLink.click();
       await page.locator('#tasks').getByText('<img src=x onerror=alert(1)> overdue task', { exact: true }).waitFor();
 
       await page.goto(app.server.origin + '/projectops?status=delivered');
       const financeLink = outstanding.getByRole('link', { name: 'Invoices for Project delivered', exact: true });
-      assert.equal(await financeLink.getAttribute('href'), '/projectops/projects/delivered#invoices');
+      assert.equal(await financeLink.getAttribute('href'), '/projectops/projects/delivered?tab=money#invoices');
       await financeLink.click();
       await page.locator('#invoices').getByText('No date', { exact: true }).waitFor();
 
