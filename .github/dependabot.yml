@@ -8,6 +8,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # The types must match the oldest Node the app supports (22, tested in CI; production runs 24):
+      # newer major types would let code use APIs those runtimes do not have.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       # Dev tooling minor and patch releases together; majors (TypeScript, @types/node) one by one.
       dev-minor-and-patch:
