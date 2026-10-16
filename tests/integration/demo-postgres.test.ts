@@ -23,7 +23,7 @@ const cookieOf = (response: { headers: Headers }) => response.headers.get('set-c
 
 test('Demo sandboxes are private seeded copies: isolated from the operator and each other, capped, resettable and swept', async () => {
   await operatorFixture(async (databaseUrl, pool) => {
-    const app = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0, demo: { maxLive: 3, maxPerWindow: 3, resetCooldownSeconds: 60 } });
+    const app = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0, demo: { maxLive: 3, maxPerWindow: 20, resetCooldownSeconds: 60 } });
     const origin = app.server.origin;
     const schemas = async () => (await pool.query(`SELECT nspname FROM pg_namespace WHERE nspname ~ '^demo_[a-f0-9]{24}$'`)).rows.map(row => row.nspname as string);
     try {
@@ -55,6 +55,7 @@ test('Demo sandboxes are private seeded copies: isolated from the operator and e
       assert.deepEqual(Object.keys(dashboard.financeTotalsByCurrency).sort(), ['EUR', 'USD']);
       assert.ok((await http(origin, 'GET', '/projectops/project-requests/bakery-ordering/activities', { visitor: a })).json.length > 30);
       const session = (await http(origin, 'GET', '/projectops/access/session', { visitor: a })).json;
+      assert.equal(session.defaults.timezone, 'UTC', 'no timezone sent: UTC');
       // Two hours from start, by the database's clock (which decides expiry).
       const dbNow = Date.parse((await pool.query('SELECT NOW() AS now')).rows[0].now);
       assert.equal(session.login, 'demo'); assert.ok(Math.abs(Date.parse(session.demo.expiresAtIso) - dbNow - 120 * 60_000) < 60_000);
@@ -74,6 +75,13 @@ test('Demo sandboxes are private seeded copies: isolated from the operator and e
       assert.deepEqual(await names(operator), ['Operator private client']);
       assert.equal((await http(origin, 'GET', '/projectops/project-requests/bakery-ordering', { visitor: operator })).status, 404);
       // A second visitor gets a fresh copy, without the first visitor's changes.
+      // The visitor's browser timezone, when valid, is the sandbox's; anything else falls back to UTC.
+      for (const [timezone, expected] of [['Asia/Beirut', 'Asia/Beirut'], ['Mars/Olympus', 'UTC'], [42, 'UTC']] as const) {
+        const started = await http(origin, 'POST', '/projectops/demo/start', { body: { timezone } }); assert.equal(started.status, 200);
+        const visitor = { cookie: cookieOf(started), csrf: started.json.csrfToken };
+        assert.equal((await http(origin, 'GET', '/projectops/access/session', { visitor })).json.defaults.timezone, expected, String(timezone));
+        assert.equal((await http(origin, 'POST', '/projectops/access/logout', { visitor })).status, 200);
+      }
       const b = await begin();
       assert.ok(!(await names(b)).includes('Visitor A client')); assert.ok((await names(a)).includes('Visitor A client'));
 
@@ -115,7 +123,7 @@ test('Demo sandboxes are private seeded copies: isolated from the operator and e
       // Expiry and the sweeper: an expired sandbox stops working and its schema is dropped, as is
       // any demo schema without a row (left by a crash).
       await pool.query(`UPDATE projectops_demo_sandboxes SET expires_at = NOW() - INTERVAL '1 second'
-        WHERE schema_name = (SELECT schema_name FROM projectops_demo_sandboxes ORDER BY created_at LIMIT 1 OFFSET 0)`);
+        WHERE schema_name = (SELECT schema_name FROM projectops_demo_sandboxes WHERE expires_at > NOW() ORDER BY created_at LIMIT 1)`);
       assert.equal((await http(origin, 'GET', '/projectops/clients', { visitor: b })).status, 401);
       const orphan = 'demo_' + randomBytes(12).toString('hex');
       await pool.query(`CREATE SCHEMA ${orphan}`);
@@ -154,6 +162,21 @@ test('A sandbox query never leaves its search_path on a pooled connection, and t
       await assert.rejects(() => sandbox.query({ sql: 'SELECT * FROM main_only', params: [] }), /main_only/);
       assert.throws(() => sandboxes.executor('public'), /Invalid demo sandbox schema/);
       assert.throws(() => sandboxes.executor('demo_x; DROP SCHEMA public'), /Invalid demo sandbox schema/);
+    } finally { await app.close(); }
+  });
+});
+
+test('Leaving a sandbox still counts against the rate of new sandboxes', async () => {
+  await operatorFixture(async (databaseUrl, pool) => {
+    const app = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0, demo: { maxLive: 5, maxPerWindow: 2 } });
+    try {
+      const origin = app.server.origin;
+      for (let i = 0; i < 2; i++) {
+        const started = await http(origin, 'POST', '/projectops/demo/start'); assert.equal(started.status, 200);
+        assert.equal((await http(origin, 'POST', '/projectops/access/logout', { visitor: { cookie: cookieOf(started), csrf: started.json.csrfToken } })).status, 200);
+      }
+      assert.equal(Number((await pool.query(`SELECT COUNT(*) AS n FROM pg_namespace WHERE nspname ~ '^demo_[a-f0-9]{24}$'`)).rows[0].n), 0, 'left sandboxes are gone');
+      assert.equal((await http(origin, 'POST', '/projectops/demo/start')).status, 503, 'two starts in the window, even though both left');
     } finally { await app.close(); }
   });
 });

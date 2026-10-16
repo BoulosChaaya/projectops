@@ -17,6 +17,10 @@ const SCHEMA = /^demo_[a-f0-9]{24}$/;
 /** Demo session tokens carry a prefix, so they can never be read as operator tokens (43 characters). */
 export const DEMO_TOKEN = /^demo\.[A-Za-z0-9_-]{43}$/;
 const hash = (token: string) => createHash('sha256').update(token).digest('hex');
+function validTimezone(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value || value.length > 100) return undefined;
+  try { new Intl.DateTimeFormat('en', { timeZone: value }); return value; } catch { return undefined; }
+}
 
 export interface DemoSandboxLimits {
   /** How long a sandbox lives from its start; resets do not extend it. */
@@ -98,8 +102,13 @@ export class ProjectOpsDemoSandboxes {
     return new ProjectOpsConnectionSqlExecutor(projectOpsSandboxConnection(this.pool, schema));
   }
 
-  /** Reserve a sandbox within the limits, then build and seed it. 'busy' when a limit is reached. */
-  async start(): Promise<DemoStart> {
+  /**
+   * Reserve a sandbox within the limits, then build and seed it. 'busy' when a limit is reached.
+   * `timezone` (the visitor's, from their browser) becomes the sandbox's display timezone when it
+   * is a valid IANA name; otherwise the sandbox shows UTC.
+   */
+  async start(options: { timezone?: unknown } = {}): Promise<DemoStart> {
+    const timezone = validTimezone(options.timezone) ?? 'UTC';
     const rawToken = 'demo.' + randomBytes(32).toString('base64url');
     const csrfToken = randomBytes(32).toString('base64url');
     const schema = 'demo_' + randomBytes(12).toString('hex');
@@ -111,9 +120,9 @@ export class ProjectOpsDemoSandboxes {
       if (Number(counts.live) >= this.limits.maxLive || Number(counts.recent) >= this.limits.maxPerWindow) return null;
       // The row exists before the schema does, so the sweeper never mistakes a sandbox being
       // built for an orphan; a build that dies leaves a 'creating' row the sweeper removes.
-      return (await client.query(`INSERT INTO projectops_demo_sandboxes (token_hash, schema_name, csrf_token, expires_at)
-        VALUES ($1, $2, $3, NOW() + make_interval(mins => $4)) RETURNING expires_at`,
-        [hash(rawToken), schema, csrfToken, this.limits.lifetimeMinutes])).rows[0];
+      return (await client.query(`INSERT INTO projectops_demo_sandboxes (token_hash, schema_name, csrf_token, timezone, expires_at)
+        VALUES ($1, $2, $3, $4, NOW() + make_interval(mins => $5)) RETURNING expires_at`,
+        [hash(rawToken), schema, csrfToken, timezone, this.limits.lifetimeMinutes])).rows[0];
     });
     if (!reserved) return 'busy';
     try {
@@ -180,9 +189,13 @@ export class ProjectOpsDemoSandboxes {
     }
   }
 
-  /** Leave the demo: the visitor's data is deleted now rather than at expiry. */
+  /**
+   * Leave the demo: the visitor's data is deleted now rather than at expiry. The row stays, expired,
+   * until it leaves the rate window, so leaving and starting again still counts against the limit.
+   */
   async end(session: DemoSession): Promise<void> {
-    const row = (await this.pool.query('DELETE FROM projectops_demo_sandboxes WHERE token_hash = $1 RETURNING schema_name', [session.tokenHash])).rows[0];
+    const row = (await this.pool.query(`UPDATE projectops_demo_sandboxes SET expires_at = LEAST(expires_at, NOW())
+      WHERE token_hash = $1 RETURNING schema_name`, [session.tokenHash])).rows[0];
     if (row) await this.dropSchema(row.schema_name);
   }
 
@@ -191,14 +204,18 @@ export class ProjectOpsDemoSandboxes {
    * by a crash between a drop and a delete). Returns the schemas dropped.
    */
   async sweep(): Promise<string[]> {
-    const expired = (await this.pool.query(`DELETE FROM projectops_demo_sandboxes
-      WHERE expires_at <= NOW() OR (status = 'creating' AND created_at < NOW() - INTERVAL '10 minutes')
-      RETURNING schema_name`)).rows.map(row => row.schema_name as string);
-    const orphans = (await this.pool.query(`SELECT nspname FROM pg_namespace
-      WHERE nspname ~ '^demo_[a-f0-9]{24}$' AND nspname NOT IN (SELECT schema_name FROM projectops_demo_sandboxes)`)).rows.map(row => row.nspname as string);
-    const dropped: string[] = [];
-    for (const schema of new Set([...expired, ...orphans])) { await this.dropSchema(schema); dropped.push(schema); }
-    return dropped;
+    // Schemas to drop: those of expired sandboxes and unfinished builds, and demo schemas no row knows.
+    const doomed = (await this.pool.query(`SELECT n.nspname FROM pg_namespace n
+      LEFT JOIN projectops_demo_sandboxes s ON s.schema_name = n.nspname
+      WHERE n.nspname ~ '^demo_[a-f0-9]{24}$'
+        AND (s.schema_name IS NULL OR s.expires_at <= NOW() OR (s.status = 'creating' AND s.created_at < NOW() - INTERVAL '10 minutes'))`))
+      .rows.map(row => row.nspname as string);
+    for (const schema of doomed) await this.dropSchema(schema);
+    // Rows go once they no longer count towards the rate window (and builds that never finished).
+    await this.pool.query(`DELETE FROM projectops_demo_sandboxes
+      WHERE (expires_at <= NOW() AND created_at < NOW() - make_interval(mins => $1))
+        OR (status = 'creating' AND created_at < NOW() - INTERVAL '10 minutes')`, [this.limits.windowMinutes]);
+    return doomed;
   }
 
   private async build(schema: string): Promise<void> {
