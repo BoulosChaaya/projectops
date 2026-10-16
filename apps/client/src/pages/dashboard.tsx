@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { TableScroll } from '../components/table-scroll.tsx';
 import { api, ApiError, type ProjectOpsDashboardView } from '../api.ts';
 import { AppShell } from '../components/app-shell.tsx';
 import { useSession } from '../use-session.ts';
@@ -254,7 +255,7 @@ function Figures({ view }: { view: ProjectOpsDashboardView }) {
         ))}
       </dl>
       {money.length > 0 && (
-        <div className="table-scroll">
+        <TableScroll label="Money by currency">
           <table className="money-table">
             <caption>Money by currency, never converted</caption>
             <thead><tr><th scope="col">Currency</th><th scope="col">Outstanding invoices</th><th scope="col">Paid invoices</th><th scope="col">Expenses submitted</th><th scope="col">Expenses approved</th></tr></thead>
@@ -267,7 +268,7 @@ function Figures({ view }: { view: ProjectOpsDashboardView }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </section>
   );
@@ -282,7 +283,7 @@ function Requests({ rows, timezone }: { rows: readonly ProjectOpsDashboardRow[];
   return (
     <section className="requests" aria-labelledby="active-requests-title">
       <h2 id="active-requests-title">Active projects</h2>
-      <div className="table-scroll">
+      <TableScroll label="Active projects">
         <table className="requests-table">
           <thead>
             <tr><th scope="col">Project</th><th scope="col">Status</th><th scope="col">Estimate</th><th scope="col">Next deadline</th><th scope="col">Open work</th><th scope="col">Invoices</th><th scope="col">Needs attention</th></tr>
@@ -314,7 +315,7 @@ function Requests({ rows, timezone }: { rows: readonly ProjectOpsDashboardRow[];
             })}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </section>
   );
 }

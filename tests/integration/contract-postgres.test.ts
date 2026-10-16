@@ -11,6 +11,7 @@ import { ProjectOpsMemorySqlExecutor } from '../../packages/projectops/src/index
 // shapes (contact_name and contactName) and exposes internal column names.
 const T0 = '2026-10-03T10:00:00.000Z';
 const DUE = '2026-12-01T12:00:00.000Z';
+const BACKDATED = '2020-01-01T00:00:00.000Z';
 const P = 'project-requests/p1';
 // Map keys that are workflow status values, not column names.
 const STATUS_VALUE_KEYS = new Set(['in_progress', 'on_hold']);
@@ -37,17 +38,27 @@ const creates: Call[] = [
   { method: 'POST', path: `${P}/invoices`, body: { id: 'inv1', invoiceNumber: 'INV-1', amountCents: 450000, currency: 'EUR', dueAtIso: DUE } },
   { method: 'POST', path: `${P}/expenses`, body: { id: 'e1', description: 'Photos', amountCents: 9900, currency: 'USD', vendor: 'Stock Co' } },
   { method: 'POST', path: `${P}/change-requests`, body: { id: 'cr1', title: 'Blog', description: 'Extra', requestedBy: 'Rania' } },
+  // The same entities with every optional field left empty.
+  { method: 'POST', path: 'clients', body: { id: 'c2', name: 'Bare Studio' } },
+  { method: 'POST', path: `${P}/tasks`, body: { id: 't2', title: 'Bare task' } },
+  { method: 'POST', path: `${P}/milestones`, body: { id: 'm2', title: 'Bare milestone' } },
+  { method: 'POST', path: `${P}/work-logs`, body: { id: 'w2', actor: 'Operator', minutes: 5 } },
+  { method: 'POST', path: `${P}/notes`, body: { id: 'n2', author: 'Operator', body: 'Bare note' } },
+  { method: 'POST', path: `${P}/expenses`, body: { id: 'e2', description: 'Bare expense', amountCents: 100, currency: 'USD' } },
 ];
 // Terminal actions fill the optional columns (resolution, decision, completion, archival).
 const actions: Call[] = [
   { method: 'POST', path: `${P}/issues/i1/resolve`, body: { resolutionNote: 'Bought' } },
   { method: 'POST', path: `${P}/risks/r1/mitigate`, body: { mitigationNote: 'Buffer' } },
-  { method: 'POST', path: `${P}/notes/n1/archive`, body: { archivedBy: 'Operator' } },
-  { method: 'POST', path: `${P}/tasks/t1/complete`, body: { completedBy: 'Operator', expectedRevision: 1 } },
+  // Who did it and when are the signed-in operator and the server clock; a body claiming otherwise is ignored.
+  { method: 'POST', path: `${P}/notes/n1/archive`, body: { archivedBy: 'imposter', archivedAtIso: BACKDATED } },
+  { method: 'POST', path: `${P}/documents/d1/archive`, body: { archivedBy: 'imposter', archivedAtIso: BACKDATED } },
+  { method: 'POST', path: `${P}/tasks/t1/complete`, body: { completedBy: 'imposter', completedAtIso: BACKDATED, expectedRevision: 1 } },
+  { method: 'POST', path: `${P}/change-requests/cr1/approve`, body: { decidedBy: 'imposter', decidedAtIso: BACKDATED } },
   { method: 'POST', path: `${P}/invoices/inv1/pay`, body: {} },
   { method: 'POST', path: `${P}/expenses/e1/approve`, body: { decisionNote: 'OK', decidedBy: 'Operator' } },
 ];
-const reads: Call[] = ['clients', 'clients/c1', 'clients/c1/projects', 'project-requests', P, 'dashboard',
+const reads: Call[] = ['clients', 'clients/c1', 'clients/c2', 'clients/c1/projects', 'project-requests', P, 'dashboard',
   ...['milestones', 'tasks', 'work-logs', 'notes', 'documents', 'issues', 'risks', 'deliverables', 'feedback', 'invoices', 'expenses', 'change-requests', 'activities']
     .map(collection => `${P}/${collection}`)].map(path => ({ method: 'GET' as const, path }));
 
@@ -56,12 +67,11 @@ function keyPaths(value: unknown, prefix = ''): string[] {
   if (!value || typeof value !== 'object') return [];
   return Object.entries(value).flatMap(([key, child]) => [`${prefix}${key}`, ...keyPaths(child, `${prefix}${key}.`)]);
 }
-// Keys whose value is present (null and absent both mean "empty" for optional fields).
-function presentKeyPaths(value: unknown, prefix = ''): string[] {
-  if (Array.isArray(value)) return value.flatMap(item => presentKeyPaths(item, `${prefix}[]`));
+// Keys whose value is null: an empty optional field is left out of a response, never null.
+function nullKeyPaths(value: unknown, prefix = ''): string[] {
+  if (Array.isArray(value)) return value.flatMap(item => nullKeyPaths(item, `${prefix}[]`));
   if (!value || typeof value !== 'object') return [];
-  return Object.entries(value).filter(([, child]) => child !== null && child !== undefined)
-    .flatMap(([key, child]) => [`${prefix}${key}`, ...presentKeyPaths(child, `${prefix}${key}.`)]);
+  return Object.entries(value).flatMap(([key, child]) => child === null ? [`${prefix}${key}`] : nullKeyPaths(child, `${prefix}${key}.`));
 }
 
 async function run(origin: string, headers: Record<string, string>, calls: Call[]) {
@@ -95,8 +105,11 @@ test('Every PostgreSQL-backed response uses camelCase domain fields only, with n
       const body = (path: string) => results.find(r => r.call.method === 'GET' && r.call.path === `${P}/${path}`)!.json as Record<string, unknown>[];
       assert.equal(body('issues')[0]!.resolutionNote, 'Bought');
       assert.equal(body('risks')[0]!.mitigationNote, 'Buffer');
-      assert.ok(body('notes')[0]!.archivedAtIso);
-      assert.ok(body('tasks')[0]!.completedAtIso);
+      const trusted = (row: Record<string, unknown>, by: string, at: string) => assert.deepEqual([row[by], row[at]], ['operator', T0], `${by} and ${at}`);
+      trusted(body('notes').find(row => row.id === 'n1')!, 'archivedBy', 'archivedAtIso');
+      trusted(body('documents').find(row => row.id === 'd1')!, 'archivedBy', 'archivedAtIso');
+      trusted(body('tasks').find(row => row.id === 't1')!, 'completedBy', 'completedAtIso');
+      trusted(body('change-requests').find(row => row.id === 'cr1')!, 'decidedBy', 'decidedAtIso');
       assert.equal(body('expenses')[0]!.decisionNote, 'OK');
     } finally { await app.close(); }
   });
@@ -123,7 +136,9 @@ test('PostgreSQL and memory executors return the same response fields, so native
         const label = `${pg.call.method} ${pg.call.path}`;
         assert.equal(pg.status, mem.status, label);
         const ignore = (path: string) => /(^|\.|\[\])latestActivity(AtIso|Summary)$/.test(path);
-        assert.deepEqual(presentKeyPaths(pg.json).filter(p => !ignore(p)).sort(), presentKeyPaths(mem.json).filter(p => !ignore(p)).sort(), label);
+        assert.deepEqual(keyPaths(pg.json).filter(p => !ignore(p)).sort(), keyPaths(mem.json).filter(p => !ignore(p)).sort(), label);
+        // A page's nextCursor is null on its last page by contract; record fields are never null.
+        assert.deepEqual(nullKeyPaths(pg.json).filter(p => !ignore(p) && p !== 'nextCursor'), [], `${label}: empty optional fields are left out, not null`);
       }
     } finally { await Promise.all([memory.close(), postgres.close()]); }
   });

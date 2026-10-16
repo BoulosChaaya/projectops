@@ -90,6 +90,7 @@ test('The listener logs server errors with their cause, client errors without, a
       { method: 'GET', path: '/leak', handler: () => { throw new Error('could not use postgres://ops:hunter2@db/projectops'); } },
       { method: 'GET', path: '/missing', handler: () => { throw new HttpError(404, 'NOT_FOUND', 'Missing.'); } },
       { method: 'GET', path: '/not-ready', handler: () => { throw new HttpError(503, 'SERVICE_NOT_READY', 'Not ready.'); } },
+      { method: 'GET', path: '/encode', handler: () => { throw new HttpError(500, 'RESPONSE_ENCODING_FAILED', 'Failed to encode JSON response'); } },
     ],
   });
   try {
@@ -105,7 +106,10 @@ test('The listener logs server errors with their cause, client errors without, a
     assert.doesNotMatch(JSON.stringify(down.body), /ECONNREFUSED|10\.0\.0\.5/);
     await call('/leak');
     const notReady = await call('/not-ready');
-    assert.deepEqual([notReady.status, notReady.retryAfter], [503, '5']);
+    assert.deepEqual([notReady.status, notReady.retryAfter, notReady.body.message], [503, '5', 'Not ready.'], 'a deliberate 503 says why');
+    const encode = await call('/encode');
+    assert.deepEqual([encode.status, encode.body.code, encode.body.message], [500, 'RESPONSE_ENCODING_FAILED', 'An unexpected internal server error occurred.'],
+      'other deliberate server errors still hide their message');
     const missing = await call('/missing');
     assert.equal(missing.status, 404);
 

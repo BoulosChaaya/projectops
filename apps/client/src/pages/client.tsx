@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { TableScroll } from '../components/table-scroll.tsx';
 import { api, ApiError, type ProjectOpsClient, type ProjectRequest, type Session } from '../api.ts';
 import { AppShell } from '../components/app-shell.tsx';
 import { ClientFields, clientInput } from '../components/client-fields.tsx';
@@ -59,7 +60,7 @@ export function ClientPage({ params }: { params: readonly string[] }) {
             <section aria-labelledby="projects-title">
               <h2 id="projects-title">Projects</h2>
               {load.projects.length === 0 ? <p className="empty-state">No projects for this client.</p> : (
-                <div className="table-scroll">
+                <TableScroll label="Projects for this client">
                   <table className="client-projects">
                     <caption className="visually-hidden">Projects for this client</caption>
                     <thead><tr><th scope="col">Project</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
@@ -73,7 +74,7 @@ export function ClientPage({ params }: { params: readonly string[] }) {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </TableScroll>
               )}
             </section>
             {archived ? null : <NewProject client={client} session={session} onError={failed} />}

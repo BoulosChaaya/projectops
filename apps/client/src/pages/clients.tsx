@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { TableScroll } from '../components/table-scroll.tsx';
 import { api, type ClientListStatus, type ProjectOpsClient } from '../api.ts';
 import { AppShell } from '../components/app-shell.tsx';
 import { ClientFields, clientInput } from '../components/client-fields.tsx';
@@ -68,7 +69,7 @@ export function ClientsPage() {
           {list && list.clients.length === 0
             ? <p className="empty-state">No clients found. Create a client or change the search.</p>
             : (
-              <div className="table-scroll">
+              <TableScroll label="Clients">
                 <table className="clients-table">
                   <caption className="visually-hidden">Clients</caption>
                   <thead><tr><th scope="col">Name</th><th scope="col">Contact</th><th scope="col">Email</th><th scope="col">Status</th></tr></thead>
@@ -83,7 +84,7 @@ export function ClientsPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
             )}
           {list?.nextCursor && (
             <button type="button" className="button button-quiet list-more-button" onClick={loadMore} disabled={loadingMore}>Load more clients</button>

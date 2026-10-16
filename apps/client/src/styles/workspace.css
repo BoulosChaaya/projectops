@@ -95,6 +95,8 @@
 .ws-create > summary::-webkit-details-marker { display: none; }
 .ws-create > summary::before { content: '+ '; }
 .ws-create[open] > summary { background: var(--sheet); color: var(--ink); border-color: var(--rule-strong); }
+/* The primary button's hover colour would put dark text on dark green while the pointer stays on the open panel's toggle. */
+.ws-create[open] > summary:hover { background: var(--paper); }
 .ws-create[open] > summary::before { content: '× '; }
 .ws-create-body { padding: var(--space-4); background: var(--paper); border-radius: var(--radius-control); }
 
@@ -229,4 +231,7 @@
   .ws-section { padding: var(--space-4); }
   .ws-section-head { padding-right: 0; }
   .ws-create > summary { position: static; width: fit-content; }
+  /* All five tabs on one phone screen: a tab scrolled out of view is a tab nobody finds. */
+  .ws-tabs { gap: 0; }
+  .ws-tabs a { flex: 1 1 auto; text-align: center; padding: var(--space-2) var(--space-1); }
 }

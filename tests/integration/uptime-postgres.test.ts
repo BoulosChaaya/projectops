@@ -25,6 +25,9 @@ test('The uptime check passes against the real application, reports a database o
       // The process still answers, but its database does not: that is an outage for every visitor.
       await link.cut();
       await assert.rejects(check(), /^Error: Down after 2 checks.*\/health\/ready: answered 503, expected 200\.$/);
+      const ready = await local(new URL('https://projectops.example/health/ready'));
+      assert.deepEqual(await ready.json(), { code: 'SERVICE_NOT_READY', message: 'Service dependencies are not ready.', status: 503,
+        correlationId: ready.headers.get('x-correlation-id') }, 'the answer says the service is not ready, not that it has a bug');
       await link.open();
       assert.deepEqual(await check(), { commit: SHA });
     } finally { await app.close(); await link.cut(); }
