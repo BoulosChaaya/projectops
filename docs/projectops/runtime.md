@@ -422,9 +422,10 @@ No final failures/skips/environment blockers. Initial focused PostgreSQL fixture
 
 With `PROJECTOPS_DEMO=on`, the sign-in page offers **Explore the demo**: no account needed. Each visitor gets a private copy of a fictional studio (6 clients, 8 projects covering every lifecycle state, with tasks, deliverables, invoices in EUR and USD, and history) in a PostgreSQL schema of their own. They can use every feature; the owner's data and other visitors' sandboxes are out of reach. Design and guarantees: [ADR-003](../decisions/ADR-003-demo-sandboxes.md).
 
-- Every page shows a banner with the time the sandbox is deleted, **Reset sample data** (a fresh copy, at most every 30 seconds; the deletion time does not move) and **Leave demo** (deletes it now).
+- Dates in a sandbox use the visitor's browser timezone (sent when the demo starts; UTC if none or invalid).
+- Every page shows a banner with the time the sandbox is deleted (in the visitor's local time), **Reset sample data** (a fresh copy, at most every 30 seconds; the deletion time does not move) and **Leave demo** (deletes it now).
 - A sandbox is deleted two hours after it starts. A sweeper runs at start-up and every five minutes and drops expired sandboxes, builds that never finished and demo schemas without a record.
-- At most 30 sandboxes exist at once and 20 are created per 10 minutes; past that, starting one answers 503 with `Retry-After: 300` and the page says to try again in a few minutes.
+- At most 30 sandboxes exist at once and 20 are created per 10 minutes (sandboxes already left still count until 10 minutes after they started); past that, starting one answers 503 with `Retry-After: 300` and the page says to try again in a few minutes.
 - In a sandbox the visitor's settings are their own; changing sign-in credentials answers 403.
 - `GET /projectops/demo` says whether the demo is offered (public); `POST /projectops/demo/start` (same-origin JSON) starts one; `POST /projectops/demo/reset` resets the caller's sandbox.
 - Backups leave sandboxes out (see [Backup and restore drill](#backup-and-restore-drill)).

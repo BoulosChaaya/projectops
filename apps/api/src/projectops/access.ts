@@ -93,7 +93,7 @@ export class ProjectOpsAccess {
       { method: 'POST', path: '/projectops/demo/start', handler: async request => {
         if (!this.demo) throw new HttpError(404, 'DEMO_DISABLED', 'The demo is not available.');
         this.mutation(request);
-        const started = await this.demo.start();
+        const started = await this.demo.start({ timezone: (request.body as { timezone?: unknown } | null)?.timezone });
         if (started === 'busy') return json({ message: 'The demo is busy right now. Try again in a few minutes.' }, 503, { 'retry-after': '300' });
         // The cookie lives as long as the sandbox does. Taken from the configured lifetime, not by
         // subtracting the app's clock from the database's: the two clocks need not agree, and the

@@ -2,7 +2,28 @@
 
 ProjectOps runs client projects from intake to payment in one application: clients, estimates and approval, planning, execution, delivery and acceptance, invoices and expenses, an automatic audit history, an operational dashboard, and project export.
 
-**Try it:** the deployed sign-in page has **Explore the demo**: a private, fully working copy of a sample studio, yours for two hours, no account needed ([how it is isolated](docs/decisions/ADR-003-demo-sandboxes.md)).
+**Live demo: [projectops-7p4d.onrender.com/projectops/login](https://projectops-7p4d.onrender.com/projectops/login)**. Choose **Explore the demo**. No account needed: you get a private, fully working copy of a sample studio, yours for two hours, in your own timezone ([how it is isolated](docs/decisions/ADR-003-demo-sandboxes.md)).
+
+![The project workspace: figures and next actions on top, five tabs, history beside every tab](docs/screenshots/workspace-plan.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/dashboard.png" alt="Dashboard: lifecycle pipeline, overdue work, upcoming deadlines and outstanding invoices"></td>
+    <td width="50%"><img src="docs/screenshots/workspace-money.png" alt="Money tab: totals per currency, invoices and expenses with their actions"></td>
+  </tr>
+  <tr>
+    <td>Dashboard: where every project stands and what needs attention.</td>
+    <td>Money: invoices and expenses, totalled per currency and never converted.</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/sign-in.png" alt="Sign-in page with the Explore the demo offer"></td>
+    <td width="50%"><img src="docs/screenshots/workspace-overview.png" alt="Overview tab: brief, delivery readiness, finance totals and history"></td>
+  </tr>
+  <tr>
+    <td>Sign-in, with the public demo.</td>
+    <td>Overview: the brief, delivery readiness and money at a glance.</td>
+  </tr>
+</table>
 
 The backend is built on raw platform primitives: Node.js's own HTTP server and hand-written parameterized SQL on PostgreSQL, with `pg` as the only runtime dependency. The interface is a React client built by Vite and served by the same server from the same origin ([ADR-002](docs/decisions/ADR-002-react-client.md)); every product page is a React page, and only the printable delivery summary stays server-rendered. Node runs the TypeScript directly by stripping types, so `pnpm verify` runs the TypeScript compiler (strict, source and tests) to actually check them.
 
@@ -25,6 +46,9 @@ The product scope is fixed by the [roadmap](docs/projectops/roadmap.md). It serv
 - **Sessions and request security.** scrypt password hashing; opaque session tokens stored only as SHA-256 hashes; 8-hour absolute and 30-minute idle expiry; persistent login rate limiting; every write requires the configured `Origin`, `application/json` and a CSRF token.
 - **Failure handling.** Responses never expose internals; server errors are logged as structured JSON with their cause chain, correlation id, method and path, with credentials redacted and no query strings or row data. A database outage answers 503 with `Retry-After` rather than 500, and the application recovers on its own when PostgreSQL returns; an acceptance test cuts the database connection mid-session to prove it.
 - **Recovery and release tooling.** Scripted backup (`pg_dump`) and restore into a fresh database with integrity fingerprints, and a source-runtime release packager. See [`scripts/`](scripts).
+- **Public demo, isolated by schema.** Each visitor gets a private copy of a seeded studio in a PostgreSQL schema of their own. Every query of a demo session runs in a transaction whose `search_path` is that schema alone, so it cannot outlive the transaction on a pooled connection and the owner's tables are not reachable at all; this needs no change to any query because all SQL names tables without a schema. Sandboxes expire, are capped, and are left out of backups. Tests prove isolation both ways, and break when either guard is removed ([ADR-003](docs/decisions/ADR-003-demo-sandboxes.md)).
+- **React client on the same origin.** A Vite-built React 19 client served by the Node server under a strict CSP (scripts, styles, fonts and API calls from this origin only), typed against the domain package's own types rather than copies ([ADR-002](docs/decisions/ADR-002-react-client.md)).
+- **Deploys from CI, verified live.** A merge to `main` deploys only after every suite passes: CI calls Render's deploy hook for that exact commit and passes once `/health/live` reports it. A browser smoke then runs against the live service (sign-in, access control, a full project, the public demo) and again after a redeploy to prove persistence.
 - **Testing against real infrastructure.** Native unit and contract tests, PostgreSQL acceptance tests, and Chromium browser journeys, including one 53-step project from intake to archive. CI runs all of them.
 
 ## Repository layout
@@ -73,4 +97,4 @@ Use a dedicated test database; the suites create and drop their own schemas.
 
 ## Status
 
-All 14 roadmap slices are complete. ProjectOps is deployed on Render (a Node web service and a private PostgreSQL 16 database, declared in [`render.yaml`](render.yaml)); `main` deploys from CI after its checks pass, and a deployed browser smoke plus an after-redeploy persistence check passed against the live service. See [status](docs/projectops/status.md) for evidence per slice and [decision records](docs/decisions) for design choices.
+All 14 roadmap slices and the post-roadmap phases (hardening, deployment, the React redesign and the public demo) are complete. ProjectOps is deployed on Render (a Node web service and a private PostgreSQL 16 database, declared in [`render.yaml`](render.yaml)); `main` deploys from CI after its checks pass, and the deployed browser smoke and its after-redeploy persistence check pass against the live service. See [status](docs/projectops/status.md) for evidence per slice and [decision records](docs/decisions) for design choices.

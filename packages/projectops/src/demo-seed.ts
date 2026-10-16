@@ -11,9 +11,10 @@ export const DEMO_LOGIN = 'demo';
  * addresses use the reserved .example domain and links the reserved example.com.
  */
 export async function seedDemoAgency(sql: ProjectOpsSqlExecutor, now: Date = new Date()): Promise<void> {
-  const base = now.getTime();
-  // An instant `days` from now (negative: in the past), at a whole minute.
-  const at = (days: number, hours = 0) => new Date(Math.floor((base + (days * 24 + hours) * 3_600_000) / 60_000) * 60_000).toISOString();
+  // Working hours: each seeded time is 09:00 UTC on its day (plus `hours`), counted from today.
+  // Every time in the past stays before `now` (at least a day back); dues and deadlines lie ahead.
+  const base = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 9);
+  const at = (days: number, hours = 0) => new Date(base + (days * 24 + hours) * 3_600_000).toISOString();
   let cursor = at(-60);
   const repo = new ProjectOpsRepository(sql).withHistory({ actor: DEMO_LOGIN, clock: () => cursor });
   // Every command happens "at" its business time, so the history reads in the order things happened.

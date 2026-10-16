@@ -88,7 +88,8 @@ export const api = {
   /** Whether this deployment offers the demo, and for how long a sandbox lives. */
   demo: () => request<{ enabled: boolean; lifetimeMinutes?: number }>('GET', '/projectops/demo'),
   /** Create a private demo sandbox and sign in to it. */
-  startDemo: () => request<{ csrfToken: string; expiresAtIso: string }>('POST', '/projectops/demo/start', { body: {} }),
+  /** Dates in the sandbox use the visitor's own timezone. */
+  startDemo: (timezone: string) => request<{ csrfToken: string; expiresAtIso: string }>('POST', '/projectops/demo/start', { body: { timezone } }),
   /** Replace the sandbox's data with a fresh copy of the sample studio. */
   resetDemo: (csrf: string) => request<{ reset: true }>('POST', '/projectops/demo/reset', { body: {}, csrf }),
   clients: (filter: { q: string; status: ClientListStatus; cursor?: string }) =>

@@ -28,7 +28,7 @@ export function LoginPage() {
   async function explore() {
     setBusy(true); setDemoNotice({ tone: 'success', text: 'Preparing your sandbox…' });
     try {
-      await api.startDemo();
+      await api.startDemo(Intl.DateTimeFormat().resolvedOptions().timeZone);
       window.location.assign('/projectops');
     } catch (error) {
       setDemoNotice({ tone: 'error', text: (error as Error).message });
