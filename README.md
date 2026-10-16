@@ -42,6 +42,8 @@ The product scope is fixed by the [roadmap](docs/projectops/roadmap.md). It serv
 
 ## Engineering highlights
 
+For a guided tour with diagrams (one request end to end, demo isolation, the path to production, and the trade-offs), read [How ProjectOps works](docs/architecture.md).
+
 - **Concurrency control.** Clients, projects, milestones and tasks carry revisions: an edit must send the revision it read, and a conditional SQL write rejects stale ones with `409`. Every write to a project's records locks and re-checks the parent project's state in the same statement, so a write racing a cancellation either commits first or fails cleanly. Acceptance tests force these races against real PostgreSQL and assert exactly one winner.
 - **Pagination.** Global lists use keyset cursors over matching indexes: each page is an indexed range read, stable under concurrent inserts, and cursors are tamper-checked. With 20,000 clients the list endpoint went from 208 ms and 4 MB to 7 ms and 10 KB per request.
 - **Migrations.** Startup applies frozen SQL files in a transaction under a PostgreSQL advisory lock, with a checksum ledger. Concurrent startups serialize, edited migrations are detected, and unmanaged schemas are refused.
@@ -66,9 +68,9 @@ packages/db/     PostgreSQL connection handling and the migration runner
 packages/auth/   scrypt password hashing
 packages/logger/ structured JSON logging
 packages/config, http-contracts, testing-kit   small shared helpers
-scripts/         integrity check, backup/restore, release packaging, deploy, deployed smoke test, uptime check
+scripts/         integrity check, backup/restore and restore check, release packaging, deploy, deployed smoke test, uptime check
 tests/           native suites; tests/integration holds PostgreSQL and Chromium suites
-docs/            roadmap, runtime guide, status, decision records
+docs/            architecture tour, roadmap, runtime guide, status, decision records
 ```
 
 ## Run locally

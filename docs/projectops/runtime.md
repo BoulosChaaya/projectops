@@ -504,6 +504,25 @@ Failures name the check that failed; credentials are never printed. The workflow
 - The pool opens at most 10 connections per instance; the database allows 100.
 - The backup and restore drill below needs network access to the database, which this Blueprint does not allow from outside Render.
 
+### Testing a point-in-time restore
+
+Render's point-in-time recovery restores into a **new** database and leaves the live one untouched, so it can be tested at any time. Do it once, and again after any change to how data is stored. It costs a few cents for the hour the copy exists.
+
+1. In the Render dashboard, open the database, then **Recovery**. Under **Point-in-Time Recovery**, click **Restore Database**.
+2. Name it `projectops-restore-test`. Pick a time at least ten minutes ago (Render refuses later ones). Keep **Copy Existing Settings** on **Yes**, which also keeps it private. Click **Start Recovery**.
+3. Wait until the new database shows **Available** (it passes through "Recovery In Progress" and "Creating").
+4. On the new database's **Info** page, copy the **Internal Database URL**. It is a secret: paste it only into the next step, never into a document or chat.
+5. Open the web service, then **Shell**, and run:
+
+   ```bash
+   RESTORE_DATABASE_URL='<internal URL from step 4>' node --experimental-strip-types scripts/projectops-restore-check.mjs
+   ```
+
+   `scripts/projectops-restore-check.mjs` only reads. It refuses the live database under another URL, checks the restored migrations match the running code and that every table is there with data, prints row counts side by side (live and restored) and the newest history entry in each, and ends with `PASS` or `FAIL: <reason>`. It never prints a connection string or row contents. The restored counts can be lower than live ones (the copy is from the chosen time) but not missing.
+6. Delete `projectops-restore-test` in Render (its **Settings**, at the bottom). The live database and the service were never changed.
+
+`restore-check-postgres.test.ts` proves the check passes a complete copy, and fails on the live database, an empty copy, a missing table, an older migration set and an unreachable URL (without printing its password).
+
 ## Backup and restore drill
 
 `scripts/projectops-recovery.mjs` takes a `pg_dump` custom-format backup and proves it restores, without touching the source database. It reads a JSON request on stdin and uses private libpq service files: `PGSERVICEFILE` (and optional `PGPASSFILE`) must be absolute, non-symlink regular files inaccessible to group and others, with named source and maintenance profiles. Passwords live only in those files, never in arguments, receipts or docs. `psql`, `pg_dump` and `pg_restore` must be on `PATH`, no older than the server's major version.
