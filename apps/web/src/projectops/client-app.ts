@@ -56,7 +56,8 @@ export function createClientApp(directory: string = DEFAULT_CLIENT_DIR): ClientA
         let body: Buffer;
         try { body = await readFile(path.join(assets, name)); }
         catch { throw new HttpError(404, 'ASSET_NOT_FOUND', 'Asset not found.'); }
-        return { status: 200, headers: { 'content-type': type, 'x-content-type-options': 'nosniff' }, body } satisfies DirectHttpResponse;
+        // The name carries a hash of the content, so a name never changes meaning: cache for a year.
+        return { status: 200, headers: { 'content-type': type, 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=31536000, immutable' }, body } satisfies DirectHttpResponse;
       },
     },
   };

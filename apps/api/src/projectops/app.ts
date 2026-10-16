@@ -27,6 +27,8 @@ export interface ProjectOpsAppConfig {
   readonly logger?: Logger;
   /** Directory of the built React client (index.html and assets/); defaults to apps/client/dist. */
   readonly clientDir?: string;
+  /** Send Strict-Transport-Security: browsers then use HTTPS only (set when the public origin is HTTPS). */
+  readonly strictTransportSecurity?: boolean;
   /** The data of a demo sandbox, by schema (postgres-app.ts). Without it, demo sessions are refused. */
   readonly sandboxService?: (schema: string) => ProjectOpsApiService;
 }
@@ -62,7 +64,9 @@ export async function startProjectOpsApp(config: ProjectOpsAppConfig): Promise<P
     client.assetRoute,
   ]);
   const listener = await startHttpListener({
-    responseHeaders: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
+    responseHeaders: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+      // One year; no includeSubDomains or preload: the host's domain is shared and not ours to commit.
+      ...(config.strictTransportSecurity ? { 'strict-transport-security': 'max-age=31536000' } : {}) },
     host: config.host,
     port: config.port,
     routes,
