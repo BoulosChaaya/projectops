@@ -52,7 +52,7 @@ The product scope is fixed by the [roadmap](docs/projectops/roadmap.md). It serv
 - **React client on the same origin.** A Vite-built React 19 client served by the Node server under a strict CSP (scripts, styles, fonts and API calls from this origin only), typed against the domain package's own types rather than copies ([ADR-002](docs/decisions/ADR-002-react-client.md)).
 - **Deploys from CI, verified live.** A merge to `main` deploys only after every suite passes: CI calls Render's deploy hook for that exact commit and passes once `/health/live` reports it. A browser smoke then runs against the live service (sign-in, access control, a full project, the public demo) and again after a redeploy to prove persistence.
 - **Monitored from outside.** Every 15 minutes a scheduled workflow checks that the live service answers, its database is ready and the sign-in page is served; a lasting failure fails the run, and GitHub emails the owner. A test runs the same check against the real application and a cut-off database.
-- **Testing against real infrastructure.** Native unit and contract tests, PostgreSQL acceptance tests, and Chromium browser journeys, including one 53-step project from intake to archive. CI runs all of them.
+- **Testing against real infrastructure.** Native unit and contract tests, PostgreSQL acceptance tests, and Chromium browser journeys, including one 53-step project from intake to archive. Every page is also checked at phone width (nothing scrolls sideways, every tab is on screen) and by an automated WCAG 2.1 AA audit (axe), on a phone and a desktop. CI runs all of them.
 
 ## Repository layout
 
