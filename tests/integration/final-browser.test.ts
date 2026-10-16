@@ -40,7 +40,7 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
     await page.locator(selector+' button').first().click();const result=await response;assert.equal(result.status(),200);const row=['#create','#create-project'].includes(selector)?undefined:await result.json();if(type)await event(type);return row;
    }
    await page.goto(app.server.origin+'/projectops/client-management');await form('#create',{name:'Acceptance studio',contactName:'Client contact',email:'acceptance@example.test'});await page.waitForURL('**/client-management/*');const c={id:page.url().split('/').at(-1)!};
-   await form('#edit',{name:'Acceptance studio revised',contactName:'',email:''});await page.locator('#message').filter({hasText:'Client saved.'}).waitFor();assert.equal((await repo.getClient(c.id))!.contactName,null);
+   await form('#edit',{name:'Acceptance studio revised',contactName:'',email:''});await page.locator('#message').filter({hasText:'Client saved.'}).waitFor();assert.equal((await repo.getClient(c.id))!.contactName,undefined);
    await form('#create-project',{title:'Acceptance project',brief:'Initial brief',budgetRange:'Initial budget',deadlineIso:'2026-10-03T11:00'});await page.waitForURL('**/projects/*');const p={id:page.url().split('/').at(-1)!};
    const root='project-requests/'+p.id;let count=1;const expectedTypes=['request_created'];
    const read=(suffix:string)=>context.request.get(app.server.origin+'/projectops/'+root+suffix).then(r=>r.json());
@@ -64,7 +64,7 @@ test('Final real-project Chromium journey runs intake to payment/delivery/archiv
    await form('#milestones .planning-edit',{title:'Final milestone',dueAtIso:''},'milestone_edited');assert.equal((await read('/milestones'))[0].dueAtIso,undefined);
    await form('#milestones .planning-edit',{dueAtIso:'2026-10-03T10:00'},'milestone_edited');
    const t=await form('#create-task',{title:'Build task',description:'Internal build details',dueAtIso:'2026-10-03T09:30'},'task_created');
-   await form('#tasks .planning-edit',{title:'Build deliverable',description:'',assignee:'operator',priority:'high',dueAtIso:''},'task_edited');assert.equal((await read('/tasks'))[0].description,null);
+   await form('#tasks .planning-edit',{title:'Build deliverable',description:'',assignee:'operator',priority:'high',dueAtIso:''},'task_edited');assert.equal((await read('/tasks'))[0].description,undefined);
    await form('#tasks .planning-edit',{dueAtIso:'2026-10-03T09:30'},'task_edited');
    const review=await form('#create-task',{title:'Review task',dueAtIso:'2026-10-03T10:30'},'task_created');
    now='2026-10-03T09:45:00.000Z';await page.goto(app.server.origin+'/projectops');await page.getByText(/1 overdue task or milestone/).waitFor();await page.getByText(/Final milestone/).first().waitFor();

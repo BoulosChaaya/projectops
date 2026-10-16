@@ -20,7 +20,7 @@ function allowed(kind: Kind, command: Command, status: string): boolean {
 }
 
 function PlanningSection({ kind }: { kind: Kind }) {
-  const { project, session, write } = useWorkspace();
+  const { project, write } = useWorkspace();
   const { status, busy, run } = useSectionAction(kind);
   const noun = NOUN[kind], Noun = noun === 'task' ? 'Task' : 'Milestone';
   const canCreate = allowed(kind, 'create', project.status);
@@ -40,7 +40,8 @@ function PlanningSection({ kind }: { kind: Kind }) {
     void run(() => write('PUT', `${kind}/${encodeURIComponent(row.id)}`, body), `${Noun} saved.`);
   }
   function act(row: Row, action: 'complete' | 'reopen') {
-    const body = { expectedRevision: row.revision, ...(kind === 'tasks' && action === 'complete' ? { completedBy: session.login } : {}) };
+    // Who completed it and when come from the session on the server.
+    const body = { expectedRevision: row.revision };
     void run(() => write('POST', `${kind}/${encodeURIComponent(row.id)}/${action}`, body), action === 'complete' ? 'Completed.' : 'Reopened.');
   }
 

@@ -427,7 +427,7 @@ export function createProjectOpsRoutes(
           requestService(_context).approveProjectChangeRequest(
             params.id,
             params.changeRequestId,
-            readChangeRequestDecisionInput(request.body, clock)
+            readChangeRequestDecisionInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
           )
         ),
     },
@@ -439,7 +439,7 @@ export function createProjectOpsRoutes(
           requestService(_context).rejectProjectChangeRequest(
             params.id,
             params.changeRequestId,
-            readChangeRequestDecisionInput(request.body, clock)
+            readChangeRequestDecisionInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
           )
         ),
     },
@@ -543,7 +543,7 @@ export function createProjectOpsRoutes(
           requestService(_context).archiveProjectDocument(
             params.id,
             params.documentId,
-            readArchiveDocumentInput(request.body, clock)
+            readArchiveDocumentInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
           )
         ),
     },
@@ -569,7 +569,7 @@ export function createProjectOpsRoutes(
           requestService(_context).archiveProjectNote(
             params.id,
             params.noteId,
-            readArchiveNoteInput(request.body, clock)
+            readArchiveNoteInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
           )
         ),
     },
@@ -603,7 +603,7 @@ export function createProjectOpsRoutes(
           requestService(_context).completeProjectTask(
             params.id,
             params.taskId,
-            readCompleteTaskInput(request.body, clock)
+            readCompleteTaskInput(request.body, clock, _context.get<{ login: string }>('projectops.operator')?.login)
           )
         ),
     },
@@ -984,12 +984,13 @@ function readChangeRequestInput(
 
 function readChangeRequestDecisionInput(
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  operator?: string
 ): DecideProjectChangeRequestInput {
   const value = readRecord(body);
   return Object.freeze({
-    decidedBy: readString(value.decidedBy, 'decidedBy'),
-    decidedAtIso: readOptionalString(value.decidedAtIso, 'decidedAtIso') ?? clock(),
+    decidedBy: operator ?? readString(value.decidedBy, 'decidedBy'),
+    decidedAtIso: operator ? clock() : readOptionalString(value.decidedAtIso, 'decidedAtIso') ?? clock(),
     decisionNote: readOptionalString(value.decisionNote, 'decisionNote'),
   });
 }
@@ -1100,12 +1101,13 @@ function readDocumentInput(
 
 function readArchiveDocumentInput(
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  operator?: string
 ): ArchiveProjectDocumentInput {
   const value = readRecord(body);
   return Object.freeze({
-    archivedBy: readString(value.archivedBy, 'archivedBy'),
-    archivedAtIso: readOptionalString(value.archivedAtIso, 'archivedAtIso') ?? clock(),
+    archivedBy: operator ?? readString(value.archivedBy, 'archivedBy'),
+    archivedAtIso: operator ? clock() : readOptionalString(value.archivedAtIso, 'archivedAtIso') ?? clock(),
   });
 }
 
@@ -1127,12 +1129,13 @@ function readNoteInput(
 
 function readArchiveNoteInput(
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  operator?: string
 ): ArchiveProjectNoteInput {
   const value = readRecord(body);
   return Object.freeze({
-    archivedBy: readString(value.archivedBy, 'archivedBy'),
-    archivedAtIso: readOptionalString(value.archivedAtIso, 'archivedAtIso') ?? clock(),
+    archivedBy: operator ?? readString(value.archivedBy, 'archivedBy'),
+    archivedAtIso: operator ? clock() : readOptionalString(value.archivedAtIso, 'archivedAtIso') ?? clock(),
   });
 }
 
@@ -1156,12 +1159,13 @@ function readTaskInput(
 
 function readCompleteTaskInput(
   body: unknown,
-  clock: () => string
+  clock: () => string,
+  operator?: string
 ): CompleteProjectTaskInput {
   const value = readRecord(body);
   return Object.freeze({
-    completedBy: readString(value.completedBy, 'completedBy'),
-    completedAtIso: readOptionalString(value.completedAtIso, 'completedAtIso') ?? clock(),
+    completedBy: operator ?? readString(value.completedBy, 'completedBy'),
+    completedAtIso: operator ? clock() : readOptionalString(value.completedAtIso, 'completedAtIso') ?? clock(),
     expectedRevision: readOptionalRevision(value.expectedRevision),
   });
 }
