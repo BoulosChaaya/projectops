@@ -117,7 +117,8 @@ function ExecutionSection({ kind }: { kind: Kind }) {
     event.preventDefault();
     if (kind === 'work-logs') return;
     const action = ACTION[kind], data = new FormData(event.currentTarget);
-    const body = action.key ? { [action.key]: optional(data.get('actionNote')) } : { archivedBy: session.login };
+    // Who archived and when come from the session on the server.
+    const body = action.key ? { [action.key]: optional(data.get('actionNote')) } : {};
     void run(() => write('POST', `${kind}/${encodeURIComponent(row.id)}/${action.path}`, body), action.done);
   }
 
