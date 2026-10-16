@@ -426,9 +426,22 @@ With `PROJECTOPS_DEMO=on`, the sign-in page offers **Explore the demo**: no acco
 - Every page shows a banner with the time the sandbox is deleted (in the visitor's local time), **Reset sample data** (a fresh copy, at most every 30 seconds; the deletion time does not move) and **Leave demo** (deletes it now).
 - A sandbox is deleted two hours after it starts. A sweeper runs at start-up and every five minutes and drops expired sandboxes, builds that never finished and demo schemas without a record.
 - At most 30 sandboxes exist at once and 20 are created per 10 minutes (sandboxes already left still count until 10 minutes after they started); past that, starting one answers 503 with `Retry-After: 300` and the page says to try again in a few minutes.
+- Each sandbox may make 60 changes a minute and 500 in total until it is reset; past that, writes answer 429 with a message (reads are unaffected). Sandboxes share the database's disk with the owner's data, and without a budget one script could fill the 1 GB disk in well under a sandbox's lifetime (measured locally: about 18 minutes).
 - In a sandbox the visitor's settings are their own; changing sign-in credentials answers 403.
 - `GET /projectops/demo` says whether the demo is offered (public); `POST /projectops/demo/start` (same-origin JSON) starts one; `POST /projectops/demo/reset` resets the caller's sandbox.
 - Backups leave sandboxes out (see [Backup and restore drill](#backup-and-restore-drill)).
+
+## Security summary
+
+What protects what, in one place (details in the sections above):
+
+- **Sessions:** scrypt password hashes; opaque tokens stored only as SHA-256 hashes; 8-hour absolute and 30-minute idle expiry; on HTTPS the cookie is `__Host-`, Secure, HttpOnly, SameSite=Strict.
+- **Writes:** every write needs the configured `Origin`, `application/json` and the session's CSRF token. Bodies are capped at 1 MiB; requests time out after 15 seconds.
+- **Responses:** pages carry a CSP that allows only this origin (no inline script or style), `nosniff` and `no-referrer`. Everything but hashed assets is `no-store`; hashed assets are cached for a year (their names change with their content). With an HTTPS public origin every response carries `Strict-Transport-Security: max-age=31536000` (no `includeSubDomains` or `preload`: the host's domain is shared).
+- **Errors and logs:** responses never include stack traces, SQL or internal messages; logs redact credentials and omit query strings and row data.
+- **Demo:** per-visitor schemas, two-hour lifetime, global caps on live and new sandboxes, and a write budget per sandbox ([ADR-003](../decisions/ADR-003-demo-sandboxes.md)).
+- **Supply chain:** one runtime dependency (`pg`); exact versions and a frozen lockfile; GitHub Actions pinned to full commits; Dependabot proposes npm and Actions updates weekly, through the same CI.
+- **Accepted risk:** the sign-in rate limit is one counter for everyone (10 attempts a minute), so someone hammering the sign-in page also blocks the owner while it lasts. A per-client limit would rely on the client address in the host's proxy headers; for a single-operator application this is documented rather than built.
 
 ## Deploying on Render
 

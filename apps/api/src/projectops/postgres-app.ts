@@ -108,6 +108,7 @@ export async function startProjectOpsPostgresApp(
       clock: config.clock,
       logger,
       access: new ProjectOpsAccess(new ProjectOpsOperatorStore(pool), config.publicOrigin, demo),
+      strictTransportSecurity: config.publicOrigin?.startsWith('https:') ?? false,
       ...(demo ? { sandboxService: (schema: string) => new ProjectOpsRepository(demo.executor(schema)) } : {}),
       healthService: new HealthService([{
         name: 'postgres',

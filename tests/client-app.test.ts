@@ -22,6 +22,10 @@ test('Client assets are served by exact hashed name with their type, and nothing
       assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
     }
     assert.equal(await (await get('app-abc123.js')).text(), 'console.log("client");');
+    // Hashed names never change meaning, so assets are cached for a year; everything else is not cached.
+    assert.equal((await get('app-abc123.js')).headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.equal((await get('missing-abc.js')).headers.get('cache-control'), 'no-store');
+    assert.equal((await fetch(`${app.server.origin}/health/live`)).headers.get('strict-transport-security'), null, 'no HSTS unless asked');
     // Encoded separators and dot segments decode into the parameter; they must still be refused.
     for (const attempt of ['..%2Fsecret.txt', '%2e%2e%2Fsecret.txt', '..%2F..%2Fpackage.json', '..%5Csecret.txt', '.hidden.js', 'missing-abc.js', 'app-abc123.txt', 'app-abc123.js%00.css', 'a..js']) {
       assert.equal((await get(attempt)).status, 404, attempt);
@@ -33,6 +37,17 @@ test('Client assets are served by exact hashed name with their type, and nothing
       });
       assert.equal(status, 404, raw);
     }
+  } finally { await app.close(); }
+});
+
+test('An HTTPS deployment sends Strict-Transport-Security on every response, and API data is still never cached', async () => {
+  const app = await startProjectOpsApp({ sql: new ProjectOpsMemorySqlExecutor(), host: '127.0.0.1', port: 0, clientDir: await clientFixture(), strictTransportSecurity: true });
+  try {
+    for (const path of ['/projectops/login', '/projectops/assets/app-abc123.js', '/health/live', '/projectops/clients', '/nope']) {
+      const response = await fetch(`${app.server.origin}${path}`);
+      assert.equal(response.headers.get('strict-transport-security'), 'max-age=31536000', path);
+    }
+    assert.equal((await fetch(`${app.server.origin}/projectops/clients`)).headers.get('cache-control'), 'no-store');
   } finally { await app.close(); }
 });
 

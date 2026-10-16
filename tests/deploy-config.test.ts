@@ -53,3 +53,13 @@ test('The running commit is reported by liveness only when it is a full Git SHA'
   assert.deepEqual({ ...new HealthService([], { commit: sha }).checkLiveness() }, { ok: true, status: 'healthy', details: { commit: sha } });
   assert.deepEqual({ ...new HealthService().checkLiveness() }, { ok: true, status: 'healthy' });
 });
+
+test('Every GitHub Action is pinned to a full commit, and Dependabot keeps npm and Actions current', () => {
+  for (const file of ['.github/workflows/ci.yml', '.github/workflows/deployed-smoke.yml']) {
+    const uses = [...readFileSync(file, 'utf8').matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map(match => match[1]!);
+    assert.ok(uses.length > 0, file);
+    for (const action of uses) assert.match(action, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, `${file}: ${action}`);
+  }
+  const dependabot = readFileSync('.github/dependabot.yml', 'utf8');
+  assert.match(dependabot, /package-ecosystem: npm/); assert.match(dependabot, /package-ecosystem: github-actions/);
+});

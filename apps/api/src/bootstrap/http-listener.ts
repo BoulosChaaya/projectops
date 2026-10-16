@@ -24,6 +24,7 @@ export type KernelRouteHandler = (
 
 export interface HttpListenerConfig {
   /** Application-owned policy, applied at serialization for success and early errors alike. */
+  /** Headers every response gets unless the route sets the same header itself. */
   readonly responseHeaders?: Readonly<Record<string, string>>;
   readonly host?: string;
   readonly port?: number;
@@ -101,7 +102,7 @@ export async function startHttpListener(config: HttpListenerConfig = {}): Promis
         );
         const serialized = serializeResponse(errBody, { status: 503, headers: { 'retry-after': RETRY_AFTER_SECONDS } });
         logger.warn('http.request.rejected', { code: errBody.code, status: 503, method: req.method, path: requestPath(req.url) });
-        res.writeHead(serialized.status, { ...serialized.headers, ...config.responseHeaders });
+        res.writeHead(serialized.status, { ...config.responseHeaders, ...serialized.headers });
         res.end(serialized.body);
         return;
       }
@@ -146,7 +147,7 @@ export async function startHttpListener(config: HttpListenerConfig = {}): Promis
           });
         });
 
-        res.writeHead(serialized.status, { ...serialized.headers, ...config.responseHeaders });
+        res.writeHead(serialized.status, { ...config.responseHeaders, ...serialized.headers });
         res.end(serialized.body);
       } catch (error) {
         const normalized = normalizeError(error, correlationId);
@@ -174,7 +175,7 @@ export async function startHttpListener(config: HttpListenerConfig = {}): Promis
           correlationId: normalized.correlationId,
           ...(normalized.status === 503 ? { headers: { 'retry-after': RETRY_AFTER_SECONDS } } : {}),
         });
-        res.writeHead(serializedErr.status, { ...serializedErr.headers, ...config.responseHeaders });
+        res.writeHead(serializedErr.status, { ...config.responseHeaders, ...serializedErr.headers });
         res.end(serializedErr.body);
       } finally {
         concurrency.release();

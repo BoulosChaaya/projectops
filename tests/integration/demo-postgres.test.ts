@@ -166,6 +166,44 @@ test('A sandbox query never leaves its search_path on a pooled connection, and t
   });
 });
 
+test("A sandbox's changes are budgeted per minute and in total; reads, settings and the owner are not", async () => {
+  await operatorFixture(async (databaseUrl, pool) => {
+    const app = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0, demo: { writesPerMinute: 3, writesPerSandbox: 5, resetCooldownSeconds: 0 } });
+    try {
+      const origin = app.server.origin;
+      await new ProjectOpsOperatorStore(pool).provision('operator', 'demo-budget-password');
+      const signIn = await http(origin, 'POST', '/projectops/access/login', { body: { login: 'operator', password: 'demo-budget-password' } });
+      const operator: Visitor = { cookie: cookieOf(signIn), csrf: signIn.json.csrfToken };
+      const begin = async (): Promise<Visitor> => { const r = await http(origin, 'POST', '/projectops/demo/start'); assert.equal(r.status, 200); return { cookie: cookieOf(r), csrf: r.json.csrfToken }; };
+      let n = 0;
+      const note = (visitor: Visitor) => http(origin, 'POST', '/projectops/project-requests/bakery-ordering/notes', { visitor, body: { id: `budget-${n++}`, author: 'demo', body: 'x' } });
+      const a = await begin();
+      for (let i = 0; i < 3; i++) assert.equal((await note(a)).status, 200);
+      const limited = await note(a);
+      assert.equal(limited.status, 429); assert.equal(limited.headers.get('retry-after'), '60'); assert.match(limited.json.message, /3 changes a minute/);
+      // Reads, settings and the owner are not budgeted.
+      assert.equal((await http(origin, 'GET', '/projectops/project-requests/bakery-ordering/notes', { visitor: a })).status, 200);
+      assert.equal((await http(origin, 'POST', '/projectops/access/settings', { visitor: a, body: { defaultCurrency: 'EUR', defaultPriority: 'low', timezone: 'UTC' } })).status, 200);
+      for (let i = 0; i < 6; i++) assert.equal((await http(origin, 'POST', '/projectops/clients', { visitor: operator, body: { id: `owner-${i}`, name: `Owner ${i}` } })).status, 200);
+      // Budgets are per sandbox: a second visitor has their own.
+      const b = await begin();
+      assert.equal((await note(b)).status, 200);
+      // The total: after a minute the rate allows more, until the sandbox's total is used.
+      const minuteLater = Date.now() + 61_000;
+      const realNow = Date.now;
+      Date.now = () => minuteLater;
+      try {
+        assert.equal((await note(a)).status, 200); assert.equal((await note(a)).status, 200);
+        const quota = await note(a);
+        assert.equal(quota.status, 429); assert.match(quota.json.message, /made its 5 changes\. Reset the sample data/);
+      } finally { Date.now = realNow; }
+      // A reset replaces the data and starts the budget again.
+      assert.equal((await http(origin, 'POST', '/projectops/demo/reset', { visitor: a })).status, 200);
+      assert.equal((await note(a)).status, 200);
+    } finally { await app.close(); }
+  });
+});
+
 test('Leaving a sandbox still counts against the rate of new sandboxes', async () => {
   await operatorFixture(async (databaseUrl, pool) => {
     const app = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0, demo: { maxLive: 5, maxPerWindow: 2 } });
@@ -187,6 +225,10 @@ test('Without PROJECTOPS_DEMO the demo is absent: no start, and demo-shaped toke
     try {
       const origin = app.server.origin;
       assert.deepEqual((await http(origin, 'GET', '/projectops/demo')).json, { enabled: false });
+      assert.equal((await fetch(origin + '/health/live')).headers.get('strict-transport-security'), null, 'plain-HTTP origin: no HSTS');
+      const https = await startProjectOpsPostgresApp({ databaseUrl, host: '127.0.0.1', port: 0, publicOrigin: 'https://projectops.example' });
+      try { assert.equal((await fetch(https.server.origin + '/health/live')).headers.get('strict-transport-security'), 'max-age=31536000', 'HTTPS origin: HSTS'); }
+      finally { await https.close(); }
       assert.equal((await http(origin, 'POST', '/projectops/demo/start')).status, 404);
       assert.equal((await http(origin, 'GET', '/projectops/clients', { visitor: { cookie: 'projectops_session=demo.' + randomBytes(32).toString('base64url'), csrf: '' } })).status, 401);
     } finally { await app.close(); }
