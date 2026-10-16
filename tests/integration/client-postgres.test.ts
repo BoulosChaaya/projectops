@@ -30,7 +30,7 @@ test('Client schema upgrade, search, revision conflicts and archive persist thro
       const edits = await Promise.all(['First', 'Second'].map(name => send('clients/c', { name, expectedRevision: 1 }, 'PUT')));
       assert.deepEqual(edits.map(r => r.status).sort(), [200, 409]);
       const edited = await (await get('clients/c')).json(); assert.equal(edited.revision, 2);
-      assert.equal(edited.contactName, null); assert.equal(edited.email, null);
+      assert.equal(edited.contactName, undefined); assert.equal(edited.email, undefined); // cleared fields are left out, not null
       assert.equal((await send('clients/c', { name: 'Studio %_', contactName: 'Boulos', email: 'client@example.com', expectedRevision: 2 }, 'PUT')).status, 200);
       for (const q of ['%_', 'bOuLoS', 'CLIENT@']) assert.equal((await (await get('clients?q=' + encodeURIComponent(q))).json()).items.length, 1);
       assert.equal((await (await get('clients?q=' + encodeURIComponent("' OR 1=1 --"))).json()).items.length, 0);

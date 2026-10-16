@@ -56,7 +56,7 @@ test('Planning migration upgrades existing children and API workflows persist ac
       assert.equal(milestone.revision, 2); assert.equal(task.revision, 2);
       milestone = await json(await send('project-requests/r/milestones/m', { title: 'Milestone cleared', expectedRevision: 2 }, 'PUT'));
       task = await json(await send('project-requests/r/tasks/t', { title: 'Task cleared', priority: 'medium', expectedRevision: 2 }, 'PUT'));
-      assert.equal(milestone.dueAtIso, undefined); assert.equal(task.dueAtIso, undefined); assert.equal(task.description, null); assert.equal(task.assignee, null);
+      assert.equal(milestone.dueAtIso, undefined); assert.equal(task.dueAtIso, undefined); assert.equal(task.description, undefined); assert.equal(task.assignee, undefined);
 
       milestone = await json(await send('project-requests/r/milestones/m/complete', { expectedRevision: 3 }));
       task = await json(await send('project-requests/r/tasks/t/complete', { completedBy: 'operator', expectedRevision: 3 }));

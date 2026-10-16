@@ -1943,8 +1943,10 @@ function compareOptionalIso(a: string | undefined, b: string | undefined): numbe
 // every multi-word column explicitly below. Passing raw columns through made every response
 // carry both shapes (contact_name and contactName) and exposed internal column names in the
 // API, while the memory executor used by native tests returned only camelCase.
+// An empty optional column (NULL) is left out, as the explicit mappings below already do, so an
+// empty email, description or vendor is absent in every response instead of sometimes null.
 function singleWordColumns(source: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(source).filter(([key]) => !key.includes('_')));
+  return Object.fromEntries(Object.entries(source).filter(([key, value]) => !key.includes('_') && value !== null));
 }
 
 function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
@@ -1966,7 +1968,7 @@ function normalizeProjectOpsRow<TRow>(row: TRow): TRow {
     ...(source.task_id !== undefined ? { taskId: normalizeOptionalValue(source.task_id) } : {}),
     ...(source.milestone_id !== undefined ? { milestoneId: normalizeOptionalValue(source.milestone_id) } : {}),
     ...(source.deliverable_id !== undefined ? { deliverableId: normalizeOptionalValue(source.deliverable_id) } : {}),
-    ...(source.contact_name !== undefined ? { contactName: source.contact_name } : {}),
+    ...(source.contact_name !== undefined ? { contactName: normalizeOptionalValue(source.contact_name) } : {}),
     ...(source.created_at !== undefined ? { createdAtIso: normalizeIsoValue(source.created_at) } : {}),
     ...(source.updated_at !== undefined ? { updatedAtIso: normalizeIsoValue(source.updated_at) } : {}),
     ...(source.deadline_at !== undefined ? { deadlineIso: normalizeOptionalIsoValue(source.deadline_at) } : {}),
