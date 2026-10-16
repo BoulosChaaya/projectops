@@ -1,0 +1,23 @@
+# Dependabot: weekly update pull requests, which go through the same CI as any change.
+# Actions are pinned to full commit SHAs (supply-chain safety); Dependabot moves the pins.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Dev tooling minor and patch releases together; majors (TypeScript, @types/node) one by one.
+      dev-minor-and-patch:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]

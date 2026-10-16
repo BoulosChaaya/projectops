@@ -10,6 +10,7 @@
     "noImplicitAny": true,
     "strictNullChecks": true,
     "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noImplicitReturns": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
