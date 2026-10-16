@@ -9,7 +9,7 @@ import { isDirectHttpResponse, type DirectHttpResponse } from '../http/response.
 import { DEMO_TOKEN, type DemoSession, type ProjectOpsDemoSandboxes } from '../../../../packages/projectops/src/demo-sandboxes.ts';
 
 type AccessStore = Pick<ProjectOpsOperatorStore, 'login' | 'resolve' | 'logout' | 'saveDefaults' | 'changeCredentials'>;
-type DemoStore = Pick<ProjectOpsDemoSandboxes, 'start' | 'resolve' | 'saveDefaults' | 'reset' | 'end' | 'limits'>;
+type DemoStore = Pick<ProjectOpsDemoSandboxes, 'start' | 'resolve' | 'saveDefaults' | 'reset' | 'end' | 'limits' | 'takeWrite'>;
 const isDemo = (session: OperatorSession): session is DemoSession => 'demo' in session;
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => ({ status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers }, body: JSON.stringify(body) });
 
@@ -54,6 +54,13 @@ export class ProjectOpsAccess {
       // Routes read their data through the sandbox's schema when this is set (app.ts serviceFor).
       if (isDemo(session)) context.set('projectops.sandbox', session.demo.schema);
       if (!['GET', 'HEAD'].includes(request.method)) this.mutation(request, session);
+      // A demo visitor's data changes count against their sandbox's budget (the access routes, which
+      // store nothing of theirs, do not), so no visitor can fill the disk the owner's data is on.
+      if (isDemo(session) && this.demo && !['GET', 'HEAD'].includes(request.method) && !route.path.startsWith('/projectops/access/') && !route.path.startsWith('/projectops/demo/')) {
+        const budget = this.demo.takeWrite(session);
+        if (budget === 'rate') return json({ message: `The demo allows ${this.demo.limits.writesPerMinute} changes a minute. Try again in a moment.` }, 429, { 'retry-after': '60' });
+        if (budget === 'quota') return json({ message: `This sandbox has made its ${this.demo.limits.writesPerSandbox} changes. Reset the sample data to keep exploring.` }, 429);
+      }
       let prepared = request;
       if (request.method === 'POST' && request.body && typeof request.body === 'object') {
         const body = { ...request.body } as Record<string, unknown>;

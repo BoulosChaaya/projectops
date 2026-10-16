@@ -32,9 +32,16 @@ export interface DemoSandboxLimits {
   readonly windowMinutes: number;
   /** Minimum time between two resets of one sandbox. */
   readonly resetCooldownSeconds: number;
+  /**
+   * Changes one sandbox may make: per minute, and in total until it is reset. Sandboxes share the
+   * database's disk with the owner's data, so one visitor must not be able to fill it.
+   */
+  readonly writesPerMinute: number;
+  readonly writesPerSandbox: number;
 }
 export const DEFAULT_DEMO_LIMITS: DemoSandboxLimits = Object.freeze({
   lifetimeMinutes: 120, maxLive: 30, maxPerWindow: 20, windowMinutes: 10, resetCooldownSeconds: 30,
+  writesPerMinute: 60, writesPerSandbox: 500,
 });
 
 export interface DemoSession extends OperatorSession {
@@ -46,6 +53,9 @@ export interface DemoPoolClient { query(sql: string, params?: unknown[]): Promis
 export interface DemoPool { query(sql: string, params?: unknown[]): Promise<Rows>; connect(): Promise<DemoPoolClient> }
 /** A dedicated connection, outside the pool, for building a sandbox (it changes the session's search_path). */
 export interface DemoBuildClient { query(sql: string, params?: unknown[]): Promise<Rows>; end(): Promise<void> }
+
+/** Whether a sandbox may make one more change: 'rate' (too many this minute) or 'quota' (too many in total). */
+export type DemoWrite = 'ok' | 'rate' | 'quota';
 
 export type DemoStart = { readonly rawToken: string; readonly csrfToken: string; readonly expiresAtIso: string } | 'busy';
 
@@ -95,6 +105,22 @@ export class ProjectOpsDemoSandboxes {
     this.migrations = options.migrations;
     this.limits = Object.freeze({ ...DEFAULT_DEMO_LIMITS, ...options.limits });
     this.now = options.now ?? (() => new Date());
+  }
+
+  // Write budgets, per sandbox schema, in this process (the service runs one instance). A reset
+  // gives a new schema, so its replaced data and its budget start again together.
+  private readonly budgets = new Map<string, { total: number; minute: number; minuteStart: number }>();
+
+  /** Count one change against the sandbox's budget, if it fits. */
+  takeWrite(session: DemoSession, nowMs = Date.now()): DemoWrite {
+    const key = session.demo.schema;
+    const budget = this.budgets.get(key) ?? { total: 0, minute: 0, minuteStart: nowMs };
+    if (nowMs - budget.minuteStart >= 60_000) { budget.minute = 0; budget.minuteStart = nowMs; }
+    if (budget.total >= this.limits.writesPerSandbox) return 'quota';
+    if (budget.minute >= this.limits.writesPerMinute) return 'rate';
+    budget.total++; budget.minute++;
+    this.budgets.set(key, budget);
+    return 'ok';
   }
 
   /** The executor for a sandbox's data. */
@@ -181,6 +207,7 @@ export class ProjectOpsDemoSandboxes {
       });
       if (!previous) throw new Error('Demo sandbox ended during reset.');
       await this.dropSchema(previous);
+      this.budgets.delete(previous);
       return 'reset';
     } catch (error) {
       await this.dropSchema(next).catch(() => {});
@@ -196,7 +223,7 @@ export class ProjectOpsDemoSandboxes {
   async end(session: DemoSession): Promise<void> {
     const row = (await this.pool.query(`UPDATE projectops_demo_sandboxes SET expires_at = LEAST(expires_at, NOW())
       WHERE token_hash = $1 RETURNING schema_name`, [session.tokenHash])).rows[0];
-    if (row) await this.dropSchema(row.schema_name);
+    if (row) { await this.dropSchema(row.schema_name); this.budgets.delete(row.schema_name); }
   }
 
   /**
@@ -210,7 +237,7 @@ export class ProjectOpsDemoSandboxes {
       WHERE n.nspname ~ '^demo_[a-f0-9]{24}$'
         AND (s.schema_name IS NULL OR s.expires_at <= NOW() OR (s.status = 'creating' AND s.created_at < NOW() - INTERVAL '10 minutes'))`))
       .rows.map(row => row.nspname as string);
-    for (const schema of doomed) await this.dropSchema(schema);
+    for (const schema of doomed) { await this.dropSchema(schema); this.budgets.delete(schema); }
     // Rows go once they no longer count towards the rate window (and builds that never finished).
     await this.pool.query(`DELETE FROM projectops_demo_sandboxes
       WHERE (expires_at <= NOW() AND created_at < NOW() - make_interval(mins => $1))
