@@ -3,7 +3,7 @@
 :root {
   --ink: #1a2238;          /* text, navigation rail */
   --ink-soft: #4a5570;     /* secondary text */
-  --ink-faint: #6b7590;    /* hints, metadata (4.6:1 on paper) */
+  --ink-faint: #5e6883;    /* hints, metadata: 4.9:1 on paper, 5.5:1 on sheet (WCAG AA 4.5:1) */
   --paper: #eef1f5;        /* application background */
   --sheet: #ffffff;        /* work surfaces */
   --rule: #d3d9e2;         /* borders and dividers */
