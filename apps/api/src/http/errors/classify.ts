@@ -50,11 +50,14 @@ export function classifyHttpError(error: unknown): ClientError | ServerError {
         ...(error.safeDetails ? { details: error.safeDetails } : {}),
       });
     }
+    const status = error.status >= 500 && error.status <= 599 ? error.status : 500;
     return Object.freeze({
       kind: 'server',
-      status: error.status >= 500 && error.status <= 599 ? error.status : 500,
+      status,
       code: error.code || 'INTERNAL_SERVER_ERROR',
-      message: 'An unexpected internal server error occurred.',
+      // A deliberate 503 states availability for the caller (not ready, busy, retry later), so its
+      // message is kept. Any other server error is a defect, and its message may describe internals.
+      message: status === 503 ? error.message : 'An unexpected internal server error occurred.',
     });
   }
 
