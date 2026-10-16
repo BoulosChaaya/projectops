@@ -498,6 +498,7 @@ Failures name the check that failed; credentials are never printed. The workflow
 
 ### Logs, backups and limits
 
+- Uptime: `.github/workflows/uptime.yml` runs `scripts/projectops-uptime.mjs` every 15 minutes (minutes 7, 22, 37 and 52) and on demand. It needs only the `PROJECTOPS_ORIGIN` variable. One round asks `/health/live` (200, `ok`, a full commit SHA), `/health/ready` (200, `ok`: the database answers) and `/projectops/login` (200 HTML); a failed round is retried after 60 seconds and the run fails only if that fails too, naming the check. A failed scheduled run is the alert: GitHub notifies the account that owns the workflow (Settings → Notifications → Actions decides email or web only). GitHub may start scheduled runs late and pauses schedules after 60 days without a commit; re-enable the workflow from the Actions tab if that happens. `uptime-postgres.test.ts` runs the same check against the real application, including with its database cut off.
 - Logs are the JSON lines described in [Errors and logs](#errors-and-logs), viewable in the service's Logs tab; Render keeps them for 7 days on the Hobby workspace.
 - The paid database has point-in-time recovery (3 days on the Hobby workspace), restored by Render into a new database. Check the database's page in Render for the current window.
 - The pool opens at most 10 connections per instance; the database allows 100.
