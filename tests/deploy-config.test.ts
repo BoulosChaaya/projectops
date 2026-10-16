@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { readProjectOpsRuntimeConfig } from '../apps/api/src/projectops/postgres-app.ts';
 import { HealthService } from '../apps/api/src/health/health.service.ts';
 
@@ -55,7 +55,9 @@ test('The running commit is reported by liveness only when it is a full Git SHA'
 });
 
 test('Every GitHub Action is pinned to a full commit, and Dependabot keeps npm and Actions current', () => {
-  for (const file of ['.github/workflows/ci.yml', '.github/workflows/deployed-smoke.yml']) {
+  const workflows = readdirSync('.github/workflows').filter(name => /\.ya?ml$/.test(name)).map(name => '.github/workflows/' + name);
+  assert.ok(workflows.length >= 3);
+  for (const file of workflows) {
     const uses = [...readFileSync(file, 'utf8').matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map(match => match[1]!);
     assert.ok(uses.length > 0, file);
     for (const action of uses) assert.match(action, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, `${file}: ${action}`);

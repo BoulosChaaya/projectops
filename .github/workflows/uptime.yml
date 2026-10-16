@@ -1,0 +1,39 @@
+name: Uptime
+
+# Checks the live service from outside every 15 minutes: the process answers, its database is
+# ready and the sign-in page is served (scripts/projectops-uptime.mjs). A failed round is retried
+# once a minute later, so only a lasting failure fails the run, and a failed scheduled run is the
+# alert: GitHub notifies the account that owns this workflow.
+#
+# GitHub may start scheduled runs some minutes late, and it pauses schedules in a repository with
+# no commits for 60 days (it emails before it does). Needs the repository variable
+# PROJECTOPS_ORIGIN; reads nothing secret and writes nothing.
+on:
+  schedule:
+    # Off the hour and half hour, when GitHub's scheduler is busiest.
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/projectops-uptime.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+      - name: Check the live service
+        env:
+          PROJECTOPS_ORIGIN: ${{ vars.PROJECTOPS_ORIGIN }}
+        run: node scripts/projectops-uptime.mjs

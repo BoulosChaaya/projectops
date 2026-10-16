@@ -24,7 +24,7 @@ Read this before changing anything. ProjectOps is a client and project operation
 - `packages/auth`: scrypt password hashing
 - `packages/logger`: structured JSON logging
 - `packages/config`, `packages/http-contracts`, `packages/testing-kit`: small shared helpers
-- `scripts`: integrity check, backup/restore, release packaging, deployed smoke test
+- `scripts`: integrity check, backup/restore, release packaging, deploy, deployed smoke test, uptime check (run every 15 minutes by `.github/workflows/uptime.yml`)
 - `tests`: native suites; `tests/integration` holds PostgreSQL and Chromium suites
 
 ## Working rules

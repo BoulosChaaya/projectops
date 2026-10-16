@@ -1,5 +1,7 @@
 # ProjectOps
 
+[![CI](https://github.com/BoulosChaaya/projectops/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BoulosChaaya/projectops/actions/workflows/ci.yml) [![Uptime](https://github.com/BoulosChaaya/projectops/actions/workflows/uptime.yml/badge.svg)](https://github.com/BoulosChaaya/projectops/actions/workflows/uptime.yml)
+
 ProjectOps runs client projects from intake to payment in one application: clients, estimates and approval, planning, execution, delivery and acceptance, invoices and expenses, an automatic audit history, an operational dashboard, and project export.
 
 **Live demo: [projectops-7p4d.onrender.com/projectops/login](https://projectops-7p4d.onrender.com/projectops/login)**. Choose **Explore the demo**. No account needed: you get a private, fully working copy of a sample studio, yours for two hours, in your own timezone ([how it is isolated](docs/decisions/ADR-003-demo-sandboxes.md)).
@@ -49,6 +51,7 @@ The product scope is fixed by the [roadmap](docs/projectops/roadmap.md). It serv
 - **Public demo, isolated by schema.** Each visitor gets a private copy of a seeded studio in a PostgreSQL schema of their own. Every query of a demo session runs in a transaction whose `search_path` is that schema alone, so it cannot outlive the transaction on a pooled connection and the owner's tables are not reachable at all; this needs no change to any query because all SQL names tables without a schema. Sandboxes expire, are capped, and are left out of backups. Tests prove isolation both ways, and break when either guard is removed ([ADR-003](docs/decisions/ADR-003-demo-sandboxes.md)).
 - **React client on the same origin.** A Vite-built React 19 client served by the Node server under a strict CSP (scripts, styles, fonts and API calls from this origin only), typed against the domain package's own types rather than copies ([ADR-002](docs/decisions/ADR-002-react-client.md)).
 - **Deploys from CI, verified live.** A merge to `main` deploys only after every suite passes: CI calls Render's deploy hook for that exact commit and passes once `/health/live` reports it. A browser smoke then runs against the live service (sign-in, access control, a full project, the public demo) and again after a redeploy to prove persistence.
+- **Monitored from outside.** Every 15 minutes a scheduled workflow checks that the live service answers, its database is ready and the sign-in page is served; a lasting failure fails the run, and GitHub emails the owner. A test runs the same check against the real application and a cut-off database.
 - **Testing against real infrastructure.** Native unit and contract tests, PostgreSQL acceptance tests, and Chromium browser journeys, including one 53-step project from intake to archive. CI runs all of them.
 
 ## Repository layout
@@ -63,7 +66,7 @@ packages/db/     PostgreSQL connection handling and the migration runner
 packages/auth/   scrypt password hashing
 packages/logger/ structured JSON logging
 packages/config, http-contracts, testing-kit   small shared helpers
-scripts/         integrity check, backup/restore, release packaging, deployed smoke test
+scripts/         integrity check, backup/restore, release packaging, deploy, deployed smoke test, uptime check
 tests/           native suites; tests/integration holds PostgreSQL and Chromium suites
 docs/            roadmap, runtime guide, status, decision records
 ```
